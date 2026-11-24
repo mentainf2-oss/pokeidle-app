@@ -2040,7 +2040,7 @@ contextBridge.executeInMainWorld({
 });
 
 
-// ===================== PokeIdle App 5.34 (gerado por tools/montar-preload.js — não edite aqui) =====================
+// ===================== PokeIdle App 5.35 (gerado por tools/montar-preload.js — não edite aqui) =====================
 ;(() => {
   const { contextBridge: pontePk, ipcRenderer: ipcPk } = require('electron');
   // o que o script pede ao app: rede só para os sites liberados (API do Claude e precificador) e avisos
@@ -2066,7 +2066,7 @@ contextBridge.executeInMainWorld({
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.34
+// @version      5.35
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -2096,7 +2096,7 @@ contextBridge.executeInMainWorld({
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.34';
+  const VERSAO_APP = '5.35';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -3966,7 +3966,7 @@ contextBridge.executeInMainWorld({
       // giro: já está no preço rápido e não vendeu em 30+ min → desce mais um degrau, até o piso (sempre com lucro)
       if (giro && novo >= a.preco * 0.97 && ag - desdeQuando(a) > 60 * 60_000) { const passo = Math.max(piso, Math.round(a.preco * (1 - CFG.giroPasso)), 1); if (passo < a.preco) novo = passo; }   // só desce
       if (Math.abs(novo - a.preco) / a.preco < 0.03 || (a.moeda === 'orb' && Math.abs(novo - a.preco) < 1)) continue;
-      const nome = a.ficha ? `${a.ficha.nome} Nv ${a.ficha.level}` : E.nomesItens[a.itemId] || 'item ' + a.itemId;
+      const nome = a.tipo === 'pokemon' && a.ficha ? `${a.ficha.nome} Nv ${a.ficha.level}` : E.nomesItens[a.itemId] || a.ficha?.nome || 'item ' + a.itemId;
       log(`${sim()}${novo < a.preco ? 'BAIXAR' : 'SUBIR'} ${nome}: ${curtoM(a.preco, a.moeda)} → ${curtoM(novo, a.moeda)} (vender rápido: ${alvo.ref}; ${c ? `custo ~${curtoM(Math.round(c.custo), a.moeda)} pelo ${c.fonte}` : a.tipo === 'pokemon' ? `custo desconhecido: não desce de ${giro ? 75 : 90}% do justo` : 'custo desconhecido: não desce do preço rápido'})`, 'venda');
       if (CFG.simulacao) continue;
       E.editados[a.id] = ag; persistir();
