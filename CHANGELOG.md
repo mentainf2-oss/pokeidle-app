@@ -2,6 +2,7 @@
 
 | Versão | Data | O que mudou |
 | --- | --- | --- |
+| 5.34 | 2026-11-24 | Drops do boss: 4 Mega Shiny e 2 Mega estavam parados no inventário. A revenda de item recusava um segundo anúncio do mesmo item, e o inventário às vezes chega depois do aviso do drop. Agora cada leva vira anúncio próprio (até 3 por item) e o app confere o inventário a cada 2 min durante o boss. |
 | 5.33 | 2026-11-24 | Ponte com o app de PC (pasta desktop/): resumo da conta, contas irmãs (uma conta sua nunca compra nem rebaixa anúncio de outra conta sua) e papel de cada conta (Tudo, Boss, Casas, Mercado). |
 | 5.32 | 2026-11-24 | Boss: o ritmo usado nas contas passa a ser o medido no dia (lutas ÷ horas, com 30+ lutas) — hoje ~130 lutas/h (~28 s), não os 19,5 s estimados; o tempo por luta do quadro "Boss hoje" não repete mais o último valor (mostrava 8 s). Boss Token nunca entra no flip de itens (o sniper comprava token a 3 🔮 para revender a 4; token é para o boss). |
 | 5.31 | 2026-11-24 | Flip de item: a revenda agora é calculada contra o próximo anúncio mais caro (é com ele que se concorre), nunca pela média de 7 dias sozinha; em Gemas só item com 20+ vendas na semana e, a partir de 300 🔮, margem mínima de 15%. Motivo: comprou 3 Shiny Egg Fragment a 978 🔮 contando revender pela média de 1.268, com um paredão de anúncios a 978–980. |

@@ -2040,7 +2040,7 @@ contextBridge.executeInMainWorld({
 });
 
 
-// ===================== PokeIdle App 5.33 (gerado por tools/montar-preload.js — não edite aqui) =====================
+// ===================== PokeIdle App 5.34 (gerado por tools/montar-preload.js — não edite aqui) =====================
 ;(() => {
   const { contextBridge: pontePk, ipcRenderer: ipcPk } = require('electron');
   // o que o script pede ao app: rede só para os sites liberados (API do Claude e precificador) e avisos
@@ -2066,7 +2066,7 @@ contextBridge.executeInMainWorld({
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.33
+// @version      5.34
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -2096,7 +2096,7 @@ contextBridge.executeInMainWorld({
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.33';
+  const VERSAO_APP = '5.34';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -3576,10 +3576,10 @@ contextBridge.executeInMainWorld({
     if (med) p = Math.max(p, med * 0.85);
     return Math.max(1, Math.round(p));
   }
-  async function revenderItem(id, precoForcado, moeda = 'gold') {
+  async function revenderItem(id, precoForcado, moeda = 'gold', outroAnuncio = false) {
     const c = E.custosItens[ck(id, moeda)]; if (!c?.qtd) return;
     await atualizarMeus();
-    if (M.meus.length >= 20 || M.meus.some((a) => a.itemId === id)) return;
+    if (M.meus.length >= 20 || (!outroAnuncio && M.meus.some((a) => a.itemId === id))) return;   // drop de boss pode ter mais de um anúncio
     const piso = c.custoMedio ? Math.ceil(c.custoMedio / (1 - COMISSAO) * 1.01) : 0;
     const preco = Math.max(Math.round(precoForcado || (CFG.vendaRapida ? precoRapidoItem(id, moeda) ?? M.medias[id]?.[moeda]?.media : M.medias[id]?.[moeda]?.media) || 0), piso, 1);
     if (preco <= 1 && !precoForcado) return;
@@ -4297,6 +4297,8 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
     }
   }
   async function cicloBoss() {
+    // drops que ficaram no inventário (o inventário às vezes chega depois do aviso do drop): anuncia a cada 2 min
+    if (CFG.bossVenderDrops && Date.now() - (M._dropsEm || 0) > 120_000) { M._dropsEm = Date.now(); try { await venderDropsBoss(); } catch (e) { log('👑 venda dos drops: ' + e.message, 'erro'); } }
     { const r = resultadoBossDia(); if (r && r.lutas >= 20 && Date.now() - (M._ritmoBossLog || 0) > 3600_000) { M._ritmoBossLog = Date.now(); log(`👑 boss hoje: ${fmt(r.lutas)} lutas (${Math.round(r.vitPct * 100)}% vitórias), ~${Math.round(r.porHora)}/h${r.seg ? `, ${r.seg} s/luta` : ''}; ${r.dropados} drops, ${fmt(Math.round(r.recebido))} 🔮 recebidas + ~${fmt(Math.round(r.pendente))} 🔮 à venda − tokens ~${fmt(Math.round(r.custo))} 🔮 = lucro ~${fmt(Math.round(r.lucro))} 🔮`, 'ok'); } }
     if (Date.now() - M.mediasEm > 10 * 60_000) await pedirM({ t: 'market.medias' }, 'medias');
     await pedirM({ t: 'market.itens', elementos: [], categoria: '' }, 'itens');
@@ -4344,7 +4346,7 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
       const preco = Math.round(Math.max(rap || 0, med ? med * CFG.bossDropPisoMedia : 0));
       if (!preco) continue;
       E.custosItens[ck(id, 'orb')] = { qtd: tem, custoTotal: 0, custoMedio: 0 };
-      await revenderItem(id, preco, 'orb');
+      await revenderItem(id, preco, 'orb', true);
     }
   }
 
