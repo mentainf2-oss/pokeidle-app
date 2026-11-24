@@ -113,7 +113,7 @@ module.exports = function pkappMain({ ipcMain, views, config, send, ctx, app, pa
   }
   // painel dentro do jogo: escondido por padrão (a página do app mostra tudo); dá para mostrar em Controle
   async function aplicarPainel(id, r) {
-    if (!!r.painelOculto !== !cfg.painelNoJogo) return;
+    if (!!r.painelOculto === !cfg.painelNoJogo) return;                 // já está como deve (escondido quando não é para mostrar)
     await ponte(id, 'controle', 'painel', !!cfg.painelNoJogo);
   }
   async function ponte(id, metodo, ...args) {

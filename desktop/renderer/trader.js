@@ -28,7 +28,7 @@ const PK_ICO = {
 };
 function pkIco(k) { const ns = 'http://www.w3.org/2000/svg'; const svg = document.createElementNS(ns, 'svg'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('class', 'pk-ico'); svg.innerHTML = PK_ICO[k] || ''; return svg; }
 function pkBotao(ico, rot, cls, onclick) { const b = el('button', cls); b.append(pkIco(ico), el('span', null, rot)); b.onclick = onclick; return b; }
-let pkRel = null, pkRelCarregando = false, pkDec = null, pkDecCat = '', pkDecConta = '';
+let pkRel = null, pkRelCarregando = false, pkDec = null, pkDecEm = 0, pkDecCat = '', pkDecConta = '';
 const pkFmt = (n) => (n == null || !isFinite(n) ? '—' : Math.abs(n) >= 1e9 ? (n / 1e9).toFixed(2) + 'B' : Math.abs(n) >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : Math.abs(n) >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(Math.round(n)));
 const pkG = (n) => (n == null || !isFinite(n) ? '—' : `${Math.round(n).toLocaleString('pt-BR')} 🔮`);
 const pkSG = (n) => (n == null || !isFinite(n) ? '—' : `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(Math.round(n)).toLocaleString('pt-BR')} 🔮`);
@@ -129,7 +129,8 @@ function pkHoje(root, s) {
 
 // ---------- Parecer: o fechamento de cada dia (perto da meia-noite) e o dia de hoje até agora ----------
 async function pkParecer(root, s) {
-  if (!pkRel && !pkRelCarregando) { pkRelCarregando = true; pkRel = await window.idle.invoke('poke:pkapp:relatorios').catch(() => []); pkRelCarregando = false; }
+  if (pkRel && Date.now() - (pkRel.em || 0) > 5 * 60_000) pkRel = null;
+  if (!pkRel && !pkRelCarregando) { pkRelCarregando = true; pkRel = await window.idle.invoke('poke:pkapp:relatorios').catch(() => []); pkRel.em = Date.now(); pkRelCarregando = false; }
   const R = pkRel || [];
   const intro = el('div', 'pk-barra');
   intro.append(el('p', 'sub', 'Perto da meia-noite (Brasília) cada conta fecha o dia. Com o parecer, o app ajusta os próprios limites dentro de faixas seguras — nunca afrouxa além do que você configurou.'),
@@ -174,7 +175,7 @@ async function pkParecer(root, s) {
 
 // ---------- Decisões: o catálogo, com filtro por tipo e conta ----------
 async function pkDecisoes(root, s) {
-  if (!pkDec) pkDec = await window.idle.invoke('poke:pkapp:decisoes', null).catch(() => []);
+  if (!pkDec || Date.now() - pkDecEm > 60_000) { pkDec = await window.idle.invoke('poke:pkapp:decisoes', null).catch(() => []); pkDecEm = Date.now(); }
   const L = pkDec || [];
   const card = el('div', 'card');
   const filtros = el('div', 'pk-chips');
