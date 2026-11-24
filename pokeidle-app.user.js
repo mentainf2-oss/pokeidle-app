@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.19
+// @version      5.20
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -1440,7 +1440,7 @@
         if (ok || !CFG.casaNaoParar) continue;
         // vitrine cheia: a casa não fica parada. O pronto vai para a fila de venda (anuncia quando abrir vaga) e entra outro no lugar.
         if ((E.filaVenda || []).length >= CFG.filaMax) { avisoRaro('filaCheia', `🪟 fila de venda cheia (${CFG.filaMax}): as casas seguem upando o que já têm`, 30); continue; }
-        (E.filaVenda = E.filaVenda || []).some((x) => x.pokemonId === p.pokemonId) || E.filaVenda.push({ pokemonId: p.pokemonId, nome: p.nome, nv, nota: p.nota, pot: p.pot, iv: p.iv, shiny: !!(p.shiny || fichaP?.shiny), custo: p.custo || 0, moedaCompra: p.moedaCompra || 'gold', ficha: fichaP ? { ...fichaP, level: nv } : null, lucro: 0, em: Date.now(), daCasa: true });
+        (E.filaVenda = E.filaVenda || []).some((x) => x.pokemonId === p.pokemonId) || E.filaVenda.push({ pokemonId: p.pokemonId, nome: p.nome, nv, nota: p.nota, pot: p.pot, iv: p.iv, shiny: !!(p.shiny || fichaP?.shiny), custo: p.custo || custoConhecido(p.pokemonId) || 0, moedaCompra: p.custo ? p.moedaCompra || 'gold' : 'gold', ficha: fichaP ? { ...fichaP, level: nv } : null, lucro: 0, em: Date.now(), daCasa: true });
         p.naFila = true; persistir();
         log(`${sim()}🏠 casa ${cid}: ${p.nome} Nv ${nv} pronto e a vitrine está cheia → fila de venda; entra outro para não perder XP`, 'ok');
       }
@@ -1602,6 +1602,12 @@
     }
     if (!E.filaVenda?.length) return;
     await atualizarMeus();
+    // já anunciado (ex.: anunciado à mão ou por outro caminho): sai da fila e libera a casa
+    const jaNaVitrine = new Set(M.meus.filter((a) => a.tipo === 'pokemon').map((a) => String(idPkAnuncio(a))));
+    const antes = E.filaVenda.length;
+    E.filaVenda = E.filaVenda.filter((x) => { if (!jaNaVitrine.has(String(x.pokemonId))) return true; for (const [k, p] of Object.entries(E.postos)) if (p?.naFila && String(p.pokemonId) === String(x.pokemonId)) E.postos[k] = null; return false; });
+    if (E.filaVenda.length !== antes) { log(`🪟 fila de venda: ${antes - E.filaVenda.length} já estava(m) anunciado(s) — tirei da fila`); persistir(); }
+    for (const x of E.filaVenda) if (!x.custo) { const c = custoConhecido(x.pokemonId); if (c) { x.custo = c; x.moedaCompra = 'gold'; } }   // custo esquecido: o piso de venda volta a valer
     let livres = vagasPk().livres - casasProntasEm(0.5);            // casa pronta tem prioridade (senão ela para de upar)
     E.filaVenda.sort((a, z) => (a.naoAntes || 0) > Date.now() ? 1 : (z.naoAntes || 0) > Date.now() ? -1 : (z.lucro || 0) - (a.lucro || 0));
     while (livres > 0 && E.filaVenda.length) {
@@ -1660,6 +1666,7 @@
     const piso = Math.ceil((custoC * 1.03 + PENSAO_DIA * CFG.vendaDias) / (1 - COMISSAO));
     const preco = Math.max(Math.round(r.preco * CFG.fatorRapido), piso);
     const liqG = liquidoVenda(a.preco, 'orb', 'pokemon') * cb, liqC = liquidoVenda(preco, 'gold', 'pokemon');
+    if (!(c?.custo > 0) && liqC < liqG * 0.7) { avisoRaro('trocaBaixa' + a.id, `🔁 ${nome}: em Coins renderia ~${curto(liqC)}, bem menos que ~${curto(liqG)} em Gemas e o custo é desconhecido — fica em Gemas`, 180); return false; }
     E.trocas[a.id] = { em: ag, custoC }; (E.editados = E.editados || {})[a.id] = ag; persistir();
     log(`${sim()}🔁 ${nome}: ${((ag - a.criadoEm) / 3600_000).toFixed(0)} h sem vender em Gemas → Coins a ${curto(preco)} (recebe ~${curto(liqC)} agora vs ~${curto(liqG)} em Gemas parado)`, 'venda');
     if (!CFG.simulacao) { enviar({ t: 'market.editar', id: a.id, preco, moeda: 'gold' }); M.meusEm = 0; await dormir(1500); }
@@ -3347,7 +3354,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     }
   }
 
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.19' }, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.20' }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));
