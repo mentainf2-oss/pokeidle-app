@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.26
+// @version      5.27
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -979,7 +979,10 @@
     // só itens que valem pelo menos 50 💠 (abaixo disso o preço mínimo em Gemas distorce), pesados pelo volume vendido em Gemas
     let soma = 0, peso = 0, n = 0;
     for (const id of Object.keys(M.medias)) { const g = M.medias[id]?.gold, o = M.medias[id]?.orb; if (g?.media >= 50_000_000 && o?.media >= 50 && g.unidades >= 10 && o.unidades >= 10 && !/Stone$/i.test(E.nomesItens[id] || '')) { soma += Math.log(g.media / o.media) * o.unidades; peso += o.unidades; n++; } }
-    return n ? { taxa: Math.exp(soma / peso), como: `${n} itens negociados nas duas moedas` } : null;
+    if (n) { const taxa = Math.exp(soma / peso); if (!E.cambioUltimo || Date.now() - E.cambioUltimo.em > 10 * 60_000) { E.cambioUltimo = { em: Date.now(), taxa }; } return { taxa, como: `${n} itens negociados nas duas moedas` }; }
+    // médias recarregando (ou ainda não lidas): usa o último câmbio bom das últimas 24 h, para não travar vendas e conversões
+    if (E.cambioUltimo && Date.now() - E.cambioUltimo.em < 24 * 3600_000) return { taxa: E.cambioUltimo.taxa, como: `último lido às ${new Date(E.cambioUltimo.em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` };
+    return null;
   }
 
   function rankingEspecies(alvo = CFG.nivelAlvo) {
@@ -2009,7 +2012,10 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
     const cbV = cambioImplicito()?.taxa || 0;
     if (custo && moedaCompra !== moeda) { if (!cbV) { log(`sem câmbio para converter o custo de ${nome} — não anunciei`, 'erro'); return false; } custo = moedaCompra === 'gold' ? custo / cbV : custo * cbV; }
     const mg = emGiro() ? 1 + CFG.giroMargem : 1.05;               // no giro aceita lucro menor (nunca prejuízo)
-    const piso = moeda === 'orb' ? precoParaLiquido((custo || 0) * mg + (cbV ? pensao / cbV : 0), 'orb', 'pokemon') : Math.ceil(((custo || 0) + pensao) / (1 - COMISSAO) * mg);
+    let piso = moeda === 'orb' ? precoParaLiquido((custo || 0) * mg + (cbV ? pensao / cbV : 0), 'orb', 'pokemon') : Math.ceil(((custo || 0) + pensao) / (1 - COMISSAO) * mg);
+    // custo desconhecido ou zero (pokémon seu, adotado ou da coleção): não entra abaixo de 90% do justo (75% no giro), igual ao reajuste
+    const justoRef = moeda === 'orb' ? (ref?.prc?.justo ?? ref?.preco) : ref?.preco;
+    if (!(custo > 0) && justoRef) piso = Math.max(piso, Math.round(justoRef * (emGiro() ? 0.75 : 0.9)));
     // vitrine quase cheia: em Gemas usa o "Vender rápido" do precificador, para girar a vaga
     // vender rápido: em Gemas o "vender rápido" do precificador; em Coins o preço de mercado × fatorRapido; nunca abaixo do piso (custo)
     const rapido = CFG.vendaRapida || (moeda === 'orb' && ref.rapido && vagasPk().livres <= 1);
@@ -3639,7 +3645,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     }
   }
 
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.26' }, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.27' }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));
