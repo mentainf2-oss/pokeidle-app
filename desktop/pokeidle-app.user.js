@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.39
+// @version      5.41
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -31,7 +31,7 @@
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.39';
+  const VERSAO_APP = '5.41';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -1794,6 +1794,25 @@
     return { usadas, livres, aCaminho, reserva, paraSnipe: Math.max(0, livres - aCaminho - reserva) };
   }
   // comprados para revender que acharam a vitrine cheia: entram quando abre vaga, o mais lucrativo primeiro
+  // fila perdida (ex.: trocou do navegador para o app de PC, que começa com estado novo): todo pokémon que o histórico da
+  // conta mostra como COMPRADO nos últimos 7 dias e que está parado na coleção (fora do time, das casas e da vitrine) volta
+  // para a fila de venda, com o custo da compra. Pokémon seu que nunca foi comprado não entra (não vende o que é seu).
+  function recuperarFila() {
+    if (Date.now() - (M._recFilaEm || 0) < 10 * 60_000 || !E.real?.compras?.length || !(M.pokemons || []).length) return;
+    M._recFilaEm = Date.now();
+    const ocupados = new Set([...Object.values(E.postos || {}).filter(Boolean).map((p) => String(p.pokemonId)), ...M.meus.map((a) => String(idPkAnuncio(a))), String(M.activeId), ...(E.filaVenda || []).map((x) => String(x.pokemonId)), ...Object.values(E.pendentes || {}).map((x) => String(x.pokemonId))]);
+    const compras = new Map(); for (const c of E.real.compras) if (c.tipo === 'pokemon' && c.pokemonId != null && Date.now() - c.em < 7 * 86400_000 && !compras.has(String(c.pokemonId))) compras.set(String(c.pokemonId), c);
+    let n = 0;
+    for (const p of M.pokemons) {
+      if (p.slot != null || ocupados.has(String(p.id))) continue;
+      const c = compras.get(String(p.id)); if (!c) continue;
+      if (!(p.level >= 50) || !(p.nota >= 3.5 || p.shiny)) continue;
+      const iv = Object.values(p.ivs || {}).reduce((a, b) => a + b, 0);
+      (E.filaVenda = E.filaVenda || []).push({ pokemonId: p.id, nome: p.nome, nv: p.level, nota: p.nota, pot: p.potencia, iv, shiny: !!p.shiny, custo: c.bruto, moedaCompra: c.moeda === 'orb' ? 'orb' : 'gold', ficha: fichaMin(p), lucro: 0, em: Date.now(), recuperado: true });
+      n++;
+    }
+    if (n) { persistir(); log(`🪟 fila recuperada: ${n} pokémon comprado(s) estava(m) parado(s) na coleção — vão para a venda`, 'ok'); }
+  }
   async function processarFilaVenda() {
     for (const x of E.filaVenda || []) if (!x.moedaCompra) { x.moedaCompra = x.moeda === 'orb' && x.custo && x.custo < 1 ? 'gold' : x.moeda || 'gold'; if (x.custo && x.custo < 1) x.custo = x.custo * (cambioImplicito()?.taxa || 0); }
     for (const o of E.ops) {
@@ -1801,6 +1820,7 @@
       o.registrado = true; const c = o.ctx; (E.filaVenda = E.filaVenda || []).some((x) => x.pokemonId === c.pokemonId) || E.filaVenda.push({ pokemonId: c.pokemonId, nome: c.nome, nv: c.nv, nota: c.nota, pot: c.pot, iv: c.iv, shiny: c.shiny, custo: c.preco, moedaCompra: c.moeda || 'gold', alvo: c.revenderPor, moeda: c.moeda, lucro: c.lucro, ficha: c.ficha, em: Date.now() });
       persistir();
     }
+    recuperarFila();
     if (!E.filaVenda?.length) return;
     await atualizarMeus();
     // já anunciado (ex.: anunciado à mão ou por outro caminho): sai da fila e libera a casa
@@ -2194,8 +2214,10 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
     if (on !== M.giroAntes) { if (M.giroAntes !== undefined || on) log(on ? `🌀 giro rápido ligado${CFG.giro === 'auto' ? ' (evento de XP)' : ''}: vende a ${Math.round(CFG.giroFator * 100)}% do mercado, casas até Nv ${CFG.giroNivelMax}, lucro mínimo menor` : '🌀 giro rápido desligado: volta ao preço e ao lucro normais', 'ok'); M.giroAntes = on; }
     return on;
   }
-  const fatorRapidoAgora = () => (emGiro() ? Math.min(CFG.fatorRapido, CFG.giroFator) : CFG.fatorRapido);
-  const fatorGemasAgora = () => (emGiro() ? CFG.giroFatorGemas : 1);
+  // o desconto do giro só vale quando a vitrine está apertada (sem vaga ou com fila): com vaga sobrando, vender barato só tira lucro
+  const vitrineApertada = () => { try { const v = vagasPk(); return v.livres <= 1 || (E.filaVenda || []).length > 0; } catch { return true; } };
+  const fatorRapidoAgora = () => (emGiro() && vitrineApertada() ? Math.min(CFG.fatorRapido, CFG.giroFator) : CFG.fatorRapido);
+  const fatorGemasAgora = () => (emGiro() && vitrineApertada() ? CFG.giroFatorGemas : 1);
   // quanto a hunt renderia numa hora que começa em t: o ouro não muda com XP; o lucro das casas acompanha o XP
   function ganhoCacaH(t) {
     const R = ritmo(); if (!R.ok) return 0;

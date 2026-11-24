@@ -2,6 +2,7 @@
 
 | Versão | Data | O que mudou |
 | --- | --- | --- |
+| 5.41 | 2026-11-24 | Vitrine com vaga e nada à venda: o app de PC começou sem a fila de venda do navegador, e os pokémon comprados ficaram parados na coleção. Agora, a cada 10 min, todo pokémon que o histórico mostra como comprado nos últimos 7 dias e está parado (fora do time, das casas e da vitrine) volta para a fila com o custo da compra; pokémon seu que nunca foi comprado não entra. Giro: o desconto só vale com a vitrine apertada (sem vaga ou com fila); com vaga sobrando vende ao preço rápido normal (ex.: Ampharos comprado a 356 🔮 tinha ido a 432 🔮 com vaga livre). |
 | 5.39 | 2026-11-24 | 💵 Custo da API x lucro (aba Claude e aba Lucro do app de PC): tokens e US$ de cada chamada (Haiku 5.5 US$ 0,10/0,50 e Sonnet 5.5 US$ 2/10 por milhão), por uso (conferência, negociação, estratégia), contra o lucro real do dia e de 7 dias; com o valor de 1 🔮 em dólar informado, diz se vale e quantas vezes se paga; mostra as compras vetadas pela conferência. |
 | 5.38 | 2026-11-24 | 🔎 Auditoria a cada 10 min: drop de boss parado no inventário (anuncia na hora), anúncio de drop acima do menor preço listado (reajusta), anúncio que paga menos que o custo e item comprado para revenda que o mercado de hoje não paga — tudo no log e na aba Lucro do app de PC. |
 | 5.37 | 2026-11-24 | Drops do boss vendidos pelo menor preço listado agora (antes: um degrau abaixo, com piso de 80% da média de 7 dias) — pedido do jogador. O reajuste dos anúncios de drop segue o mesmo preço. |
