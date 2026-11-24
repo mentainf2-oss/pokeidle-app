@@ -15,6 +15,44 @@ module.exports = function pkappMain({ ipcMain, views, config, send, ctx, app, pa
   const salvar = () => { try { fs.writeFileSync(arq(), JSON.stringify(cfg, null, 2)); } catch {} };
 
   const resumos = new Map();      // accId -> { em, r }
+  const cachePrc = new Map();     // url -> { em, status, text }
+
+  // ---------- 🗄️ banco de dados único ----------
+  // Uma conta (a líder: a primeira ligada) coleta as vendas do mercado; o app guarda 30 dias num arquivo e entrega às outras,
+  // que param de coletar e de baixar planilhas. Se a líder sair, a próxima ligada assume; se ninguém entregar por 15 min, cada uma volta a coletar.
+  const arqBase = () => path.join(app.getPath('userData'), 'pkapp-base.json');
+  const base = { vendas: new Map(), itens: new Map(), lider: null, liderDesde: 0, enviado: {}, em: 0, sujo: false };
+  try { const j = JSON.parse(fs.readFileSync(arqBase(), 'utf8')); for (const v of j.vendas || []) base.vendas.set(v.k, v); for (const v of j.itens || []) base.itens.set(v.k, v); base.liderDesde = j.liderDesde || 0; } catch {}
+  function podarBase() { const lim = Date.now() - 30 * 86400_000; for (const m of [base.vendas, base.itens]) for (const [k, v] of m) if (v.em < lim) m.delete(k); }
+  function salvarBase() { if (!base.sujo) return; base.sujo = false; podarBase(); try { fs.writeFileSync(arqBase(), JSON.stringify({ liderDesde: base.liderDesde, vendas: [...base.vendas.values()], itens: [...base.itens.values()] })); } catch {} }
+  async function sincronizarBase() {
+    if (Date.now() - base.em < 2 * 60_000) return; base.em = Date.now();
+    const ligadas = accounts().filter((a) => { const x = resumos.get(a.id); return x && x.r && x.r.ligado && x.r.mod && x.r.mod.analise; });
+    if (!ligadas.length) return;
+    const lider = ligadas.find((a) => a.id === base.lider) || ligadas[0];
+    if (lider.id !== base.lider) { base.lider = lider.id; base.enviado = {}; await ponte(lider.id, 'baseLiderar'); }
+    const p = await ponte(lider.id, 'baseExportar', Math.max(0, base.liderDesde - 3 * 3600_000));
+    if (p) {
+      for (const v of p.vendas || []) { base.vendas.set(v.k, v); if (v.em > base.liderDesde) base.liderDesde = v.em; }
+      for (const v of p.itens || []) base.itens.set(v.k, v);
+      if ((p.vendas || []).length || (p.itens || []).length) base.sujo = true;
+    }
+    const nomeLider = (resumos.get(lider.id) || {}).r?.nick || nomeDa(lider.id);
+    for (const a of ligadas) {
+      if (a.id === lider.id) continue;
+      if (!base.enviado[a.id]) {                                          // primeira vez: o que esta conta já coletou também entra no banco (fica mais completo)
+        const q = await ponte(a.id, 'baseExportar', 0);
+        if (q) { for (const v of q.vendas || []) base.vendas.set(v.k, v); for (const v of q.itens || []) base.itens.set(v.k, v); if ((q.vendas || []).length) base.sujo = true; }
+      }
+      const e = base.enviado[a.id] || { v: 0, i: 0 }, d14 = Date.now() - 14 * 86400_000;
+      const v = [...base.vendas.values()].filter((x) => x.em > Math.max(e.v, d14)).sort((x, y) => x.em - y.em).slice(0, 6000);
+      const it = [...base.itens.values()].filter((x) => x.em > Math.max(e.i, d14)).sort((x, y) => x.em - y.em).slice(0, 3000);
+      const r = await ponte(a.id, 'baseImportar', { vendas: v, itens: it }, nomeLider);   // mesmo sem nada novo: avisa que a líder segue entregando
+      if (r && r.ok) base.enviado[a.id] = { v: v.length ? v[v.length - 1].em : e.v, i: it.length ? it[it.length - 1].em : e.i };
+    }
+    salvarBase();
+  }
+  setInterval(() => salvarBase(), 10 * 60_000);
   const vistos = new Map();       // accId -> último log visto (texto + hora)
 
   // ---------- rede do script (no lugar do GM_xmlhttpRequest do Tampermonkey) ----------
@@ -25,9 +63,14 @@ module.exports = function pkappMain({ ipcMain, views, config, send, ctx, app, pa
     if (!/(^|\.)pokeidle\.io$/.test(origem)) return { erro: 'pedido fora de uma conta do PokeIdle' };
     const metodo = String(o.method || 'GET').toUpperCase();
     if (!['GET', 'POST'].includes(metodo)) return { erro: 'método não liberado' };
+    // precificador: um download para todas as contas (guardado 3 h)
+    const cacheavel = metodo === 'GET' && u.hostname === 'briaoale.github.io';
+    if (cacheavel) { const c = cachePrc.get(u.href); if (c && Date.now() - c.em < 3 * 3600_000) return { status: c.status, text: c.text }; }
     try {
       const r = await fetch(u.href, { method: metodo, headers: o.headers || {}, body: metodo === 'POST' ? o.data : undefined, signal: AbortSignal.timeout(Math.min(180000, Number(o.timeout) || 60000)) });
-      return { status: r.status, text: await r.text() };
+      const out = { status: r.status, text: await r.text() };
+      if (cacheavel && r.status === 200) cachePrc.set(u.href, { em: Date.now(), ...out });
+      return out;
     } catch (err) {
       return err && (err.name === 'TimeoutError' || err.name === 'AbortError') ? { timeout: true } : { erro: String(err && err.message || err) };
     }
@@ -126,6 +169,7 @@ module.exports = function pkappMain({ ipcMain, views, config, send, ctx, app, pa
     };
     total.hoje = { lucroG: soma((r) => r.hoje && r.hoje.lucroG), caixaG: soma((r) => r.hoje && r.hoje.caixaG), vendas: soma((r) => r.hoje && r.hoje.vendas), compras: soma((r) => r.hoje && r.hoje.compras),
       revendas: soma((r) => r.hoje && r.hoje.revendas), prejuizos: soma((r) => r.hoje && r.hoje.prejuizos), decisoes: soma((r) => r.hoje && r.hoje.decisoes), erros: soma((r) => r.hoje && r.hoje.erros), apiUsd: soma((r) => r.api && r.api.usd) };
+    total.base = { vendas: base.vendas.size, itens: base.itens.size, lider: base.lider ? ((resumos.get(base.lider) || {}).r?.nick || nomeDa(base.lider)) : null };
     return { contas, total, sugestao: sugerir(), papeis: PAPEIS, temToken: !!cfg.githubToken, avisos: !!cfg.avisos, painelNoJogo: !!cfg.painelNoJogo };
   }
 
@@ -146,6 +190,13 @@ module.exports = function pkappMain({ ipcMain, views, config, send, ctx, app, pa
     if (acao === 'mod' && !(valor && typeof valor.k === 'string')) return estado();
     await ponte(id, 'controle', acao, valor); await lerConta(id); return estado();
   });
+  // copiar os ajustes de uma conta para outra (a de destino fica em simulação)
+  ipcMain.handle('poke:pkapp:copiarAjustes', async (_e, de, para) => {
+    if (!de || !para || de === para) return { ok: false, erro: 'escolha duas contas diferentes' };
+    const txt = await ponte(de, 'exportarAjustes'); if (!txt) return { ok: false, erro: 'a conta de origem não respondeu' };
+    const r = await ponte(para, 'importarAjustes', txt); await lerConta(para);
+    return r || { ok: false, erro: 'a conta de destino não respondeu' };
+  });
   // parecer: os dias fechados de cada conta e o dia de hoje até agora
   ipcMain.handle('poke:pkapp:relatorios', async () => {
     const out = [];
@@ -165,6 +216,7 @@ module.exports = function pkappMain({ ipcMain, views, config, send, ctx, app, pa
     for (const a of accounts()) { const r = await lerConta(a.id); if (r) { avisar(a.id, r); avisarParecer(a.id, r); await aplicarPainel(a.id, r); } }
     await avisarIrmas();
     await aplicarPapeis();
+    try { await sincronizarBase(); } catch {}
     send('pkapp:estado', estado());
   }
   return { tick };

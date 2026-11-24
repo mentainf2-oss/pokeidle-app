@@ -1016,3 +1016,4 @@ input[type=password] { background: var(--s2); border: 1px solid var(--line-2); b
 .pk-barra { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
 .pk-barra .sub { margin: 0; max-width: 90ch; }
 .pk-barra .pk-chips { margin-bottom: 0; align-items: center; }
+#page-trader .pk-base { margin: 12px 0 0; }

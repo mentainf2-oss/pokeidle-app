@@ -68,6 +68,7 @@ function pkHoje(root, s) {
   );
   hero.append(esq, dir);
   root.append(hero);
+  if (s.total.base && s.total.base.lider) root.append(el('p', 'tip pk-base', `🗄️ Banco de dados único: ${Number(s.total.base.vendas).toLocaleString('pt-BR')} vendas de pokémon e ${Number(s.total.base.itens).toLocaleString('pt-BR')} de itens (30 dias), coletadas por ${s.total.base.lider} e repassadas às outras contas — só ela baixa planilhas.`));
 
   const lista = el('div', 'card'); lista.append(el('h2', 'section first', 'Contas'));
   const t = el('table', 'pk-tab pk-contas');
@@ -198,6 +199,19 @@ function pkControle(root, s) {
     const lin = el('div', 'actions'); lin.append(el('span', 'muted', 'Papel'), sel, button('Abrir no jogo', 'ghost', async () => { await window.idle.invoke('poke:select', c.id).catch(() => {}); go('poke'); }));
     card.append(lin);
     if (sug && sug !== c.papel) card.append(el('p', 'tip', `Sugerido: ${pkNomePapel[sug]} — ${s.sugestao.porque[c.id] || ''}`));
+    const outras = s.contas.filter((o) => o.id !== c.id && o.r);
+    if (outras.length) {
+      const so = el('select'); for (const o of outras) { const op = el('option', null, pkNome(o)); op.value = o.id; so.append(op); }
+      const cp = el('div', 'actions');
+      cp.append(el('span', 'muted', 'Copiar ajustes de'), so, button('Copiar', 'ghost', async () => {
+        const de = s.contas.find((o) => o.id === so.value);
+        if (!confirm(`Copiar os ajustes de ${pkNome(de)} para ${pkNome(c)}? Casas e papel continuam os desta conta, e ela fica em simulação até você ligar o modo real.`)) return;
+        const r = await window.idle.invoke('poke:pkapp:copiarAjustes', so.value, c.id);
+        toast(r && r.ok ? `Ajustes de ${pkNome(de)} copiados para ${pkNome(c)} (em simulação)` : `Não copiou: ${(r && r.erro) || 'erro'}`);
+        pkEstado = await window.idle.invoke('poke:pkapp:estado'); renderTrader();
+      }));
+      card.append(cp);
+    }
     grid.append(card);
   }
   root.append(grid);

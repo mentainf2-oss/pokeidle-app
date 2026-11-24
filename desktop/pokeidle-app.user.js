@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.42
+// @version      5.43
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -31,7 +31,7 @@
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.42';
+  const VERSAO_APP = '5.43';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -421,7 +421,10 @@
     try { estudar(); } catch (e) { console.warn('[PKApp] estudo', e); }
     pintar();
   }
+  // 🗄️ banco de dados único: no app de PC uma conta (a líder) coleta as vendas e baixa as planilhas; as outras recebem dela e não baixam nada
+  const seguidora = () => !!M.baseDe && Date.now() - (M.baseDeEm || 0) < 15 * 60_000;
   function pedirPlanilhaSeHora() {
+    if (seguidora()) return;
     if (Date.now() - (E.ultimoCsv || 0) < 61 * 60_000) return;
     E.ultimoCsv = Date.now() - 55 * 60_000;
     if (enviar({ t: 'csv.pedir', tipo: 'mercado', filtros: { tipo: 'pokemon' } })) log('📊 pedindo a planilha de pokémon…');
@@ -531,8 +534,24 @@
   // o que o app comprou e já vendeu: casa a venda (histórico) com a compra (registro do app ou histórico) pelo id do pokémon
   function revendasDoApp(dias = 7) {
     const lim = Date.now() - dias * 86400_000, cb = cambioImplicito()?.taxa || 0, out = [];
+    const usados = new Set(), regs = () => [...Object.values(E.anunciosPk || {}).map((r) => ({ pid: r.pid, nome: r.nome, nv: r.ficha?.level ?? null, custo: r.custo, moeda: r.moeda, em: r.em })), ...(E.arquivoPk || [])];
+    const porNome = (v) => {                                             // venda sem id: acha o anúncio do app com a mesma espécie e nível (±2) anunciado antes da venda
+      const m = String(v.desc || '').match(/^(.+?) Nv (\d+)/); if (!m) return null;
+      const nome = m[1].replace(/^✨/, '').trim(), nv = Number(m[2]);
+      const c = regs().filter((r) => r.custo > 0 && r.em < v.em && !usados.has(String(r.pid)) && String(r.nome || '').replace(/^✨/, '').startsWith(nome + ' Nv') && (() => { const n = r.nv ?? Number(String(r.nome).match(/Nv ~?(\d+)/)?.[1]); return Math.abs((n || 0) - nv) <= 2; })())
+        .sort((a, z) => z.em - a.em)[0];
+      return c || null;
+    };
     for (const v of E.real?.vendas || []) {
-      if (v.em < lim || v.pokemonId == null) continue;
+      if (v.em < lim || v.tipo !== 'pokemon') continue;
+      if (v.pokemonId == null) {
+        const r = porNome(v); if (!r) continue; usados.add(String(r.pid));
+        const o = E.ops.find((x) => x.tipo === 'compra' && x.pokemonId != null && String(x.pokemonId) === String(r.pid));
+        const conv = (val, de) => (de === 'gold' ? val : val * cb);
+        const c = { preco: r.custo, moeda: r.moeda, em: o?.em ?? r.em, origem: o ? (/casa/.test(o.motivo || '') ? 'casa' : 'sniper') : 'casa' };
+        out.push({ desc: v.desc, compra: c, venda: { liquido: v.liquido, moeda: v.moeda, em: v.em }, lucroC: conv(v.liquido, v.moeda) - conv(c.preco, c.moeda), horas: (v.em - c.em) / 3600_000 });
+        continue;
+      }
       const o = E.ops.find((x) => x.tipo === 'compra' && x.pokemonId != null && String(x.pokemonId) === String(v.pokemonId) && x.em < v.em);
       const c = o ? { preco: o.unit ?? o.preco, moeda: o.moeda, em: o.em, origem: /casa/.test(o.motivo || '') ? 'casa' : 'sniper' } : (() => { const h = (E.real?.compras || []).find((x) => x.pokemonId != null && String(x.pokemonId) === String(v.pokemonId) && x.em < v.em); return h ? { preco: h.bruto, moeda: h.moeda, em: h.em, origem: 'histórico' } : null; })();
       if (!c) continue;
@@ -555,7 +574,8 @@
     M.coletorRodando = true;
     let primeira = true, ciclos = 0, calmo = 1;
     while (M.ligado) {
-      if (CFG.mod.analise) {
+      if (CFG.mod.analise && seguidora()) { try { if (ciclos++ % 2 === 0) await recentesOrb(); } catch {} }   // banco de dados vem da conta líder pelo app de PC
+      else if (CFG.mod.analise) {
         try {
           const n = await coletarTipo('pokemon', primeira ? 20 : 15);     // a planilha do jogo já traz o histórico; não trava a fila de pedidos
           calmo = n ? 1 : Math.min(calmo * 1.5, 3);                   // nada novo: espera mais na próxima     // primeira volta: até 1.800 vendas para trás
@@ -2070,7 +2090,11 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
     E.anunciosPk = E.anunciosPk || {};
     await atualizarMeus();
     const ag = Date.now(), v = vagasPk(), meusPk = M.meus.filter((a) => a.tipo === 'pokemon');
-    for (const [pid, reg] of Object.entries(E.anunciosPk)) if (ag - reg.em > 5 * 60_000 && !meusPk.some((a) => String(idPkAnuncio(a)) === pid)) delete E.anunciosPk[pid];
+    for (const [pid, reg] of Object.entries(E.anunciosPk)) if (ag - reg.em > 5 * 60_000 && !meusPk.some((a) => String(idPkAnuncio(a)) === pid)) {
+      // o anúncio saiu (vendeu ou foi retirado): guarda nome, nível e custo — o histórico do jogo não traz o id do pokémon, e é assim que a venda acha a compra
+      if (reg.custo > 0) { E.arquivoPk = (E.arquivoPk || []).filter((x) => ag - x.saiu < 14 * 86400_000 && String(x.pid) !== pid).slice(0, 400); E.arquivoPk.unshift({ pid: reg.pid, nome: reg.nome, nv: reg.ficha?.level ?? null, custo: reg.custo, moeda: reg.moeda, em: reg.em, saiu: ag }); }
+      delete E.anunciosPk[pid];
+    }
     const apertado = v.livres === 0 && ((E.filaVenda || []).length > 0 || casasProntasEm(1) > 0);
     for (const a of meusPk) {
       const reg = E.anunciosPk[idPkAnuncio(a)]; if (!reg) continue;            // só mexe no que o app anunciou
@@ -2337,7 +2361,22 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
     if (achados.some((x) => /sem anúncio/.test(x))) { M._dropsEm = 0; }   // força a venda dos drops na próxima volta
     if (achados.some((x) => /acima do menor listado/.test(x))) M.reajTodosEm = 0;
   }
+  // cada conta só luta no boss que tem liberado: a região pede o nível de treinador dela (Kanto 300, Johto 650, Hoenn 3.100…)
+  // e as chances de drop sobem com a região (×(par+1)). Sem a região liberada, escolhe a melhor que a conta alcança.
+  const regiaoLiberada = (reg) => !M.nivel || M.nivel >= nivelRegiao(REGIOES[reg] ?? 99);
+  function bossDaConta() {
+    if (!M.nivel || regiaoLiberada(CFG.bossRegiao)) return false;
+    const regs = Object.keys(REGIOES).filter(regiaoLiberada).sort((a, z) => REGIOES[z] - REGIOES[a]);
+    if (!regs.length) return false;
+    const reg = regs[0], par = REGIOES[reg];
+    const melhor = BOSSES[reg].map((k, pos) => ({ k, ev: [0, 1, 2].reduce((s2, d) => s2 + Math.max(0, evBoss(premioDe(pos, Date.now() + d * 86400_000), par).liquidoG), 0) })).sort((a, z) => z.ev - a.ev)[0];
+    const antes = `${CFG.bossRegiao}/${CFG.bossKey}`;
+    CFG.bossRegiao = reg; CFG.bossKey = melhor.k; CFG.bossSegPorLuta = 0; salvarCfg();
+    log(`👑 boss desta conta: ${antes} pede Nv ${fmt(nivelRegiao(REGIOES[antes.split('/')[0]] ?? 0))} e a conta é Nv ${fmt(M.nivel)} → ${reg}/${melhor.k} (chances de drop ×${par + 1})`, 'ok');
+    return true;
+  }
   async function cicloBoss() {
+    try { bossDaConta(); } catch (e) { console.warn('[PKApp] boss da conta', e); }
     // drops que ficaram no inventário (o inventário às vezes chega depois do aviso do drop): anuncia a cada 2 min
     if (CFG.bossVenderDrops && Date.now() - (M._dropsEm || 0) > 120_000) { M._dropsEm = Date.now(); try { await venderDropsBoss(); } catch (e) { log('👑 venda dos drops: ' + e.message, 'erro'); } }
     { const r = resultadoBossDia(); if (r && r.lutas >= 20 && Date.now() - (M._ritmoBossLog || 0) > 3600_000) { M._ritmoBossLog = Date.now(); log(`👑 boss hoje: ${fmt(r.lutas)} lutas (${Math.round(r.vitPct * 100)}% vitórias), ~${Math.round(r.porHora)}/h${r.seg ? `, ${r.seg} s/luta` : ''}; ${r.dropados} drops, ${fmt(Math.round(r.recebido))} 🔮 recebidas + ~${fmt(Math.round(r.pendente))} 🔮 à venda − tokens ~${fmt(Math.round(r.custo))} 🔮 = lucro ~${fmt(Math.round(r.lucro))} 🔮`, 'ok'); } }
@@ -2947,6 +2986,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     while (M.ligado) {
       try {
         novoDia();
+        try { bossDaConta(); } catch {}                                                // boss e teto do token pelo nível desta conta
         if (CFG.mod.analise) { pedirPlanilhaSeHora(); await retratoItens(); }
         await conferirLucroReal();
         try { auditoria(); } catch (e) { console.warn('[PKApp] auditoria', e); }                                   // histórico da conta: orçamento real e abas de Lucro (a cada 10–30 min)
@@ -4048,6 +4088,32 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
       else return false;
       pintar(); return true;
     },
+    // banco de dados único (app de PC): a líder entrega as vendas novas; as seguidoras gravam e param de coletar
+    async baseExportar(desde) {
+      const d = Number(desde) || 0, lim = Date.now() - 30 * 86400_000;
+      const v = (await tudo('vendas')).filter((x) => x.em > Math.max(d, lim)).sort((a, z) => a.em - z.em).slice(-8000);
+      const it = (await tudo('itensVendas')).filter((x) => x.em > Math.max(d, lim)).sort((a, z) => a.em - z.em).slice(-4000);
+      return { vendas: v, itens: it, nick: M.nick || null, coletando: !seguidora() };
+    },
+    baseImportar(pacote, lider) {
+      const v = Array.isArray(pacote?.vendas) ? pacote.vendas.filter((x) => x && x.k && x.em) : [], it = Array.isArray(pacote?.itens) ? pacote.itens.filter((x) => x && x.k && x.em) : [];
+      if (v.length) gravar('vendas', v); if (it.length) gravar('itensVendas', it);
+      const novo = !M.baseDe; M.baseDe = String(lider || 'outra conta'); M.baseDeEm = Date.now();
+      if (novo) log(`🗄️ banco de dados único: as vendas vêm de ${M.baseDe} pelo app de PC — esta conta não coleta nem baixa planilhas`, 'ok');
+      M.baseRecebidas = (M.baseRecebidas || 0) + v.length + it.length;
+      if (v.length && Date.now() - (M.baseAtualEm || 0) > 5 * 60_000) { M.baseAtualEm = Date.now(); setTimeout(() => atualizarBase(), 1500); }
+      return { ok: true, vendas: v.length, itens: it.length };
+    },
+    baseLiderar() { M.baseDe = null; M.baseDeEm = 0; return true; },
+    // copiar os ajustes de uma conta para outra (no app de PC): leva tudo menos o que é desta conta (casas, papel, ataque, nível)
+    exportarAjustes: () => exportarCfg(),
+    importarAjustes(txt) {
+      let j; try { j = JSON.parse(String(txt || '')); } catch { return { ok: false, erro: 'ajustes inválidos' }; }
+      if (!j || !j.cfg) return { ok: false, erro: 'ajustes inválidos' };
+      for (const k of ['casas', 'papel', 'meuAtaque', 'nivelTreinador', 'simulacao', 'bossRegiao', 'bossKey', 'bossSegPorLuta']) delete j.cfg[k];   // boss: cada conta usa o que tem liberado
+      const r = importarCfg(JSON.stringify(j)); if (r.ok) { log(`⚙️ ajustes copiados de outra conta no app de PC (${r.n}); a conta fica em simulação até você ligar o modo real`, 'ok'); pintar(); }
+      return r;
+    },
     relatorios: () => JSON.parse(JSON.stringify((E.relatorios || []).filter((r) => !r.parcial))),
     parecerHoje: () => JSON.parse(JSON.stringify(compilarParecer(hoje(), true))),
     decisoes: (cat) => DEC.filter((x) => !cat || x.cat === cat).slice(0, 300),
@@ -4062,7 +4128,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     papeis: () => Object.keys(PAPEIS),
   };
   try { Object.defineProperty(PAGINA, '__PKAPP_PONTE', { value: ponteDesktop, configurable: true }); } catch {}
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, estudoToken, resultadoBossDia, exportarCfg, importarCfg, compilarParecer, fecharDia, aprender, DEC, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: VERSAO_APP }, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, estudoToken, resultadoBossDia, exportarCfg, importarCfg, compilarParecer, fecharDia, aprender, DEC, bossDaConta, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: VERSAO_APP }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));
