@@ -2,6 +2,7 @@
 
 | Versão | Data | O que mudou |
 | --- | --- | --- |
+| 5.11 | 2026-11-23 | Vender rápido, sempre com lucro: pokémon em 💠 pelo "vender rápido" do precificador, em Coins a 90% do mercado, itens um degrau abaixo do menor anúncio. O app ajusta todos os seus anúncios a cada 30 min (os seus também), nunca abaixo do custo + 3%; sem custo conhecido, pokémon não desce de 95% do justo. |
 | 5.10 | 2026-11-23 | Boss Token: compra sempre até o preço que você define (Coins e 💠), sem margem de lucro e sem passar pela conferência do Claude. Sem preço definido, o automático é o ponto de equilíbrio do boss. |
 | 5.9 | 2026-11-23 | Lucro real: o app lê o histórico de compras e vendas da sua conta no jogo (24 h e 7 dias, por moeda) a cada 30 min e mostra na aba Análise. |
 | 5.8 | 2026-11-23 | Visual novo: 7 abas com ícones e sub-abas (Mercado, Boss, Análise), chips de estado no topo, módulos como interruptores, botão de largura. Logs mostram quantidade e preço unitário ("30× a 5 💠 = 150 💠"). Calculadora "Quantos tokens dá" na aba Boss. Atualização automática pelo GitHub. |
