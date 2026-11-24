@@ -7,7 +7,7 @@ Feito a partir do [Idleterino](https://github.com/ViinniSantoos/idleterino), de 
 ## O que tem a mais
 
 - **PokeIdle App em cada conta**: o mesmo script do Tampermonkey, embutido no app (`tools/montar-preload.js`). Cada conta tem o seu painel, configuração e limites.
-- **Aba Lucro**: as contas lado a lado e o total — Coins, Gemas, tokens, saldo de 24 h e 7 dias pelo histórico do jogo, boss do dia, vitrine e fila.
+- **Aba Painel**: *Hoje* (lucro realizado do dia, caixa, boss, API e uma linha por conta), *Parecer* (o fechamento de cada dia às 23:50 e o que o app aprendeu), *Decisões* (o catálogo de tudo o que o app fez, com o motivo) e *Controle* (ligar, simulação/real, módulos e papel de cada conta). O painel dentro do jogo fica escondido; dá para mostrar em Controle.
 - **Contas irmãs**: uma conta sua nunca compra nem rebaixa anúncio de outra conta sua.
 - **Papel de cada conta** (Tudo, Boss, Casas, Mercado) e a sugestão de onde cada uma rende mais.
 - **Avisos** de vendas, drops raros, disjuntor e vetos do Claude (PC, celular pelo ntfy, Discord).
@@ -16,7 +16,7 @@ Feito a partir do [Idleterino](https://github.com/ViinniSantoos/idleterino), de 
 
 Baixe o instalador na página de Releases do repositório (Windows: `PokeIdleApp-Setup.exe`; Linux: AppImage ou .deb). Como o instalador não é assinado, o Windows pode mostrar "O Windows protegeu o computador": clique em **Mais informações → Executar assim mesmo**.
 
-O repositório é privado. Para o app se atualizar sozinho, crie um token do GitHub só de leitura (Settings → Developer settings → Fine-grained tokens → repositório `pokeidle-app` → Contents: Read-only) e cole na aba **Lucro → Ajustes do app**.
+O repositório é privado. Para o app se atualizar sozinho, crie um token do GitHub só de leitura (Settings → Developer settings → Fine-grained tokens → repositório `pokeidle-app` → Contents: Read-only) e cole na aba **Painel → Controle**.
 
 ## Montar
 

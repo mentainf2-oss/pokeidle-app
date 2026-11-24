@@ -2040,7 +2040,7 @@ contextBridge.executeInMainWorld({
 });
 
 
-// ===================== PokeIdle App 5.41 (gerado por tools/montar-preload.js — não edite aqui) =====================
+// ===================== PokeIdle App 5.42 (gerado por tools/montar-preload.js — não edite aqui) =====================
 ;(() => {
   const { contextBridge: pontePk, ipcRenderer: ipcPk } = require('electron');
   // o que o script pede ao app: rede só para os sites liberados (API do Claude e precificador) e avisos
@@ -2066,7 +2066,7 @@ contextBridge.executeInMainWorld({
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.41
+// @version      5.42
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -2096,7 +2096,7 @@ contextBridge.executeInMainWorld({
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.41';
+  const VERSAO_APP = '5.42';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -2264,7 +2264,26 @@ contextBridge.executeInMainWorld({
     M.log.unshift({ t: new Date().toLocaleTimeString(), msg, tipo });
     M.log.length = Math.min(M.log.length, 250);
     console.log('[PKApp]', msg); pintarLog();
+    try { catalogar(msg, tipo); } catch {}
   }
+  // 📚 catálogo: toda decisão do app fica guardada com o motivo (o texto do log já traz o porquê), por 4 dias
+  const DEC = (() => { const L = ler('pkapp.decisoes', []); return Array.isArray(L) ? L : []; })();
+  const CATS_DEC = [
+    ['erro', (m, t) => t === 'erro' || /^erro|falhou/i.test(m)], ['auditoria', (m) => /^🔎/.test(m)], ['aprendizado', (m) => /^🎓 aprendizado|^📋 parecer/.test(m)],
+    ['claude', (m) => /^🧠/.test(m)], ['venda', (m) => /^💰 vendido|^ANUNCIAR|^VENDER|^🪟/.test(m)], ['preço', (m) => /^(BAIXAR|SUBIR|REAJUSTAR|CORRIGIR)|^🔁|^🤝 aplicando/.test(m)],
+    ['negociação', (m) => /^🤝/.test(m)], ['compra', (m, t) => t === 'compra' || /^COMPRAR|^🛒|^✨/.test(m)], ['casa', (m) => /^🏠/.test(m)], ['boss', (m) => /^👑|Boss Token|^🎁/.test(m)],
+    ['pulou', (m) => /pulei|^⛔|não compro|sem preço|sem câmbio|^📚|^🐢/.test(m)], ['ajuste', (m) => /^⚙️|^👥|^▶|^⏹|^🧪|^⚡ modo|ligado$|desligado$/.test(m)],
+  ];
+  const IGNORAR_DEC = /^💰 lucro real|planilha|^🔮 precificador|^🎓 (em|estudo)|^🧾|^📊/;
+  let decSujo = false;
+  function catalogar(msg, tipo) {
+    const sim2 = /^\[SIM\] /.test(msg), m = msg.replace(/^\[SIM\] /, '');
+    if (IGNORAR_DEC.test(m)) return;
+    const c = CATS_DEC.find(([, f]) => f(m, tipo)); if (!c) return;
+    DEC.unshift({ em: Date.now(), cat: c[0], msg: m.slice(0, 400), sim: sim2 || undefined }); decSujo = true;
+    const lim = Date.now() - 4 * 86400_000; while (DEC.length > 2500 || (DEC.length && DEC[DEC.length - 1].em < lim)) DEC.pop();
+  }
+  setInterval(() => { if (decSujo) { decSujo = false; salvar('pkapp.decisoes', DEC); } }, 60_000);
   function op(o) { E.ops.unshift({ em: Date.now(), ...o }); E.ops.length = Math.min(E.ops.length, 300); persistir(); }
 
   /* ============================== CONEXÃO ============================== */
@@ -2412,7 +2431,7 @@ contextBridge.executeInMainWorld({
         else { (E.semPar = E.semPar || []).unshift({ em: Date.now(), id: e.id, pedido: e.pedido, tipo: e.tipo, itemId: e.itemId, descricao: e.descricao }); E.semPar.length = Math.min(E.semPar.length, 20); persistir(); }
         break;
       }
-      case 'marketVendido': M.meusEm = 0; log('💰 vendido: ' + (e.descricao || ''), 'ok'); op({ tipo: 'venda', desc: e.descricao }); break;
+      case 'marketVendido': M.meusEm = 0; log('💰 vendido: ' + (e.descricao || ''), 'ok'); try { const d = String(e.descricao || ''); for (const [id, n] of Object.entries(E.nomesItens || {})) if (n && d.includes(n)) (E.vendaItemEm ??= {})[id] = Date.now(); } catch {} op({ tipo: 'venda', desc: e.descricao }); break;
       case 'marketCriado': M.meusEm = 0; log('📢 anunciado: ' + (e.descricao || '')); break;
       case 'mktSorteio': if (e.perdeu) log('🎲 perdeu o sorteio'); break;
       case 'bossMorto': {
@@ -3564,6 +3583,7 @@ contextBridge.executeInMainWorld({
   /* ============================== 💎 FLIP DE ITENS ============================== */
   async function flipItem(id, a, medVenda, moedaCompra, moedaVenda, cambio = 1) {
     if (moedaCompra === 'orb' && moedaVenda !== 'orb') return;           // nunca compra item em Gemas para vender em Coins (só Coins → Gemas)
+    if ((E.aprendizado?.itensEvitar?.[id] || 0) > Date.now()) return;    // o parecer viu este item dar prejuízo: fica de fora por 7 dias
     const liquidoUn = medVenda * (1 - COMISSAO);                         // na moeda de venda
     const custoNaVenda = moedaCompra === moedaVenda ? a.preco : a.preco / cambio;
     const lucroUn = liquidoUn - custoNaVenda;
@@ -3950,6 +3970,17 @@ contextBridge.executeInMainWorld({
   // pokémon parado em Gemas há trocarParaCoinsH horas: passa a vender em Coins (capital gira mais rápido), sempre com lucro.
   // Tenta mudar a moeda do próprio anúncio; se o jogo não aceitar, retira e põe na fila para anunciar em Coins (o jogo pede 30 min).
   // desde quando o anúncio está à venda: editar o preço reinicia o criadoEm no jogo, então guarda o primeiro que viu
+  // quanto um pokémon precisa render LÍQUIDO (já sem a comissão) para valer a venda:
+  //  · comprado pelo sniper: a compra foi o investimento — custo + 5% e pelo menos metade do lucro mínimo do sniper (ex.: 356 🔮 → ≥ 381 🔮 líquidos);
+  //  · nas casas, no giro do evento: custo + giroMargem, mas nunca menos que 10 🔮 / 2M de lucro;
+  //  · fora do giro: a margem normal.
+  function liquidoMinimo(pokemonId, custo, moeda, margemNormal) {
+    if (!(custo > 0)) return 0;
+    const o = pokemonId != null && E.ops.find((x) => x.tipo === 'compra' && x.pokemonId != null && String(x.pokemonId) === String(pokemonId));
+    if (o && /sniper/.test(o.motivo || '') && !/casa/.test(o.motivo || '')) return custo + Math.max(custo * 0.05, (moeda === 'orb' ? CFG.snipeLucroMinGemas : CFG.snipeLucroMin) * 0.5);
+    if (emGiro()) return Math.max(custo * (1 + CFG.giroMargem), custo + (moeda === 'orb' ? 10 : 2_000_000));
+    return custo * margemNormal;
+  }
   function desdeQuando(a) {
     E.vistoEm = E.vistoEm || {};
     const v = E.vistoEm[a.id], c = a.criadoEm || Date.now();
@@ -4003,7 +4034,7 @@ contextBridge.executeInMainWorld({
       const c = custoDoAnuncio(a), tipoV = a.tipo === 'pokemon' ? 'pokemon' : 'item';
       // lucro de pelo menos 3% sobre o custo; pokémon de custo desconhecido (pode ter sido comprado) não desce abaixo de 95% do preço justo
       const giro = emGiro() && a.tipo === 'pokemon';
-      const piso = c ? precoParaLiquido(c.custo * (giro ? 1 + CFG.giroMargem : 1.03), a.moeda, tipoV) : a.tipo === 'pokemon' && alvo.justo ? Math.round(alvo.justo * (giro ? 0.75 : 0.9)) : alvo.preco;
+      const piso = c ? precoParaLiquido(a.tipo === 'pokemon' ? liquidoMinimo(a.pokemonId, c.custo, a.moeda, 1.03) : c.custo * 1.03, a.moeda, tipoV) : a.tipo === 'pokemon' && alvo.justo ? Math.round(alvo.justo * (giro ? 0.75 : 0.9)) : alvo.preco;
       // acima do preço rápido: baixa até ele (nunca abaixo do piso); bem abaixo dele: sobe até ele (está deixando dinheiro na mesa)
       const desce = Math.max(alvo.preco, piso), sobe = c ? Math.max(alvo.preco, piso) : alvo.preco;
       let novo = a.preco > desce ? desce : a.preco < sobe * 0.97 ? sobe : a.preco;
@@ -4151,7 +4182,7 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
     const cbV = cambioImplicito()?.taxa || 0;
     if (custo && moedaCompra !== moeda) { if (!cbV) { log(`sem câmbio para converter o custo de ${nome} — não anunciei`, 'erro'); return false; } custo = moedaCompra === 'gold' ? custo / cbV : custo * cbV; }
     const mg = emGiro() ? 1 + CFG.giroMargem : 1.05;               // no giro aceita lucro menor (nunca prejuízo)
-    let piso = moeda === 'orb' ? precoParaLiquido((custo || 0) * mg + (cbV ? pensao / cbV : 0), 'orb', 'pokemon') : Math.ceil(((custo || 0) + pensao) / (1 - COMISSAO) * mg);
+    let piso = moeda === 'orb' ? precoParaLiquido(liquidoMinimo(pokemonId, custo || 0, 'orb', 1.05) + (cbV ? pensao / cbV : 0), 'orb', 'pokemon') : Math.ceil(((custo || 0) + pensao) / (1 - COMISSAO) * mg);
     // custo desconhecido ou zero (pokémon seu, adotado ou da coleção): não entra abaixo de 90% do justo (75% no giro), igual ao reajuste
     const justoRef = moeda === 'orb' ? (ref?.prc?.justo ?? ref?.preco) : ref?.preco;
     if (!(custo > 0) && justoRef) piso = Math.max(piso, Math.round(justoRef * (emGiro() ? 0.75 : 0.9)));
@@ -4353,7 +4384,7 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
     for (const id of drops) {
       const tem = Number(M.itens[id] || 0), nome = (E.nomesItens[id] || id).toString();
       const abertos = M.meus.filter((x) => x.itemId === id && x.moeda === 'orb').length;
-      if (tem && CFG.bossVenderDrops && CFG.gemasAtivas && abertos < CFG.bossAnunciosPorItem && M.meus.length < 20) achados.push(`${tem}× ${nome} no inventário sem anúncio`);
+      if (tem && CFG.bossVenderDrops && CFG.gemasAtivas && abertos < CFG.bossAnunciosPorItem && M.meus.length < 20 && !esperaRevenda(id)) achados.push(`${tem}× ${nome} no inventário sem anúncio`);
       for (const a of M.meus.filter((x) => x.itemId === id && x.moeda === 'orb')) { const menor = menorListadoItem(id, 'orb', a.id); if (menor && a.preco > menor) achados.push(`${nome} anunciado a ${fmt(a.preco)} 🔮, acima do menor listado (${fmt(menor)})`); }
     }
     for (const a of M.meus) {
@@ -4409,6 +4440,8 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
     log(`${sim()}👑 série encerrada — voltando para a hunt (${E.huntSlug})`);
     if (!CFG.simulacao) setTimeout(() => enviar({ t: 'hunt.select', slug: E.huntSlug }), 4000);
   }
+  // o jogo não deixa anunciar de novo um item por 30 min depois que ele vendeu (avisado pelo jogador com a Mega Shiny Stone)
+  const esperaRevenda = (id) => { const t = Math.max(E.vendaItemEm?.[id] || 0, ...((E.real?.vendas || []).filter((v) => Number(v.itemId) === Number(id)).map((v) => v.em || 0))); return Math.max(0, t + 31 * 60_000 - Date.now()); };
   async function venderDropsBoss() {
     if (!CFG.gemasAtivas) { if (!M._avisoDropG) { M._avisoDropG = 1; log('👑 drops de boss ficam guardados: a venda é só em Gemas e "Operar em Gemas" está desligado', 'erro'); } return; }
     await atualizarMeus();
@@ -4416,10 +4449,12 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
       const tem = Number(M.itens[id] || 0);
       // cada leva de drop vira um anúncio próprio (até bossAnunciosPorItem por item): vende aos poucos, sem despejar tudo de uma vez
       if (!tem || M.meus.filter((a) => a.itemId === id && a.moeda === 'orb').length >= CFG.bossAnunciosPorItem || M.meus.length >= 20) continue;
+      if (esperaRevenda(id)) { avisoRaro('dropEspera' + id, `👑 ${tem}× ${E.nomesItens[id] || id}: vendeu há pouco — o jogo libera anunciar de novo em ${Math.ceil(esperaRevenda(id) / 60000)} min`, 30); continue; }
       if (Date.now() - (M.listaItem?.[id + ':orb']?.em || 0) > 10 * 60_000) await pedirM({ t: 'market.item', itemId: id, moeda: 'orb' }, 'item', (m) => m.itemId === id && m.moeda === 'orb');
       const med = M.medias[id]?.orb?.media, menor = menorListadoItem(id, 'orb') ?? med;   // pedido do jogador: pelo menor preço listado, não pela média
-      const preco = Math.round(Math.max(menor || 0, med && CFG.bossDropPisoMedia ? med * CFG.bossDropPisoMedia : 0));
-      if (!preco) continue;
+      let preco = Math.round(Math.max(menor || 0, med && CFG.bossDropPisoMedia ? med * CFG.bossDropPisoMedia : 0));
+      if (!preco) preco = Math.round(fonteGemaItem(id)?.preco || 0);                          // sem anúncio e sem média: o preço que o app usa no boss
+      if (!preco) { avisoRaro('dropSemPreco' + id, `👑 ${tem}× ${E.nomesItens[id] || id} sem preço de referência — anuncio quando aparecer um anúncio ou a média`, 60); continue; }
       E.custosItens[ck(id, 'orb')] = { qtd: tem, custoTotal: 0, custoMedio: 0 };
       await revenderItem(id, preco, 'orb', true);
     }
@@ -5098,6 +5133,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     W.querySelector('#pk-min').onclick = () => W.classList.toggle('min');
     W.querySelector('#pk-larg').onclick = () => { W.classList.toggle('largo'); salvar('pkapp.largo', W.classList.contains('largo')); };
     if (ler('pkapp.largo', false)) W.classList.add('largo');
+    if (ler('pkapp.painelOculto', false)) W.style.display = 'none';      // no app de PC o painel fica escondido (o app mostra tudo na página dele)
     W.querySelectorAll('.pk-nav button').forEach((b) => (b.onclick = () => { const g = grupoDe(b.dataset.aba); abaAtual = g[2].includes(M.ultimaSub?.[g[0]]) ? M.ultimaSub[g[0]] : b.dataset.aba; pintar(); }));
     arrastavel(W, W.querySelector('.pk-top'));
     montarInicio(); montarCompras(); montarSniperPk(); montarSniperIt(); montarCasas(); montarLucro(); $('#sec-estudo').innerHTML = '<div id="e-corpo"></div><div style="margin-top:6px"><button class="bt cinza" id="e-bt">Estudar agora</button></div>'; $('#e-bt').onclick = () => { estudar(true); pintar(); }; montarBoss(); montarPrey(); montarInvestir(); montarAvaliar(); montarAnalise(); montarClaude(); montarConfig();
@@ -5313,11 +5349,11 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     return o;
   }
   // itens: preço médio de compra x venda e lucro do que já foi vendido (Coins pelo câmbio quando as moedas diferem)
-  function lucroPorItem(dias = 7) {
-    const lim = Date.now() - dias * 86400_000, cb = cambioImplicito()?.taxa || 0, por = {};
-    const ent = (l) => { const k = l.itemId ?? nomeItemDe(l.desc); return (por[k] ??= { nome: E.nomesItens?.[l.itemId] || nomeItemDe(l.desc), cq: 0, cG: 0, cO: 0, vq: 0, vG: 0, vO: 0 }); };
-    for (const c of E.real?.compras || []) if (c.em >= lim && c.tipo !== 'pokemon') { const e = ent(c); e.cq += c.qtd || 1; if (c.moeda === 'orb') e.cO += c.bruto || 0; else e.cG += c.bruto || 0; }
-    for (const v of E.real?.vendas || []) if (v.em >= lim && v.tipo !== 'pokemon') { const e = ent(v); e.vq += v.qtd || 1; if (v.moeda === 'orb') e.vO += v.liquido || 0; else e.vG += v.liquido || 0; }
+  function lucroPorItem(dias = 7, de = null, ate = Infinity) {
+    const lim = de ?? Date.now() - dias * 86400_000, cb = cambioImplicito()?.taxa || 0, por = {};
+    const ent = (l) => { const k = l.itemId ?? nomeItemDe(l.desc); return (por[k] ??= { id: l.itemId ?? null, nome: E.nomesItens?.[l.itemId] || nomeItemDe(l.desc), cq: 0, cG: 0, cO: 0, vq: 0, vG: 0, vO: 0 }); };
+    for (const c of E.real?.compras || []) if (c.em >= lim && c.em < ate && c.tipo !== 'pokemon') { const e = ent(c); e.cq += c.qtd || 1; if (c.moeda === 'orb') e.cO += c.bruto || 0; else e.cG += c.bruto || 0; }
+    for (const v of E.real?.vendas || []) if (v.em >= lim && v.em < ate && v.tipo !== 'pokemon') { const e = ent(v); e.vq += v.qtd || 1; if (v.moeda === 'orb') e.vO += v.liquido || 0; else e.vG += v.liquido || 0; }
     return Object.values(por).map((e) => {
       const soGemas = !e.cG && !e.vG, soCoins = !e.cO && !e.vO;
       const custoU = e.cq ? (soGemas ? e.cO : e.cG + e.cO * cb) / e.cq : null, vendaU = e.vq ? (soGemas ? e.vO : e.vG + e.vO * cb) / e.vq : null;
@@ -5900,6 +5936,145 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     }
   }
 
+  /* ============================== 📋 PARECER DO DIA E APRENDIZADO ============================== */
+  // Perto da meia-noite (Brasília) o app fecha o dia: o que comprou, vendeu, lucrou, errou e acertou, com o custo da API.
+  // Com o parecer, ajusta os próprios limites dentro de faixas seguras (nunca abaixo do que você configurou) e registra cada mudança.
+  const diaDe = (ms) => new Date(ms - 3 * 3600_000).toISOString().slice(0, 10);
+  const janelaDia = (dia) => { const de = Date.parse(dia + 'T00:00:00-03:00'); return { de, ate: de + 86400_000 }; };
+  const sinalG = (v) => (v > 0 ? '+' : v < 0 ? '−' : '') + fmt(Math.abs(Math.round(v))) + ' 🔮';
+  // faixas do aprendizado: [passo para apertar, teto]; afrouxar volta devagar até o valor que você configurou
+  const FAIXAS_AP = {
+    snipeDescontoMin: { passo: 0.05, teto: 0.6, rot: 'desconto mínimo do sniper', fmt: (v) => Math.round(v * 100) + '%' },
+    snipeLucroMinGemas: { passo: 20, teto: 200, rot: 'lucro mínimo do sniper em Gemas', fmt: (v) => fmt(v) + ' 🔮' },
+    casaLucroMin: { fator: 1.2, tetoX: 3, rot: 'lucro mínimo por pokémon das casas', fmt: (v) => curto(v) },
+    margemMinGemas: { passo: 0.05, teto: 0.3, rot: 'margem mínima de itens em Gemas', fmt: (v) => Math.round(v * 100) + '%' },
+    bossEvMinPct: { passo: 0.1, teto: 0.6, rot: 'retorno mínimo do boss', fmt: (v) => Math.round(v * 100) + '%' },
+    claudeIntervaloMin: { fator: 1.5, teto: 240, rot: 'intervalo das decisões do Claude', fmt: (v) => Math.round(v) + ' min' },
+  };
+  function ajustarCfg(chave, direcao, porque, aj) {
+    const f = FAIXAS_AP[chave], A = (E.aprendizado ??= { base: {}, hist: [], itensEvitar: {} });
+    if (A.base[chave] == null) A.base[chave] = CFG[chave];
+    const base = A.base[chave], de = CFG[chave];
+    let para;
+    if (direcao > 0) para = f.fator ? Math.min(f.tetoX ? base * f.tetoX : f.teto, de * f.fator) : Math.min(f.teto, +(de + f.passo).toFixed(4));
+    else para = f.fator ? Math.max(base, de / f.fator) : Math.max(base, +(de - f.passo).toFixed(4));
+    if (!(Math.abs(para - de) > 1e-9)) return;
+    if ((A.hist || []).some((h) => h.chave === chave && Date.now() - h.em < 20 * 3600_000)) return;   // um ajuste por limite a cada fechamento
+    CFG[chave] = para; salvarCfg();
+    const x = { em: Date.now(), chave, rot: f.rot, de: f.fmt(de), para: f.fmt(para), porque };
+    aj.push(x); A.hist.unshift(x); A.hist.length = Math.min(A.hist.length, 60);
+    log(`🎓 aprendizado: ${f.rot} ${x.de} → ${x.para} (${porque})`, 'ok');
+  }
+  function aprender(rel) {
+    const aj = [], A = (E.aprendizado ??= { base: {}, hist: [], itensEvitar: {} }), base = A.base;
+    const acima = (k) => base[k] != null && CFG[k] > base[k] + 1e-9;
+    // 1) revendas dos últimos 3 dias, por origem (dado de verdade: venda casada com a compra)
+    const cb = cambioImplicito()?.taxa || 0, emG = (v, m) => (m === 'orb' ? v : cb ? v / cb : 0);
+    const rv = revendasDoApp(3).map((x) => ({ ...x, lucroG: emG(x.venda.liquido, x.venda.moeda) - emG(x.compra.preco, x.compra.moeda) }));
+    const sn = rv.filter((x) => x.compra.origem === 'sniper'), cs = rv.filter((x) => x.compra.origem === 'casa');
+    const perdas = (L) => L.filter((x) => x.lucroG < 0).length;
+    const J = janelaDia(rel.dia), perdeuNoDia = (L) => L.some((x) => x.lucroG < 0 && x.venda.em >= J.de && x.venda.em < J.ate);   // a janela é de 3 dias, mas só aperta se o dia fechado teve prejuízo
+    if (sn.length >= 4 && perdas(sn) / sn.length >= 0.4 && perdeuNoDia(sn)) {
+      const p = `${perdas(sn)} de ${sn.length} revendas do sniper em 3 dias deram prejuízo`;
+      ajustarCfg('snipeDescontoMin', 1, p, aj); ajustarCfg('snipeLucroMinGemas', 1, p, aj);
+    } else if (sn.length >= 6 && !perdas(sn) && sn.reduce((s2, x) => s2 + x.horas, 0) / sn.length <= 24) {
+      const p = `${sn.length} revendas do sniper sem prejuízo, vendidas em ~${Math.round(sn.reduce((s2, x) => s2 + x.horas, 0) / sn.length)} h`;
+      if (acima('snipeDescontoMin')) ajustarCfg('snipeDescontoMin', -1, p, aj);
+      if (acima('snipeLucroMinGemas')) ajustarCfg('snipeLucroMinGemas', -1, p, aj);
+    }
+    if (cs.length >= 3 && perdas(cs) / cs.length >= 0.34 && perdeuNoDia(cs)) ajustarCfg('casaLucroMin', 1, `${perdas(cs)} de ${cs.length} pokémon das casas venderam abaixo do custo`, aj);
+    else if (cs.length >= 5 && !perdas(cs) && acima('casaLucroMin')) ajustarCfg('casaLucroMin', -1, `${cs.length} pokémon das casas vendidos com lucro`, aj);
+    // 2) itens: item que deu prejuízo sai do flip por 7 dias; prejuízo no total aperta a margem
+    const it = lucroPorItem(3).filter((x) => x.lucro != null && x.vq >= 1);
+    for (const x of it) if (x.lucro < 0 && x.vq >= 2 && x.id != null && !((A.itensEvitar[x.id] || 0) > Date.now())) {
+      A.itensEvitar[x.id] = Date.now() + 7 * 86400_000;
+      aj.push({ em: Date.now(), chave: 'itensEvitar', rot: 'flip de ' + x.nome, de: 'liberado', para: 'fora por 7 dias', porque: `${x.vq} vendidos com prejuízo de ${x.moeda === 'orb' ? fmt(Math.round(-x.lucro)) + ' 🔮' : curto(-x.lucro)}` });
+      log(`🎓 aprendizado: flip de ${x.nome} fora por 7 dias (${x.vq} vendidos com prejuízo)`, 'ok');
+    }
+    for (const [id, ate] of Object.entries(A.itensEvitar)) if (ate < Date.now()) delete A.itensEvitar[id];
+    const itG = it.filter((x) => x.moeda === 'orb'), somaG = itG.reduce((s2, x) => s2 + x.lucro, 0), qG = itG.reduce((s2, x) => s2 + x.vq, 0);
+    if (qG >= 3 && somaG < 0) ajustarCfg('margemMinGemas', 1, `itens em Gemas: ${sinalG(somaG)} em 3 dias`, aj);
+    else if (qG >= 5 && somaG > 0 && !itG.some((x) => x.lucro < 0) && acima('margemMinGemas')) ajustarCfg('margemMinGemas', -1, `itens em Gemas: ${sinalG(somaG)} sem prejuízo`, aj);
+    // 3) boss: dia com prejuízo aperta o retorno mínimo; dia bom volta devagar
+    const b = rel.boss;
+    if (b && b.lutas >= 200 && b.lucro < 0) ajustarCfg('bossEvMinPct', 1, `boss do dia: ${b.lutas} lutas, ${sinalG(b.lucro)}`, aj);
+    else if (b && b.lutas >= 200 && b.lucro > 0 && acima('bossEvMinPct')) ajustarCfg('bossEvMinPct', -1, `boss do dia: ${sinalG(b.lucro)}`, aj);
+    // 4) API do Claude: se custou mais do que o dia lucrou, decide menos vezes
+    if (rel.api && rel.api.usd > 0.05 && CFG.usdPorGema > 0 && rel.api.usd > rel.lucroG * CFG.usdPorGema) ajustarCfg('claudeIntervaloMin', 1, `a API custou US$ ${rel.api.usd.toFixed(2)} e o dia lucrou US$ ${(rel.lucroG * CFG.usdPorGema).toFixed(2)}`, aj);
+    else if (rel.api && CFG.usdPorGema > 0 && rel.lucroG * CFG.usdPorGema > rel.api.usd * 20 && acima('claudeIntervaloMin')) ajustarCfg('claudeIntervaloMin', -1, 'a API se paga com folga', aj);
+    persistir();
+    return aj;
+  }
+  function compilarParecer(dia, parcial = false) {
+    const { de, ate } = janelaDia(dia), cb = cambioImplicito()?.taxa || 0, emG = (v, m) => (m === 'orb' ? v : cb ? v / cb : 0);
+    const no = (x) => x.em >= de && x.em < ate;
+    const compras = (E.real?.compras || []).filter(no), vendas = (E.real?.vendas || []).filter(no);
+    const mov = {};
+    for (const tipo of ['pokemon', 'item']) {
+      const eh = (x) => (x.tipo === 'pokemon') === (tipo === 'pokemon');
+      const C = compras.filter(eh), V = vendas.filter(eh);
+      mov[tipo] = { nC: C.length, nV: V.length, gastoG: C.reduce((s2, x) => s2 + emG(x.bruto || 0, x.moeda), 0), recG: V.reduce((s2, x) => s2 + emG(x.liquido || 0, x.moeda), 0),
+        gastoC: C.filter((x) => x.moeda === 'gold').reduce((s2, x) => s2 + (x.bruto || 0), 0), recC: V.filter((x) => x.moeda === 'gold').reduce((s2, x) => s2 + (x.liquido || 0), 0) };
+    }
+    const rv = revendasDoApp(Math.ceil((Date.now() - de) / 86400_000) + 1).filter((x) => x.venda.em >= de && x.venda.em < ate)
+      .map((x) => ({ nome: x.desc, origem: x.compra.origem, horas: Math.round(x.horas), lucroG: emG(x.venda.liquido, x.venda.moeda) - emG(x.compra.preco, x.compra.moeda), moedas: x.compra.moeda + '→' + x.venda.moeda }));
+    const its = lucroPorItem(1, de, ate).filter((x) => x.lucro != null).map((x) => ({ nome: x.nome, vq: x.vq, lucroG: x.moeda === 'orb' ? x.lucro : emG(x.lucro, 'gold') }));
+    const bd = E.bossDia && E.bossDia.dia === dia ? (() => { try { return resultadoBossDia(); } catch { return null; } })() : null;
+    const boss = bd ? { lutas: bd.lutas, vit: bd.vit, porHora: Math.round(bd.porHora), drops: bd.dropados, vendidos: bd.vendidos, recebido: Math.round(bd.recebido), pendente: Math.round(bd.pendente), custo: Math.round(bd.custo), lucro: Math.round(bd.lucro) } : null;
+    const api = E.apiUso?.[dia] ? { usd: E.apiUso[dia].usd, chamadas: E.apiUso[dia].chamadas } : null;
+    const D = DEC.filter(no), porCat = {}; for (const x of D) porCat[x.cat] = (porCat[x.cat] || 0) + 1;
+    const errosTxt = {}; for (const x of D) if (x.cat === 'erro') { const k = x.msg.replace(/\d+/g, '#').slice(0, 90); errosTxt[k] = (errosTxt[k] || 0) + 1; }
+    const erros = Object.entries(errosTxt).sort((a, z) => z[1] - a[1]).slice(0, 4).map(([m, n]) => ({ msg: m, n }));
+    const vetos = (E.conferencias || []).filter((x) => !x.ok && no(x)).length;
+    const lucroRv = rv.reduce((s2, x) => s2 + x.lucroG, 0), lucroIt = its.reduce((s2, x) => s2 + x.lucroG, 0), lucroBoss = boss ? boss.lucro : 0;
+    const lucroG = lucroRv + lucroIt + lucroBoss;
+    const caixaG = mov.pokemon.recG + mov.item.recG - mov.pokemon.gastoG - mov.item.gastoG;
+    const melhores = [...rv, ...its.map((x) => ({ nome: x.nome + (x.vq > 1 ? ` ×${x.vq}` : ''), lucroG: x.lucroG, origem: 'item' }))].sort((a, z) => z.lucroG - a.lucroG);
+    let parados = 0; try { parados = M.meus.filter((a) => a.tipo === 'pokemon' || a.pokemonId != null).filter((a) => Date.now() - desdeQuando(a) > 48 * 3600_000).length; } catch {}
+    const rel = { dia, em: Date.now(), parcial: parcial || undefined, versao: VERSAO_APP, simulacao: !!CFG.simulacao, cambio: cb || null, lucroG: Math.round(lucroG), caixaG: Math.round(caixaG),
+      partes: { revendas: Math.round(lucroRv), itens: Math.round(lucroIt), boss: Math.round(lucroBoss) }, mov, revendas: rv.length, prejuizos: rv.filter((x) => x.lucroG < 0).length + its.filter((x) => x.lucroG < 0).length,
+      melhores: melhores.filter((x) => x.lucroG > 0).slice(0, 3), piores: melhores.filter((x) => x.lucroG < 0).slice(-3).reverse(), boss, api, decisoes: D.length, porCat, erros, vetos, parados };
+    // o texto do parecer, curto e direto
+    const L = [];
+    L.push(`${rel.lucroG > 0 ? 'Dia positivo' : rel.lucroG < 0 ? 'Dia negativo' : 'Dia sem lucro realizado'}: lucro realizado ${sinalG(rel.lucroG)}${cb ? '' : ' (sem câmbio: Coins não entram na conta)'} — revendas ${sinalG(rel.partes.revendas)}, itens ${sinalG(rel.partes.itens)}${boss ? `, boss ${sinalG(rel.partes.boss)}` : ''}.`);
+    L.push(`Caixa do dia ${sinalG(rel.caixaG)}: vendeu ${mov.pokemon.nV} pokémon e ${mov.item.nV} lotes de itens, comprou ${mov.pokemon.nC} pokémon e ${mov.item.nC} lotes de itens${caixaG < 0 && lucroG >= 0 ? ' (o caixa negativo é estoque comprado que ainda vai ser vendido)' : ''}.`);
+    if (rel.melhores.length) L.push(`Acertos: ${rel.melhores.map((x) => `${x.nome} ${sinalG(x.lucroG)}`).join('; ')}.`);
+    if (rel.piores.length) L.push(`Erros: ${rel.piores.map((x) => `${x.nome} ${sinalG(x.lucroG)}`).join('; ')}.`);
+    if (boss) L.push(`Boss: ${fmt(boss.lutas)} lutas (${Math.round(boss.vit / boss.lutas * 100)}% de vitória, ${boss.porHora}/h), ${boss.drops} drops, ${sinalG(boss.lucro)} contando ${fmt(boss.pendente)} 🔮 ainda à venda.`);
+    if (parados) L.push(`Vitrine: ${parados} pokémon anunciados há mais de 48 h.`);
+    if (erros.length || vetos) L.push(`Falhas: ${erros.map((e) => `${e.n}× ${e.msg}`).join('; ') || 'nenhuma'}${vetos ? `; o Claude vetou ${vetos} compra(s)` : ''}.`);
+    if (api) L.push(`API do Claude: US$ ${api.usd.toFixed(2)} em ${api.chamadas} chamadas${CFG.usdPorGema > 0 ? ` — o dia lucrou US$ ${(lucroG * CFG.usdPorGema).toFixed(2)}, ${lucroG * CFG.usdPorGema > api.usd ? 'se pagou' : 'não se pagou'}` : ''}.`);
+    rel.linhas = L;
+    return rel;
+  }
+  let fechando = false;
+  async function fecharDia(dia, atrasado = false) {
+    if (fechando) return; fechando = true;
+    try {
+      if (M.ws && M.ws.readyState === 1) { try { await conferirLucroReal(true); } catch {} }
+      const rel = compilarParecer(dia); rel.atrasado = atrasado || undefined;
+      const ant = (E.relatorios || []).find((r) => r.dia < dia);
+      rel.ajustesAnteriores = ant?.ajustes?.length ? ant.ajustes : undefined;
+      rel.ajustes = aprender(rel);
+      if (rel.ajustes.length) rel.linhas.push(`Ajustes para amanhã: ${rel.ajustes.map((a) => `${a.rot} ${a.de} → ${a.para}`).join('; ')}.`);
+      else rel.linhas.push('Ajustes: nenhum — os limites atuais estão dando resultado.');
+      E.relatorios = [rel, ...(E.relatorios || []).filter((r) => r.dia !== dia)].sort((a, z) => (a.dia < z.dia ? 1 : -1)).slice(0, 21);
+      persistir();
+      log(`📋 parecer do dia ${dia.split('-').reverse().slice(0, 2).join('/')}: ${sinalG(rel.lucroG)}${rel.ajustes.length ? `, ${rel.ajustes.length} ajuste(s)` : ''}`, 'ok');
+      notificar(`Parecer do dia: ${sinalG(rel.lucroG)}`);
+    } finally { fechando = false; }
+  }
+  function agendaParecer() {
+    if (!E.real) return;                                             // sem o histórico do jogo não há o que fechar
+    const agBR = new Date(Date.now() - 3 * 3600_000), d = hoje(), ontem = diaDe(Date.now() - 86400_000);
+    E.relatoriosDesde ??= ontem;
+    const tem = (x) => (E.relatorios || []).some((r) => r.dia === x && !r.parcial);
+    if (agBR.getUTCHours() === 23 && agBR.getUTCMinutes() >= 50 && !tem(d)) return fecharDia(d);
+    if (ontem >= E.relatoriosDesde && !tem(ontem)) return fecharDia(ontem, true);
+  }
+  setInterval(() => { try { agendaParecer(); } catch (e) { console.warn('[PKApp] parecer', e); } }, 5 * 60_000);
+  setTimeout(() => { try { agendaParecer(); } catch {} }, 90_000);
+
   // ---- ponte com o app de PC (várias contas): resumo da conta, contas irmãs e papel de cada conta ----
   const PAPEIS = {
     tudo: { compras: true, sniperPk: true, sniperIt: true, casas: true, boss: true },
@@ -5922,8 +6097,25 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
         casas: Object.values(E.postos || {}).filter(Boolean).map((p) => ({ nome: p.nome, nv: p.xp ? nivelDeXp(p.xp) : null, bot: !!p.bot, shiny: !!p.shiny })),
         api: (() => { try { const x = custoApiVsLucro(1); return { usd: x.usd, chamadas: x.chamadas, lucroG: x.lucroG, empate: x.empate }; } catch { return null; } })(),
         ideias: M.estudo?.ideias || [], auditoria: M.auditoria?.achados || [], log: M.log.slice(0, 25).map((l) => ({ t: l.t, msg: l.msg, tipo: l.tipo })),
+        hoje: (() => { try { const r = compilarParecer(hoje(), true); return { lucroG: r.lucroG, caixaG: r.caixaG, partes: r.partes, vendas: r.mov.pokemon.nV + r.mov.item.nV, compras: r.mov.pokemon.nC + r.mov.item.nC, revendas: r.revendas, prejuizos: r.prejuizos, decisoes: r.decisoes, erros: r.porCat.erro || 0, parados: r.parados }; } catch { return null; } })(),
+        parecer: (() => { const r = (E.relatorios || []).find((x) => !x.parcial); return r ? { dia: r.dia, em: r.em, lucroG: r.lucroG, linhas: r.linhas, ajustes: r.ajustes || [], atrasado: !!r.atrasado } : null; })(),
+        decisoes: DEC.slice(0, 60), painelOculto: !!ler('pkapp.painelOculto', false),
+        aprendizado: { hist: (E.aprendizado?.hist || []).slice(0, 10), itensEvitar: Object.entries(E.aprendizado?.itensEvitar || {}).filter(([, t]) => t > Date.now()).map(([id, t]) => ({ id, nome: E.nomesItens?.[id] || id, ate: t })) },
       }));
     },
+    // controles vindos da página do app de PC (o mesmo que os botões do painel)
+    controle(acao, valor) {
+      if (acao === 'ligar') { const on = !!valor; if (on !== M.ligado) { M.ligado = on; log(on ? '▶ app LIGADO' : '⏹ app PARADO'); if (on) loop(); } }
+      else if (acao === 'simulacao') { const on = !!valor; if (on !== !!CFG.simulacao) { CFG.simulacao = on; salvarCfg(); log(on ? '🧪 modo SIMULAÇÃO' : '⚡ modo REAL'); } }
+      else if (acao === 'mod') { const k = valor && valor.k; if (!Object.prototype.hasOwnProperty.call(CFG.mod, k)) return false; CFG.mod[k] = !!valor.on; salvarCfg(); log(`⚙️ ${k}: ${CFG.mod[k] ? 'ligado' : 'desligado'} (app de PC)`); }
+      else if (acao === 'painel') { const ver = !!valor; salvar('pkapp.painelOculto', !ver); if (W) W.style.display = ver ? '' : 'none'; }
+      else if (acao === 'fecharDia') { fecharDia(valor && /^\d{4}-\d\d-\d\d$/.test(valor) ? valor : hoje()); }
+      else return false;
+      pintar(); return true;
+    },
+    relatorios: () => JSON.parse(JSON.stringify((E.relatorios || []).filter((r) => !r.parcial))),
+    parecerHoje: () => JSON.parse(JSON.stringify(compilarParecer(hoje(), true))),
+    decisoes: (cat) => DEC.filter((x) => !cat || x.cat === cat).slice(0, 300),
     definirIrmas(lista) {
       M.irmas = { ids: new Set((lista || []).map((x) => x && x.vendedorId).filter((x) => x != null).map(String)), nicks: new Set((lista || []).map((x) => x && x.nick).filter(Boolean).map((x) => String(x).toLowerCase())) };
       return { ids: M.irmas.ids.size, nicks: M.irmas.nicks.size };
@@ -5935,7 +6127,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     papeis: () => Object.keys(PAPEIS),
   };
   try { Object.defineProperty(PAGINA, '__PKAPP_PONTE', { value: ponteDesktop, configurable: true }); } catch {}
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, estudoToken, resultadoBossDia, exportarCfg, importarCfg, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: VERSAO_APP }, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, estudoToken, resultadoBossDia, exportarCfg, importarCfg, compilarParecer, fecharDia, aprender, DEC, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: VERSAO_APP }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));

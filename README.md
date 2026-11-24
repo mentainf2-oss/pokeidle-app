@@ -4,7 +4,7 @@ Userscript do Tampermonkey para o [PokeIdle](https://pokeidle.io): lista de comp
 
 ## App de PC (sem Tampermonkey)
 
-A pasta [desktop/](desktop/) tem o app de PC: o PokeIdle App rodando em até 4 contas, com a aba Lucro, contas irmãs e papéis. Baseado no Idleterino (MIT). Veja [desktop/README.md](desktop/README.md).
+A pasta [desktop/](desktop/) tem o app de PC: o PokeIdle App rodando em até 4 contas, com a aba Painel (resultado do dia, parecer diário, catálogo de decisões e controle das contas), contas irmãs e papéis. Baseado no Idleterino (MIT). Veja [desktop/README.md](desktop/README.md).
 
 ## Instalar (Tampermonkey)
 

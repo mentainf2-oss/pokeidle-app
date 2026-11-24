@@ -10,7 +10,7 @@ const PAPEIS = ['tudo', 'boss', 'casas', 'mercado'];
 
 module.exports = function pkappMain({ ipcMain, views, config, send, ctx, app, path, fs, accounts }) {
   const arq = () => path.join(app.getPath('userData'), 'pkapp.json');
-  let cfg = { githubToken: '', papeis: {}, avisos: true };
+  let cfg = { githubToken: '', papeis: {}, avisos: true, painelNoJogo: false, parecerAvisado: {} };
   try { cfg = { ...cfg, ...JSON.parse(fs.readFileSync(arq(), 'utf8')) }; } catch {}
   const salvar = () => { try { fs.writeFileSync(arq(), JSON.stringify(cfg, null, 2)); } catch {} };
 
@@ -56,6 +56,26 @@ module.exports = function pkappMain({ ipcMain, views, config, send, ctx, app, pa
     if (r.log.length) vistos.set(id, `${r.log[0].t}|${r.log[0].msg}`);
     if (ult === undefined) return;                       // primeira leitura: só marca onde parou
     for (const l of novos.reverse()) for (const [re, titulo] of AVISOS) if (re.test(l.msg)) { ctx.alert('pkapp', `${titulo} — ${r.nick || nomeDa(id)}`, l.msg.slice(0, 300), `${id}|${l.msg.slice(0, 60)}`); break; }
+  }
+
+  // parecer do dia: avisa uma vez por conta e por dia (PC, celular e Discord, pelos canais de Ajustes → Avisos)
+  function avisarParecer(id, r) {
+    const p = r.parecer; if (!p || !ctx.alert) return;
+    cfg.parecerAvisado = cfg.parecerAvisado || {};
+    if (cfg.parecerAvisado[id] === p.dia) return;
+    cfg.parecerAvisado[id] = p.dia; salvar();
+    if (!cfg.avisos || Date.now() - (p.em || 0) > 12 * 3600_000) return;      // parecer antigo: só marca
+    const dia = String(p.dia).split('-').reverse().slice(0, 2).join('/');
+    ctx.alert('pkapp', `Parecer do dia ${dia} — ${r.nick || nomeDa(id)}`, (p.linhas || []).join('\n').slice(0, 1800), `${id}|parecer|${p.dia}`);
+  }
+  // painel dentro do jogo: escondido por padrão (a página do app mostra tudo); dá para mostrar em Controle
+  async function aplicarPainel(id, r) {
+    if (!!r.painelOculto !== !cfg.painelNoJogo) return;
+    await ponte(id, 'controle', 'painel', !!cfg.painelNoJogo);
+  }
+  async function ponte(id, metodo, ...args) {
+    const v = views.get(id); if (!v || v.webContents.isDestroyed()) return null;
+    return v.webContents.executeJavaScript(`window.__PKAPP_PONTE ? window.__PKAPP_PONTE[${JSON.stringify(metodo)}](...${JSON.stringify(args)}) : null`).catch(() => null);
   }
 
   // contas irmãs: cada conta recebe a lista das OUTRAS (id de vendedor e nick)
@@ -104,7 +124,9 @@ module.exports = function pkappMain({ ipcMain, views, config, send, ctx, app, pa
       d7: { recC: soma((r) => r.real && r.real.d7.gold.recebido), gasC: soma((r) => r.real && r.real.d7.gold.gasto), recG: soma((r) => r.real && r.real.d7.orb.recebido), gasG: soma((r) => r.real && r.real.d7.orb.gasto) },
       revendasC: soma((r) => r.revendas7 && r.revendas7.lucroC), bossG: soma((r) => r.boss && r.boss.lucro), cambio: (contas.find((c) => c.r && c.r.cambio) || { r: {} }).r.cambio || null,
     };
-    return { contas, total, sugestao: sugerir(), papeis: PAPEIS, temToken: !!cfg.githubToken, avisos: !!cfg.avisos };
+    total.hoje = { lucroG: soma((r) => r.hoje && r.hoje.lucroG), caixaG: soma((r) => r.hoje && r.hoje.caixaG), vendas: soma((r) => r.hoje && r.hoje.vendas), compras: soma((r) => r.hoje && r.hoje.compras),
+      revendas: soma((r) => r.hoje && r.hoje.revendas), prejuizos: soma((r) => r.hoje && r.hoje.prejuizos), decisoes: soma((r) => r.hoje && r.hoje.decisoes), erros: soma((r) => r.hoje && r.hoje.erros), apiUsd: soma((r) => r.api && r.api.usd) };
+    return { contas, total, sugestao: sugerir(), papeis: PAPEIS, temToken: !!cfg.githubToken, avisos: !!cfg.avisos, painelNoJogo: !!cfg.painelNoJogo };
   }
 
   ipcMain.handle('poke:pkapp:estado', () => estado());
@@ -117,9 +139,30 @@ module.exports = function pkappMain({ ipcMain, views, config, send, ctx, app, pa
   });
   ipcMain.handle('poke:pkapp:token', (_e, tok) => { cfg.githubToken = String(tok || '').trim().slice(0, 200); salvar(); return estado(); });
   ipcMain.handle('poke:pkapp:avisos', (_e, on) => { cfg.avisos = !!on; salvar(); return estado(); });
+  ipcMain.handle('poke:pkapp:painel', async (_e, on) => { cfg.painelNoJogo = !!on; salvar(); for (const [id, x] of resumos) await aplicarPainel(id, x.r); return estado(); });
+  const CONTROLES = new Set(['ligar', 'simulacao', 'mod', 'fecharDia']);
+  ipcMain.handle('poke:pkapp:controle', async (_e, id, acao, valor) => {
+    if (!CONTROLES.has(acao)) return estado();
+    if (acao === 'mod' && !(valor && typeof valor.k === 'string')) return estado();
+    await ponte(id, 'controle', acao, valor); await lerConta(id); return estado();
+  });
+  // parecer: os dias fechados de cada conta e o dia de hoje até agora
+  ipcMain.handle('poke:pkapp:relatorios', async () => {
+    const out = [];
+    for (const a of accounts()) {
+      const rels = await ponte(a.id, 'relatorios'), hojeP = await ponte(a.id, 'parecerHoje'), x = resumos.get(a.id);
+      out.push({ id: a.id, nome: (x && x.r && x.r.nick) || a.name, relatorios: rels || [], hoje: hojeP, aprendizado: x && x.r && x.r.aprendizado });
+    }
+    return out;
+  });
+  ipcMain.handle('poke:pkapp:decisoes', async (_e, cat) => {
+    const out = [];
+    for (const a of accounts()) { const L = await ponte(a.id, 'decisoes', cat || null), x = resumos.get(a.id); for (const d of L || []) out.push({ conta: (x && x.r && x.r.nick) || a.name, ...d }); }
+    return out.sort((a, z) => z.em - a.em).slice(0, 600);
+  });
 
   async function tick() {
-    for (const a of accounts()) { const r = await lerConta(a.id); if (r) avisar(a.id, r); }
+    for (const a of accounts()) { const r = await lerConta(a.id); if (r) { avisar(a.id, r); avisarParecer(a.id, r); await aplicarPainel(a.id, r); } }
     await avisarIrmas();
     await aplicarPapeis();
     send('pkapp:estado', estado());
