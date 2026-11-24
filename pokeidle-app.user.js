@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.29
+// @version      5.30
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -20,7 +20,7 @@
  *               Também usa o "Exportar planilha" do jogo de hora em hora e tira um retrato dos itens. Base local de 14 dias.
  *  🛒 Compras   sua lista: o que comprar, filtros e faixa de preço, quantidade e o que fazer depois.
  *  🎯 Pokémon   sniper de pokémon: anúncios novos que batem com a lista ou estão muito abaixo do mercado (Coins e/ou Gemas).
- *  💠 Itens     sniper de itens: flip de fragmentos, peças de TM, Boss Token e tickets, em cada moeda ou cruzando Coins→Gemas.
+ *  🔮 Itens     sniper de itens: flip de fragmentos, peças de TM, Boss Token e tickets, em cada moeda ou cruzando Coins→Gemas.
  *  🏠 Casas     compra barato, upa nas casas, vende no nível que mais rende por hora.
  *  👑 Boss      rotação dos lendários, valor esperado por token, compra de tokens, série automática e venda dos drops.
  *  🧠 Claude    a cada hora manda o resumo para a API do Claude, que ajusta a estratégia dentro dos seus limites.
@@ -77,8 +77,8 @@
 
     // boss
     bossRegiao: 'hoenn', bossKey: 'rayquaza', bossModo: 'avisar',   // 'desligado' | 'avisar' | 'auto'
-    bossTokensMin: 20, tokenEstoqueAlvo: 150, tokenPrecoMax: 0, tokenPrecoMaxGemas: 0, tokenAutoCompra: true, tokenLucroMinGemas: 2,   // teto do token em Coins e em 💠 (0 = automático); vale para TODA compra de token
-    bossVenderDrops: true, bossEvMinPct: 0.15, bossSegPorLuta: 0, bossTokenMoeda: 'gold',
+    bossTokensMin: 20, tokenEstoqueAlvo: 150, tokenPrecoMax: 0, tokenPrecoMaxGemas: 0, tokenAutoCompra: true, tokenLucroMinGemas: 2,   // teto do token em Coins e em 🔮 (0 = automático); vale para TODA compra de token
+    bossVenderDrops: true, bossAnunciosPorItem: 3, bossDropPisoMedia: 0.8, bossEvMinPct: 0.15, bossSegPorLuta: 0, bossTokenMoeda: 'gold',
     // investir
     meuAtaque: 0, nivelTreinador: 0, investPaybackDias: 7, fatiaDemanda: 0.25,
     // prey
@@ -118,7 +118,7 @@
     regras: [], postos: {}, ultimaPlanilhaHora: 0, boss: { lutas: 0, vitorias: 0, derrotas: 0, duracoes: [], drops: {} }, prey: { dia: null, gasto: 0, hist: [] }, estudoInicio: null, estudoConcluido: false, recomendacoes: [], custosItens: {}, pendentes: {}, ops: [], claudeHist: [], nomesItens: {}, huntSlug: null,
   }, ler('pkapp.estado', {}));
   const persistir = () => salvar('pkapp.estado', E);
-  if ((CFG.cfgVersao || 0) < 52) {                                // v5.2: tokens pelo lucro por boss (pedido do jogador: ≥ 2 💠), nas duas moedas
+  if ((CFG.cfgVersao || 0) < 52) {                                // v5.2: tokens pelo lucro por boss (pedido do jogador: ≥ 2 🔮), nas duas moedas
     CFG.tokenPrecoMaxGemas = 0; CFG.tokenAutoCompra = true; CFG.tokenLucroMinGemas = CFG.tokenLucroMinGemas || 2; CFG.bossTokenMoeda = 'orb';   // em Gemas, como pedido (Coins ficam para as casas; dá para escolher "Coins e Gemas" na aba Boss)
     CFG.cfgVersao = Math.max(CFG.cfgVersao || 0, 52); salvarCfg();
   }
@@ -127,7 +127,7 @@
     for (const r of E.regras) if (r.origem === 'claude' && Number(r.itemId) === 70000 && !r.ativa && (r.compradas || 0) < r.qtd) { r.ativa = true; r.depois = 'guardar'; }
     CFG.cfgVersao = 50; salvarCfg(); persistir();
   }
-  if (!CFG.migShiny521) {                                         // v5.21: o jogador pediu shiny nas casas, até 5k 💠, só os muito vendidos
+  if (!CFG.migShiny521) {                                         // v5.21: o jogador pediu shiny nas casas, até 5k 🔮, só os muito vendidos
     CFG.casaShiny = true; CFG.casaShinyPrecoMax = 5000; CFG.casaShinyVendasMin = CFG.casaShinyVendasMin || 40; CFG.migShiny521 = true; salvarCfg();
   }
   if (!CFG.migSemLimite526) {                                     // v5.26: o jogador pediu sem limite de quantidade (o lucro e a conferência decidem)
@@ -136,6 +136,9 @@
   if (!CFG.migSegBoss528) {                                       // v5.28: o jogador faz ~4.440 lutas/dia no Rayquaza (4× fraco a gelo) ≈ 19,5 s por luta
     if (!(CFG.bossSegPorLuta > 0) && CFG.bossKey === 'rayquaza') CFG.bossSegPorLuta = 19.5;
     CFG.migSegBoss528 = true; salvarCfg();
+  }
+  if (!CFG.migBoss530) {                                          // v5.30: o jogador pediu para fazer boss (série automática) e vender cada drop logo
+    CFG.mod.boss = true; CFG.bossModo = 'auto'; CFG.bossVenderDrops = true; CFG.migBoss530 = true; salvarCfg();
   }
   if (!E.casaContaReal) { E.casaComprasHoje = null; E.casaShinyHoje = null; E.casaContaReal = true; }   // v5.25: a conta antiga somava sorteios perdidos
   for (const r of E.regras || []) r.reservadas = 0;                 // compras agendadas não sobrevivem a recarregar a página
@@ -149,8 +152,8 @@
     return f1 * 0.87 + f2 * 0.90 + f3 * 0.925;
   }
   const precoParaLiquido = (liq, moeda, tipo) => { let p = liq / (1 - COMISSAO); for (let i = 0; i < 20; i++) p += (liq - liquidoVenda(p, moeda, tipo)) / 0.9; return Math.ceil(p); };
-  const unid = (moeda) => (moeda === 'orb' ? ' 💠' : '');
-  const curtoM = (v, moeda) => (moeda === 'orb' ? fmt(v) + ' 💠' : curto(v));
+  const unid = (moeda) => (moeda === 'orb' ? ' 🔮' : '');
+  const curtoM = (v, moeda) => (moeda === 'orb' ? fmt(v) + ' 🔮' : curto(v));
   const ITEM = { TOKEN: 70000, ZFRAG: 59194, AOE: 40530, MEGA: 70014, MEGASH: 70015, SAFARI: 70095 };
   const xpDoNivel = (L) => Math.round(50 / 3 * (L ** 3 - 6 * L * L + 17 * L - 12));
   const nivelDeXp = (xp) => { let L = Math.max(1, Math.floor(Math.cbrt(xp * 3 / 50))); while (xpDoNivel(L + 1) <= xp) L++; while (L > 1 && xpDoNivel(L) > xp) L--; return L; };
@@ -485,7 +488,7 @@
     E.gemasHoje = Math.round(real.orb + andamento.orb); E.gastoHoje = Math.round(real.gold + andamento.gold);
     persistir();
     if (Math.abs(antes.orb - E.gemasHoje) >= 10 || Math.abs(antes.gold - E.gastoHoje) >= 1e6)
-      log(`🧾 orçamento do dia acertado pelo histórico: 💠 ${fmt(antes.orb)} → ${fmt(E.gemasHoje)} · Coins ${curto(antes.gold)} → ${curto(E.gastoHoje)} (${E.gemasHoje < antes.orb || E.gastoHoje < antes.gold ? 'a diferença eram sorteios perdidos, que não custaram nada' : 'inclui compras feitas fora do app'})`, 'ok');
+      log(`🧾 orçamento do dia acertado pelo histórico: 🔮 ${fmt(antes.orb)} → ${fmt(E.gemasHoje)} · Coins ${curto(antes.gold)} → ${curto(E.gastoHoje)} (${E.gemasHoje < antes.orb || E.gastoHoje < antes.gold ? 'a diferença eram sorteios perdidos, que não custaram nada' : 'inclui compras feitas fora do app'})`, 'ok');
   }
   // o que o app comprou e já vendeu: casa a venda (histórico) com a compra (registro do app ou histórico) pelo id do pokémon
   function revendasDoApp(dias = 7) {
@@ -639,7 +642,7 @@
     if (shiny && b.length >= 4) { const base = mediana(b.map(limpo)); return { preco: base * alvo.total, base, n: b.length, como: 'espécie (todos os níveis)', fatores: alvo }; }
     return null;
   }
-  /* ============================== 💠 PRECIFICADOR EM GEMAS ==============================
+  /* ============================== 🔮 PRECIFICADOR EM GEMAS ==============================
    * Motor de preço do "Precificador de Pokémon" (https://briaoale.github.io/precificador-pokemon/),
    * MIT License, Copyright (c) 2026 briaoAle — copiado aqui (pve-power, nota, central, pve-pricing, ficha) e adaptado.
    * Só os DADOS vêm do site (precos.json e o catálogo de espécies, lidos como JSON); nenhum código remoto roda no jogo.
@@ -939,8 +942,8 @@
         const i = espTxt.indexOf('['), j = espTxt.lastIndexOf(']');           // o catálogo é JS: lê só a lista, como JSON
         preparar(JSON.parse(precosTxt), JSON.parse(espTxt.slice(i, j + 1)));
         await prepararFits();
-        log(`💠 precificador: ${fmt(S.rows.length)} vendas em Gemas (lidas em ${new Date(S.precos.geradoEm).toLocaleString('pt-BR')})`, 'ok');
-      } catch (e) { S.erro = e.message; log('💠 precificador: ' + e.message, 'erro'); }
+        log(`🔮 precificador: ${fmt(S.rows.length)} vendas em Gemas (lidas em ${new Date(S.precos.geradoEm).toLocaleString('pt-BR')})`, 'ok');
+      } catch (e) { S.erro = e.message; log('🔮 precificador: ' + e.message, 'erro'); }
       finally { S.carregando = false; }
     }
     const lerCache = () => new Promise((res) => { try { if (!DB.db?.objectStoreNames.contains('cache')) return res(null); const r = DB.db.transaction('cache').objectStore('cache').get('precificador'); r.onsuccess = () => res(r.result || null); r.onerror = () => res(null); } catch { res(null); } });
@@ -981,7 +984,7 @@
   function cambioImplicito() {
     if (CFG.cambioCoinsPorGema > 0) return { taxa: CFG.cambioCoinsPorGema, como: 'manual' };
     const taxas = [];
-    // só itens que valem pelo menos 50 💠 (abaixo disso o preço mínimo em Gemas distorce), pesados pelo volume vendido em Gemas
+    // só itens que valem pelo menos 50 🔮 (abaixo disso o preço mínimo em Gemas distorce), pesados pelo volume vendido em Gemas
     let soma = 0, peso = 0, n = 0;
     for (const id of Object.keys(M.medias)) { const g = M.medias[id]?.gold, o = M.medias[id]?.orb; if (g?.media >= 50_000_000 && o?.media >= 50 && g.unidades >= 10 && o.unidades >= 10 && !/Stone$/i.test(E.nomesItens[id] || '')) { soma += Math.log(g.media / o.media) * o.unidades; peso += o.unidades; n++; } }
     if (n) { const taxa = Math.exp(soma / peso); if (!E.cambioUltimo || Date.now() - E.cambioUltimo.em > 10 * 60_000) { E.cambioUltimo = { em: Date.now(), taxa }; } return { taxa, como: `${n} itens negociados nas duas moedas` }; }
@@ -1079,11 +1082,12 @@
     if (xP5) ideias.push(`P5 vale ×${xP5.toFixed(1)} em Coins${atrib.pot.gemas[5]?.x ? ` e ×${atrib.pot.gemas[5].x.toFixed(1)} em Gemas` : ''}; P2–P4 ${xP4 && xP4 < 1.15 ? 'quase não mudam o preço' : `chegam a ×${(xP4 || 1).toFixed(2)}`}. Snipe de P5 compensa até perto de ×${(xP5 * 0.6).toFixed(1)} o preço de um P1.`);
     if (xN40 || xN42) ideias.push(`Nota manda no preço: 3,8 ×${(atrib.nota.coins['3,8']?.x || 1).toFixed(2)}, 3,9 ×${(atrib.nota.coins['3,9']?.x || 1).toFixed(2)}, 4,0–4,1 ×${(xN40 || 1).toFixed(1)}, 4,2+ ×${(xN42 || 1).toFixed(1)} (Coins). IV sozinho pesa pouco depois da nota.`);
     const alto = niveis[4];
-    if (alto.coins && alto.gemasEmCoins) ideias.push(alto.gemasEmCoins > alto.coins * 1.3 ? `Nv 800+ normal vende ~${fmt(Math.round(alto.gemas))} 💠 (~${curto(alto.gemasEmCoins)}) contra ~${curto(alto.coins)} em Coins: alto nível rende mais em Gemas.` : `Nv 800+: Coins (~${curto(alto.coins)}) e Gemas (~${curto(alto.gemasEmCoins)}) pagam parecido.`);
+    if (alto.coins && alto.gemasEmCoins) ideias.push(alto.gemasEmCoins > alto.coins * 1.3 ? `Nv 800+ normal vende ~${fmt(Math.round(alto.gemas))} 🔮 (~${curto(alto.gemasEmCoins)}) contra ~${curto(alto.coins)} em Coins: alto nível rende mais em Gemas.` : `Nv 800+: Coins (~${curto(alto.coins)}) e Gemas (~${curto(alto.gemasEmCoins)}) pagam parecido.`);
     const rap = especies.slice(0, 5).map((e) => `${e.nome} (~${Math.round(e.porDia)}/dia)`).join(', ');
     if (rap) ideias.push(`Mais vendidos (giram mais rápido): ${rap}.`);
     const upa = especies.filter((e) => e.ganho > 0 && e.porDia >= CFG.estudoVendasDiaMin).sort((a, z) => z.ganho - a.ganho).slice(0, 4);
     if (upa.length) ideias.push(`Melhor para upar e vender (com volume): ${upa.map((e) => `${e.nome} ${curto(e.baixo)} → ${curto(e.alto)}`).join(', ')}.`);
+    try { const t2 = estudoToken(); if (t2.evBom) { const a6 = t2.precos.find((x) => x.t === 6); ideias.push(`Boss token: no pior dia bom cada token rende ~${t2.evBom.toFixed(1)} 🔮; a 6 🔮 ${a6.lucro > 0 ? `ainda dá +${a6.lucro.toFixed(1)} 🔮 por token (${Math.round(a6.pct * 100)}%)` : `dá ${a6.lucro.toFixed(1)} 🔮 por token (prejuízo)`}. Teto sugerido ${t2.tetoSugerido.toFixed(1)} 🔮.`); } } catch {}
     for (const [k, e] of Object.entries(porOrigem)) if (e.n >= 3) ideias.push(`Suas revendas via ${k}: ${e.n} em 14 dias, lucro ${curto(e.lucro)}, ~${mediana(e.horas).toFixed(0)} h da compra à venda.`);
     M.estudo = { em: Date.now(), dias, diasO, n: b.length, nO: o.length, atrib, niveis, especies, meus, porOrigem, evitar, preferir, variacao, ideias, cb };
     E.estudoDecisoes = { em: Date.now(), evitar, preferir }; persistir();
@@ -1109,10 +1113,10 @@
         <p style="margin:2px 0"><b class="bom">Preferir:</b> ${Object.entries(s2.preferir).map(([n, m]) => `${esc(n)} <span class="mudo">(${esc(m)})</span>`).join(' · ') || '<span class="mudo">—</span>'}</p>
         <p style="margin:2px 0"><b class="ruim">Evitar:</b> ${Object.entries(s2.evitar).map(([n, m]) => `${esc(n)} <span class="mudo">(${esc(m)})</span>`).join(' · ') || '<span class="mudo">nada por enquanto</span>'}</p>
         <p class="mudo" style="margin:2px 0">Sniper em Coins só compra espécie que vende ≥ ${CFG.estudoVendasDiaMin}/dia.</p></div>
-      <div class="cart"><h4>⚖️ Quanto vale cada atributo (× da mesma espécie e faixa de nível)</h4><table><tr><th></th><th class="num">Coins</th><th class="num">💠 normal</th><th class="num">✨ shiny</th></tr>
+      <div class="cart"><h4>⚖️ Quanto vale cada atributo (× da mesma espécie e faixa de nível)</h4><table><tr><th></th><th class="num">Coins</th><th class="num">🔮 normal</th><th class="num">✨ shiny</th></tr>
         ${linhaAtr('P', 'pot', ['1', '2', '3', '4', '5'])}${linhaAtr('Nota ', 'nota', ['< 3,7', '3,7', '3,8', '3,9', '4,0–4,1', '4,2+'])}${linhaAtr('IV ', 'iv', ['< 100', '100–119', '120–139', '140–159', '160+'])}</table>
         <p class="mudo" style="margin:4px 0 0">Cada linha compara só com a mesma espécie na mesma faixa de nível. O IV aparece pouco porque a nota já carrega o IV.</p></div>
-      <div class="cart"><h4>📈 Preço por nível: Coins x Gemas</h4><table><tr><th>Nível</th><th class="num">Coins</th><th class="num">💠 normal</th><th class="num">💠 em Coins</th><th class="num">✨ shiny</th></tr>
+      <div class="cart"><h4>📈 Preço por nível: Coins x Gemas</h4><table><tr><th>Nível</th><th class="num">Coins</th><th class="num">🔮 normal</th><th class="num">🔮 em Coins</th><th class="num">✨ shiny</th></tr>
         ${s2.niveis.map((l) => `<tr class="${l.gemasEmCoins && l.coins && l.gemasEmCoins > l.coins * 1.2 ? 'bom' : ''}"><td>Nv ${l.faixa}</td><td class="num">${l.coins ? curto(l.coins) : '—'} <span class="mudo">(${l.nC})</span></td><td class="num">${l.gemas ? fmt(Math.round(l.gemas)) : '—'} <span class="mudo">(${l.nG})</span></td><td class="num">${l.gemasEmCoins ? curto(l.gemasEmCoins) : '—'}</td><td class="num">${l.shiny ? fmt(Math.round(l.shiny)) : '—'} <span class="mudo">(${l.nS})</span></td></tr>`).join('')}</table></div>
       <div class="cart"><h4>⚡ O que vende rápido (Coins)</h4><table><tr><th>Espécie</th><th class="num">Vendas/dia</th><th class="num">Nv &lt; 150</th><th class="num">Nv 300+</th><th class="num">Upar rende</th><th class="num">P5</th></tr>
         ${s2.especies.slice(0, 15).map((e) => `<tr class="${s2.evitar[e.nome] ? 'ruim' : s2.preferir[e.nome] ? 'bom' : ''}"><td>${esc(e.nome)}</td><td class="num">${Math.round(e.porDia)}</td><td class="num">${e.baixo ? curto(e.baixo) : '—'}</td><td class="num">${e.alto ? curto(e.alto) : '—'} <span class="mudo">(${e.nAlto})</span></td><td class="num">${e.ganho != null ? curto(e.ganho) : '—'}</td><td class="num">${e.p5 ? curto(e.p5) : '—'}</td></tr>`).join('')}</table></div>
@@ -1135,12 +1139,12 @@
     const fx = R.faixas.map((f) => `<tr><td>Nv ${f.a}${f.z < 1e8 ? '–' + f.z : '+'}</td><td class="num">${f.medS ? fmt(Math.round(f.medS)) : '—'} <span class="mudo">(${f.nS})</span></td><td class="num">${f.medN ? fmt(Math.round(f.medN)) : '—'} <span class="mudo">(${f.nN})</span></td><td class="num">${f.medS && f.medN ? '×' + Math.round(f.medS / f.medN) : '—'}</td></tr>`).join('');
     const top = R.familias.filter((f) => f.ganho > 0).slice(0, 12).map((f) => {
       const hs = h(Math.max(100, f.nvBaixo), f.nvAlto), liq = liquidoVenda(f.alto, 'orb', 'pokemon') - f.baixo, porH = hs ? liq / Math.max(0.5, hs) : null;
-      return `<tr class="${liq > 0 ? 'bom' : ''}"><td>${esc(f.nome)} <span class="mudo">(${f.vendas})</span></td><td class="num">${fmt(Math.round(f.baixo))}<br><span class="mudo">Nv ~${f.nvBaixo}</span></td><td class="num">${fmt(Math.round(f.alto))}<br><span class="mudo">Nv ~${f.nvAlto}</span></td><td class="num">${fmt(Math.round(liq))} 💠${vg ? `<br><span class="mudo">~${curto(liq * vg)}</span>` : ''}</td><td class="num">${hs ? hs.toFixed(0) + ' h' : '—'}<br><span class="mudo">${porH ? fmt(Math.round(porH)) + ' 💠/h' : ''}</span></td></tr>`;
+      return `<tr class="${liq > 0 ? 'bom' : ''}"><td>${esc(f.nome)} <span class="mudo">(${f.vendas})</span></td><td class="num">${fmt(Math.round(f.baixo))}<br><span class="mudo">Nv ~${f.nvBaixo}</span></td><td class="num">${fmt(Math.round(f.alto))}<br><span class="mudo">Nv ~${f.nvAlto}</span></td><td class="num">${fmt(Math.round(liq))} 🔮${vg ? `<br><span class="mudo">~${curto(liq * vg)}</span>` : ''}</td><td class="num">${hs ? hs.toFixed(0) + ' h' : '—'}<br><span class="mudo">${porH ? fmt(Math.round(porH)) + ' 🔮/h' : ''}</span></td></tr>`;
     }).join('');
     const pos = R.familias.filter((f) => f.ganho > 0).length;
     return `<div class="kv" style="margin:0 0 6px"><span>Vendas de shiny</span><b>${fmt(R.nShiny)} (~${fmt(Math.round(R.nShiny / R.dias))}/dia)</b><span>Famílias que valem mais alto</span><b>${pos} de ${R.familias.length}</b>
-      <span>Casa com shiny</span><b class="${CFG.casaShiny ? 'bom' : 'mudo'}">${CFG.casaShiny ? `ligada · até ${fmt(CFG.casaShinyPrecoMax)} 💠 (limite do dia ${fmt(CFG.gemasMaxPorDia)}), lucro ≥ ${fmt(CFG.casaShinyLucroMin)} 💠, ${CFG.casaShinyDia > 0 ? CFG.casaShinyDia + '/dia' : 'sem limite por dia'}` : 'desligada (Config → Casas)'}</b></div>
-      <table><tr><th>Nível</th><th class="num">✨ shiny 💠</th><th class="num">normal 💠</th><th class="num">Shiny vale</th></tr>${fx}</table>
+      <span>Casa com shiny</span><b class="${CFG.casaShiny ? 'bom' : 'mudo'}">${CFG.casaShiny ? `ligada · até ${fmt(CFG.casaShinyPrecoMax)} 🔮 (limite do dia ${fmt(CFG.gemasMaxPorDia)}), lucro ≥ ${fmt(CFG.casaShinyLucroMin)} 🔮, ${CFG.casaShinyDia > 0 ? CFG.casaShinyDia + '/dia' : 'sem limite por dia'}` : 'desligada (Config → Casas)'}</b></div>
+      <table><tr><th>Nível</th><th class="num">✨ shiny 🔮</th><th class="num">normal 🔮</th><th class="num">Shiny vale</th></tr>${fx}</table>
       <p class="mudo" style="margin:6px 0 2px">Mediana das vendas sem os adicionais (Mega, Z, AoE). Por família: comprado baixo (Nv ≤ 200) e vendido no Nv 500–1.200, já sem a taxa das Gemas. Horas numa casa a 25%.</p>
       <p style="margin:6px 0 2px"><b>Compra liberada só para:</b> ${shinyUteis().map((f) => `${esc(f.nome)} <span class="mudo">(${f.vendas})</span>`).join(', ') || '—'} <span class="mudo">— ≥ ${CFG.casaShinyVendasMin} vendas de shiny em 30 dias, ≥ 5 no nível alto</span></p>
       ${top ? `<table><tr><th>Família</th><th class="num">Compra</th><th class="num">Venda</th><th class="num">Ganho</th><th class="num">Casa</th></tr>${top}</table>` : '<span class="mudo">Poucas vendas por família ainda.</span>'}`;
@@ -1212,7 +1216,7 @@
     }
     return false;
   }
-  // "30× a 5 💠 = 150 💠" em vez de só o total
+  // "30× a 5 🔮 = 150 🔮" em vez de só o total
   const qtdM = (qtd, preco, moeda) => (qtd > 1 ? `${fmt(qtd)}× a ${curtoM(preco, moeda)} = ${curtoM(qtd * preco, moeda)}` : `por ${curtoM(preco, moeda)}`);
   const podeMoeda = (moeda, escolha) => (moeda === 'gold' ? escolha !== 'orb' : CFG.gemasAtivas && escolha !== 'gold');
   async function comprar(a, ctx) {
@@ -1232,7 +1236,7 @@
       }
     }
     const tetoSh = ctx.shinyCasa && moeda === 'orb' ? Math.max(CFG.gemasMaxPorCompra, CFG.casaShinyPrecoMax) : null;   // shiny p/ casa: teto por compra próprio
-    if (!cabeNoOrcamento(total, moeda, tetoSh)) { log(`orçamento: pulei ${ctx.nome} ${qtdM(qtd, a.preco, moeda)}${tetoSh && E.gemasHoje + total > CFG.gemasMaxPorDia ? ` (limite do dia ${fmt(CFG.gemasMaxPorDia)} 💠, já ${fmt(E.gemasHoje)})` : ''}`); return false; }
+    if (!cabeNoOrcamento(total, moeda, tetoSh)) { log(`orçamento: pulei ${ctx.nome} ${qtdM(qtd, a.preco, moeda)}${tetoSh && E.gemasHoje + total > CFG.gemasMaxPorDia ? ` (limite do dia ${fmt(CFG.gemasMaxPorDia)} 🔮, já ${fmt(E.gemasHoje)})` : ''}`); return false; }
     if (!CFG.simulacao && disjuntor(total, moeda, tetoSh)) return false;
     const limiteClaude = moeda === 'orb' ? CFG.claudeAprovaAcimaGemas : CFG.claudeAprovaAcima;
     const tokenNoSeuPreco = ctx.tipo === 'item' && Number(ctx.itemId ?? a.itemId) === ITEM.TOKEN && (moeda === 'orb' ? CFG.tokenPrecoMaxGemas > 0 : CFG.tokenPrecoMax > 0) && a.preco <= tetoDoJogador(ITEM.TOKEN, moeda);
@@ -1276,7 +1280,7 @@
     persistir();
     if (p.tipo === 'item') {
       if (p.depois === 'revender') {
-        const vMoeda = p.venderEm || moedaVendaItem(p.itemId), k = ck(p.itemId, vMoeda), cb = cambioImplicito()?.taxa || 0;
+        const vMoeda = p.moeda === 'orb' ? 'orb' : (p.venderEm || moedaVendaItem(p.itemId)), k = ck(p.itemId, vMoeda), cb = cambioImplicito()?.taxa || 0;   // comprado em Gemas: revende só em Gemas (pedido do jogador)
         const custoUn = p.custoNaMoedaDeVenda ?? (p.moeda === vMoeda ? p.preco : vMoeda === 'orb' ? (cb ? p.preco / cb : p.preco) : p.preco * cb);
         const c = E.custosItens[k] || { qtd: 0, custoTotal: 0 };
         c.qtd += p.qtd; c.custoTotal += p.qtd * custoUn; c.custoMedio = c.custoTotal / c.qtd;
@@ -1419,11 +1423,11 @@
     const lucroMin = (a.moeda === 'orb' ? CFG.snipeLucroMinGemas : CFG.snipeLucroMin) * (vg.paraSnipe <= 2 ? 2 : 1);
     if (a.preco <= ref.preco * (1 - CFG.snipeDescontoMin) && lucro >= lucroMin) {
       M.snipeStats.oportunidades++;
-      await comprar(a, { tipo: 'pokemon', pokemonId: f.id, nome: `${f.shiny ? '✨' : ''}${f.nome} Nv ${f.level} n${f.nota}`, nv: f.level, nota: f.nota, pot: f.potencia, iv: f.ivTotal, shiny: !!f.shiny, ficha: fichaMin(f), depois: 'revender', revenderPor: Math.round(venda), lucro, motivo: `${pve && pve.score >= 0.85 ? '⚡IV PvE ' + Math.round(pve.score * 100) + '% · ' : ''}sniper: ${Math.round((1 - a.preco / ref.preco) * 100)}% abaixo do justo ${curtoM(ref.preco, a.moeda)} (${ref.prc ? `precificador ${ref.prc.rapido}/${ref.prc.justo}/${ref.prc.esperar} 💠, ${ref.prc.nFamilia} vendas da família` : `${textoFatores(ref.fatores, f.potencia)}; ${ref.n} vendas`})` });
+      await comprar(a, { tipo: 'pokemon', pokemonId: f.id, nome: `${f.shiny ? '✨' : ''}${f.nome} Nv ${f.level} n${f.nota}`, nv: f.level, nota: f.nota, pot: f.potencia, iv: f.ivTotal, shiny: !!f.shiny, ficha: fichaMin(f), depois: 'revender', revenderPor: Math.round(venda), lucro, motivo: `${pve && pve.score >= 0.85 ? '⚡IV PvE ' + Math.round(pve.score * 100) + '% · ' : ''}sniper: ${Math.round((1 - a.preco / ref.preco) * 100)}% abaixo do justo ${curtoM(ref.preco, a.moeda)} (${ref.prc ? `precificador ${ref.prc.rapido}/${ref.prc.justo}/${ref.prc.esperar} 🔮, ${ref.prc.nFamilia} vendas da família` : `${textoFatores(ref.fatores, f.potencia)}; ${ref.n} vendas`})` });
     }
   }
 
-  /* ============================== 💠 SNIPER DE ITENS ============================== */
+  /* ============================== 🔮 SNIPER DE ITENS ============================== */
   async function loopSniperItens() {
     if (M.sniperItRodando) return;
     M.sniperItRodando = true;
@@ -1438,7 +1442,7 @@
   const ehRevendavel = (id) => REVENDAVEIS.includes(M.cats[id] || E.catsItens?.[id]) && !/Stone$/i.test(E.nomesItens[id] || '') && ![70040, 70041, 70042, 70043, 70044, 70080, 70081, 70082, 70083, 70084].includes(Number(id));
   async function snipeItens() {
     const regrasIt = E.regras.some((r) => r.tipo === 'item' && r.ativa);
-    if (M.meus.length >= 20 && !regrasIt) return avisoRaro('it20', '💠 20 anúncios abertos — sniper de itens esperando vaga');
+    if (M.meus.length >= 20 && !regrasIt) return avisoRaro('it20', '🔮 20 anúncios abertos — sniper de itens esperando vaga');
     await pedirM({ t: 'market.itens', elementos: [], categoria: '' }, 'itens');
     if (Date.now() - M.mediasEm > 10 * 60_000) await pedirM({ t: 'market.medias' }, 'medias');
     const regrasItem = E.regras.filter((r) => r.tipo === 'item' && r.ativa);
@@ -1471,6 +1475,7 @@
 
   /* ============================== 💎 FLIP DE ITENS ============================== */
   async function flipItem(id, a, medVenda, moedaCompra, moedaVenda, cambio = 1) {
+    if (moedaCompra === 'orb' && moedaVenda !== 'orb') return;           // nunca compra item em Gemas para vender em Coins (só Coins → Gemas)
     const liquidoUn = medVenda * (1 - COMISSAO);                         // na moeda de venda
     const custoNaVenda = moedaCompra === moedaVenda ? a.preco : a.preco / cambio;
     const lucroUn = liquidoUn - custoNaVenda;
@@ -1485,7 +1490,7 @@
     if (CFG.simulacao) M.simItens[id] = (M.simItens[id] || 0) + qtd;
     const cruzado = moedaCompra !== moedaVenda;
     await comprar(a, { tipo: 'item', itemId: id, nome: E.nomesItens[id] || 'item ' + id, qtd, depois: 'revender', venderEm: cruzadoFixo(moedaCompra, moedaVenda), custoNaMoedaDeVenda: moedaCompra !== moedaVenda ? custoNaVenda : undefined,
-      lucro: lucroUn * qtd, motivo: cruzado ? `cruzado: compra em Coins, vende ~${fmt(medVenda)} 💠 (câmbio ${curto(cambio)}/💠)` : `flip: média ${curtoM(medVenda, moedaVenda)}` });
+      lucro: lucroUn * qtd, motivo: cruzado ? `cruzado: compra em Coins, vende ~${fmt(medVenda)} 🔮 (câmbio ${curto(cambio)}/🔮)` : `flip: média ${curtoM(medVenda, moedaVenda)}` });
   }
   const cruzadoFixo = (mc, mv) => (mc !== mv ? mv : undefined);            // flip cruzado já decidiu; o normal decide na hora de vender
   // item: um degrau abaixo do menor anúncio dos outros, nunca acima da média de 7 dias nem abaixo de 85% dela
@@ -1683,7 +1688,7 @@
     const pct = E.postos[key]?.pct || 25, xpH = xpHoraCasa(pct);
     // dá para pagar hoje? (limite do dia e reserva de Gemas valem para o shiny também)
     const podeHoje = Math.min(CFG.casaShinyPrecoMax, CFG.gemasMaxPorDia - E.gemasHoje, (M.gemas ?? 0) - CFG.reservaGemas);
-    if (podeHoje < 300) { avisoRaro('shOrc', `✨ shiny: sem Gemas no orçamento de hoje (${fmt(E.gemasHoje)} de ${fmt(CFG.gemasMaxPorDia)} 💠 gastas, reserva ${fmt(CFG.reservaGemas)})`, 120); return false; }
+    if (podeHoje < 300) { avisoRaro('shOrc', `✨ shiny: sem Gemas no orçamento de hoje (${fmt(E.gemasHoje)} de ${fmt(CFG.gemasMaxPorDia)} 🔮 gastas, reserva ${fmt(CFG.reservaGemas)})`, 120); return false; }
     // só famílias com muita venda de shiny (30 dias): busca pelo nome, revezando entre as melhores
     const fams = shinyUteis(); if (!fams.length) { avisoRaro('shFam', '✨ shiny: nenhuma família com vendas suficientes', 240); return false; }
     E.shinyGiro = ((E.shinyGiro || 0) + 1) % fams.length;
@@ -1701,10 +1706,10 @@
       if (m.lucro < CFG.casaShinyLucroMin || m.lucro < a.preco * CFG.casaShinyMargemMin) continue;
       if (!melhor || m.porH > melhor.m.porH) melhor = { a, f, m };
     }
-    if (!melhor) { avisoRaro('shNada' + cid, `✨ casa ${cid}: ${nomes.join(', ')} — nenhum shiny até ${fmt(podeHoje)} 💠 com lucro ≥ ${fmt(CFG.casaShinyLucroMin)} 💠 e ≥ ${Math.round(CFG.casaShinyMargemMin * 100)}% agora`, 60); return false; }
+    if (!melhor) { avisoRaro('shNada' + cid, `✨ casa ${cid}: ${nomes.join(', ')} — nenhum shiny até ${fmt(podeHoje)} 🔮 com lucro ≥ ${fmt(CFG.casaShinyLucroMin)} 🔮 e ≥ ${Math.round(CFG.casaShinyMargemMin * 100)}% agora`, 60); return false; }
     const { a, f, m } = melhor;
     const ok = await comprar(a, { tipo: 'pokemon', pokemonId: f.id, nome: f.nome, nv: f.level, nota: f.nota, pot: f.potencia, iv: f.ivTotal, xp: f.xp, shiny: true, shinyCasa: true, ficha: fichaMin(f), casaKey: key, depois: 'casa', lucro: m.lucro, alvoNv: m.L,
-      motivo: `casa ${cid} (shiny ${m.familia || f.nome}, ${m.nFam} vendas/30 d): vende ~${fmt(m.venda)} 💠 no Nv ${m.L} (rápido; justo ${fmt(m.justo)}), lucro ~${fmt(Math.round(m.lucro))} 💠${m.horas ? ` em ~${m.horas.toFixed(0)} h` : ''}` });
+      motivo: `casa ${cid} (shiny ${m.familia || f.nome}, ${m.nFam} vendas/30 d): vende ~${fmt(m.venda)} 🔮 no Nv ${m.L} (rápido; justo ${fmt(m.justo)}), lucro ~${fmt(Math.round(m.lucro))} 🔮${m.horas ? ` em ~${m.horas.toFixed(0)} h` : ''}` });
 
     return !!ok;
   }
@@ -1815,11 +1820,14 @@
   function alvoRapidoAnuncio(a) {
     if (a.tipo === 'pokemon') {
       const f = a.ficha ? fichaMin(a.ficha) : fichaDoPokemon(a.pokemonId); if (!f) return null;
-      if (a.moeda === 'orb') { const r = precoPrecificador(f), fg = fatorGemasAgora(); return r ? { preco: Math.max(1, Math.round(r.rapido * fg)), justo: r.justo, ref: `precificador ${r.rapido}/${r.justo}/${r.esperar} 💠${fg < 1 ? ` × ${fg} (giro)` : ''}` } : null; }
+      if (a.moeda === 'orb') { const r = precoPrecificador(f), fg = fatorGemasAgora(); return r ? { preco: Math.max(1, Math.round(r.rapido * fg)), justo: r.justo, ref: `precificador ${r.rapido}/${r.justo}/${r.esperar} 🔮${fg < 1 ? ` × ${fg} (giro)` : ''}` } : null; }
       const r = precoMercado(f.nome, f.level, f.nota, f.potencia, a.ficha?.ivTotal ?? Object.values(f.ivs || {}).reduce((x, y) => x + y, 0)); if (!r || r.como !== 'espécie' || r.n < 3) return null;
       const fr = fatorRapidoAgora(); return { preco: Math.round(r.preco * fr), justo: r.preco, ref: `mercado ${curto(r.preco)} × ${fr}${emGiro() ? ' (giro)' : ''}` };
     }
-    const p = precoRapidoItem(a.itemId, a.moeda, a.id); return p ? { preco: p, ref: 'um degrau abaixo do menor anúncio' } : null;
+    const p = precoRapidoItem(a.itemId, a.moeda, a.id); if (!p) return null;
+    const ehDrop = [ITEM.ZFRAG, ITEM.AOE, ITEM.MEGA, ITEM.MEGASH, ITEM.SAFARI].includes(Number(a.itemId)), med = M.medias[a.itemId]?.[a.moeda]?.media;
+    if (ehDrop && med && p < med * CFG.bossDropPisoMedia) return { preco: Math.round(med * CFG.bossDropPisoMedia), ref: `drop de boss: piso de ${Math.round(CFG.bossDropPisoMedia * 100)}% da média de 7 dias` };
+    return { preco: p, ref: 'um degrau abaixo do menor anúncio' };
   }
   // pokémon parado em Gemas há trocarParaCoinsH horas: passa a vender em Coins (capital gira mais rápido), sempre com lucro.
   // Tenta mudar a moeda do próprio anúncio; se o jogo não aceitar, retira e põe na fila para anunciar em Coins (o jogo pede 30 min).
@@ -1987,7 +1995,7 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
         if (r && (a.preco < r.rapido * 0.8 || a.preco > r.esperar * 1.5)) {
           const novo = Math.max(Math.round(r.justo * CFG.vendaFatorMediana), reg.piso || 1);
           reg.corrigido = true; reg.ultEdit = ag; persistir();
-          log(`${sim()}CORRIGIR ${reg.nome}: ${curtoM(a.preco, 'orb')} → ${curtoM(novo, 'orb')} (precificador: ${r.rapido}/${r.justo}/${r.esperar} 💠)`, 'venda');
+          log(`${sim()}CORRIGIR ${reg.nome}: ${curtoM(a.preco, 'orb')} → ${curtoM(novo, 'orb')} (precificador: ${r.rapido}/${r.justo}/${r.esperar} 🔮)`, 'venda');
           if (!CFG.simulacao) { enviar({ t: 'market.editar', id: a.id, preco: novo, moeda: 'orb' }); M.meusEm = 0; }
           continue;
         }
@@ -2021,7 +2029,7 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
       return false;
     }
     const pensao = PENSAO_DIA * CFG.vendaDias;                     // em Coins
-    // o custo vem na moeda em que foi PAGO; converte para a moeda da venda (32 💠 pagos não viram 32 Coins)
+    // o custo vem na moeda em que foi PAGO; converte para a moeda da venda (32 🔮 pagos não viram 32 Coins)
     const cbV = cambioImplicito()?.taxa || 0;
     if (custo && moedaCompra !== moeda) { if (!cbV) { log(`sem câmbio para converter o custo de ${nome} — não anunciei`, 'erro'); return false; } custo = moedaCompra === 'gold' ? custo / cbV : custo * cbV; }
     const mg = emGiro() ? 1 + CFG.giroMargem : 1.05;               // no giro aceita lucro menor (nunca prejuízo)
@@ -2037,7 +2045,7 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
     if (rapido) { const cc = await menorConcorrentePk(ficha?.nome || String(nome).replace(/ Nv .*$/, ''), Math.round(nv), nota, pot, moeda, shiny); if (cc?.preco && degrauAbaixo(cc.preco, moeda) < alvoC) { alvoC = degrauAbaixo(cc.preco, moeda); porque += ` — abaixo do menor parecido (${curtoM(cc.preco, moeda)})`; } }
     const preco = Math.max(Math.round(alvoC), piso, 1);
     if (rapido) porque += emGiro() ? ' — giro rápido' : ' — vender rápido';
-    if (ref.prc) porque += ` [precificador: ${ref.prc.rapido}/${ref.prc.justo}/${ref.prc.esperar} 💠]`;
+    if (ref.prc) porque += ` [precificador: ${ref.prc.rapido}/${ref.prc.justo}/${ref.prc.esperar} 🔮]`;
     if (CFG.simulacao) { if (!M.simVistos.has('v' + pokemonId)) { M.simVistos.add('v' + pokemonId); M.simListados.set('p' + pokemonId, Date.now()); log(`[SIM] VENDER ${nome} Nv ~${nv} por ${curtoM(preco, moeda)}${porque}`, 'venda'); } return true; }
     log(`VENDER ${nome} Nv ~${nv} por ${curtoM(preco, moeda)}${porque}`, 'venda');
     if (!enviar({ t: 'market.criar', tipo: 'pokemon', itemId: null, pokemonId, casaId: null, bicicletaId: null, qtd: 1, preco, moeda, dias: CFG.vendaDias })) return false;
@@ -2078,7 +2086,7 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
     return { preco: 0, como: 'sem preço' };
   }
   const precoGemaItem = (id) => fonteGemaItem(id).preco;
-  // lucro esperado por boss em 💠 no melhor dia dos próximos 3 (é quando você usa os tokens): define o teto do token
+  // lucro esperado por boss em 🔮 no melhor dia dos próximos 3 (é quando você usa os tokens): define o teto do token
   function evTokenGemas() {
     const par = REGIOES[CFG.bossRegiao] ?? 2, pos = BOSSES[CFG.bossRegiao].indexOf(CFG.bossKey);
     const evs = [0, 1, 2].map((d) => { const p = premioDe(pos, Date.now() + d * 86400_000); return { premio: p, d, liq: evBoss(p, par).liquidoG }; });
@@ -2090,7 +2098,34 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
     if (M.bossEntrouEm) { const d = (Date.now() - M.bossEntrouEm) / 1000; if (d > 5 && d < 1800) { b.duracoes.push(Math.round(d)); b.duracoes = b.duracoes.slice(-60); } }
     M.bossEntrouEm = Date.now();                                    // na série automática a próxima luta começa logo
     for (const x of drops || []) if (x.itemId) b.drops[x.itemId] = (b.drops[x.itemId] || 0) + (x.qtd || 1);
+    novoDia();
+    const bd = E.bossDia?.dia === E.dia ? E.bossDia : (E.bossDia = { dia: E.dia, lutas: 0, vit: 0, inicio: Date.now(), fim: Date.now(), drops: {}, durs: [] });
+    bd.lutas++; if (venceu) bd.vit++; bd.fim = Date.now(); if (b.duracoes.length) { bd.durs.push(b.duracoes[b.duracoes.length - 1]); bd.durs = bd.durs.slice(-200); }
+    for (const x of drops || []) if (x.itemId) bd.drops[x.itemId] = (bd.drops[x.itemId] || 0) + (x.qtd || 1);
     persistir();
+  }
+  // resultado real do boss no dia: lutas, ritmo, drops, Gemas recebidas pela venda dos drops, o que falta vender e o custo dos tokens
+  function resultadoBossDia() {
+    const bd = E.bossDia; if (!bd || bd.dia !== E.dia || !bd.lutas) return null;
+    const ids = [ITEM.ZFRAG, ITEM.AOE, ITEM.MEGA, ITEM.MEGASH, ITEM.SAFARI], nomes = ids.map((id) => E.nomesItens[id]).filter(Boolean);
+    const vendas = (E.real?.vendas || []).filter((v) => v.em >= bd.inicio && v.moeda === 'orb' && (ids.includes(Number(v.itemId)) || nomes.some((n) => String(v.desc || '').includes(n))));
+    const recebido = vendas.reduce((s2, v) => s2 + (v.liquido || 0), 0), vendidos = vendas.reduce((s2, v) => s2 + (v.qtd || 1), 0);
+    const dropados = Object.values(bd.drops).reduce((a, b2) => a + b2, 0);
+    let pendente = 0; for (const id of ids) { const n = Number(M.itens[id] || 0) + M.meus.filter((a) => a.itemId === id).reduce((s2, a) => s2 + (a.qtd || 0), 0); pendente += n * (fonteGemaItem(id).preco || 0) * (1 - COMISSAO); }
+    const tk = (E.real?.compras || []).filter((c) => c.moeda === 'orb' && Number(c.itemId) === ITEM.TOKEN || /Boss Token/.test(c.desc || '') && c.moeda === 'orb').filter((c) => Date.now() - c.em < 7 * 86400_000);
+    const qtdTk = tk.reduce((s2, c) => s2 + (c.qtd || 1), 0), custoTk = qtdTk ? tk.reduce((s2, c) => s2 + (c.bruto || 0), 0) / qtdTk : (M.resumo[ITEM.TOKEN]?.minOrb || 0);
+    const horas = Math.max(1 / 60, (bd.fim - bd.inicio) / 3600_000), custo = bd.lutas * custoTk;
+    return { ...bd, horas, porHora: bd.lutas / horas, seg: mediana(bd.durs) || null, vitPct: bd.vit / bd.lutas, dropados, vendidos, recebido, pendente, custoTk, custo, lucro: recebido + pendente - custo };
+  }
+  // vale comprar token a X 🔮? lucro por token em cada prêmio, com o preço dos drops de agora e o de 7 dias, e a sua taxa de vitória
+  function estudoToken() {
+    const par = REGIOES[CFG.bossRegiao] ?? 2, pos = BOSSES[CFG.bossRegiao].indexOf(CFG.bossKey), vit = taxaVitoria();
+    const premios = [0, 1, 2].map((d) => premioDe(pos, Date.now() + d * 86400_000));
+    const liq = (premio, media) => DROPS_DO_PREMIO(premio, par).reduce((s2, [id, ch]) => s2 + ch * (media ? (M.medias[id]?.orb?.media || precoGemaItem(id)) : precoGemaItem(id)), 0) * (1 - COMISSAO) * vit;
+    const dias = premios.map((p, d) => ({ d, premio: p, agora: liq(p, false), media: liq(p, true) }));
+    const bons = dias.filter((x) => x.premio !== 'tickets');
+    const evBom = bons.length ? Math.min(...bons.map((x) => Math.min(x.agora, x.media))) : 0;   // o pior dos dias bons, pelo preço mais baixo
+    return { dias, evBom, tetoSugerido: Math.floor(evBom * 0.85 * 10) / 10, precos: [3, 4, 5, 6, 7, 8].map((t) => ({ t, lucro: evBom - t, pct: (evBom - t) / t })) };
   }
   const taxaVitoria = () => (E.boss.lutas >= 5 ? E.boss.vitorias / E.boss.lutas : 1);
   const segPorLuta = () => CFG.bossSegPorLuta || mediana(E.boss.duracoes) || 60;
@@ -2181,11 +2216,12 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
         if (qtd < 1) break;
         const ev = evTokenGemas();
         const fixo = tm === 'orb' ? CFG.tokenPrecoMaxGemas > 0 : CFG.tokenPrecoMax > 0;
-        if (await comprar(a, { tipo: 'item', itemId: ITEM.TOKEN, nome: 'Bronze Boss Token', qtd, depois: 'guardar', precoDoJogador: fixo, motivo: fixo ? `até o seu preço de ${curtoM(teto, tm)}` : `boss ${CFG.bossKey} (${NOME_PREMIO[ev.premio]}) rende ~${ev.liq.toFixed(1)} 💠 por token` })) falta -= qtd;
+        if (await comprar(a, { tipo: 'item', itemId: ITEM.TOKEN, nome: 'Bronze Boss Token', qtd, depois: 'guardar', precoDoJogador: fixo, motivo: fixo ? `até o seu preço de ${curtoM(teto, tm)}` : `boss ${CFG.bossKey} (${NOME_PREMIO[ev.premio]}) rende ~${ev.liq.toFixed(1)} 🔮 por token` })) falta -= qtd;
       }
     }
   }
   async function cicloBoss() {
+    { const r = resultadoBossDia(); if (r && r.lutas >= 20 && Date.now() - (M._ritmoBossLog || 0) > 3600_000) { M._ritmoBossLog = Date.now(); log(`👑 boss hoje: ${fmt(r.lutas)} lutas (${Math.round(r.vitPct * 100)}% vitórias), ~${Math.round(r.porHora)}/h${r.seg ? `, ${r.seg} s/luta` : ''}; ${r.dropados} drops, ${fmt(Math.round(r.recebido))} 🔮 recebidas + ~${fmt(Math.round(r.pendente))} 🔮 à venda − tokens ~${fmt(Math.round(r.custo))} 🔮 = lucro ~${fmt(Math.round(r.lucro))} 🔮`, 'ok'); } }
     if (Date.now() - M.mediasEm > 10 * 60_000) await pedirM({ t: 'market.medias' }, 'medias');
     await pedirM({ t: 'market.itens', elementos: [], categoria: '' }, 'itens');
     const par = REGIOES[CFG.bossRegiao] ?? 2, pos = BOSSES[CFG.bossRegiao].indexOf(CFG.bossKey);
@@ -2204,7 +2240,7 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
       log(`👑 rotação boa, mas a caça rende mais agora (~${curto(cacaAgora)}/h vs boss ~${curto(bH)}/h)${evx ? ` — evento de XP ×${evx.mult} até ${new Date(evx.ate).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : ''}`);
     }
     if (vale && !M.emBoss && !M.bossAuto && (M.tokens == null || M.tokens >= CFG.bossTokensMin)) {
-      const msg = `👑 dia bom no ${CFG.bossKey}: ${NOME_PREMIO[premioHoje]} (+${Math.round(ev.pct * 100)}% por token, ~${fmt(ev.lucroG)} 💠 por token)`;
+      const msg = `👑 dia bom no ${CFG.bossKey}: ${NOME_PREMIO[premioHoje]} (+${Math.round(ev.pct * 100)}% por token, ~${fmt(ev.lucroG)} 🔮 por token)`;
       if (CFG.bossModo === 'avisar') { if (!M._avisoBoss || Date.now() - M._avisoBoss > 3600_000) { M._avisoBoss = Date.now(); log(msg + ' — ligue a série no jogo', 'ok'); notificar(msg); } return; }
       if (CFG.simulacao) { if (M._simBoss && Date.now() - M._simBoss < 3600_000) return; M._simBoss = Date.now(); }
       log(`${sim()}${msg} — entrando com repetição automática`, 'ok');
@@ -2225,9 +2261,11 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
     await atualizarMeus();
     for (const id of [ITEM.ZFRAG, ITEM.AOE, ITEM.MEGA, ITEM.MEGASH, ITEM.SAFARI]) {
       const tem = Number(M.itens[id] || 0);
-      if (!tem || M.meus.some((a) => a.itemId === id)) continue;
-      const med = M.medias[id]?.orb?.media, min = M.resumo[id]?.minOrb;
-      const preco = Math.round(Math.max(med || 0, min ? min - 1 : 0));
+      // cada leva de drop vira um anúncio próprio (até bossAnunciosPorItem por item): vende aos poucos, sem despejar tudo de uma vez
+      if (!tem || M.meus.filter((a) => a.itemId === id && a.moeda === 'orb').length >= CFG.bossAnunciosPorItem || M.meus.length >= 20) continue;
+      if (Date.now() - (M.listaItem?.[id + ':orb']?.em || 0) > 10 * 60_000) await pedirM({ t: 'market.item', itemId: id, moeda: 'orb' }, 'item', (m) => m.itemId === id && m.moeda === 'orb');
+      const med = M.medias[id]?.orb?.media, rap = precoRapidoItem(id, 'orb') ?? M.resumo[id]?.minOrb ?? med;
+      const preco = Math.round(Math.max(rap || 0, med ? med * CFG.bossDropPisoMedia : 0));
       if (!preco) continue;
       E.custosItens[ck(id, 'orb')] = { qtd: tem, custoTotal: 0, custoMedio: 0 };
       await revenderItem(id, preco, 'orb');
@@ -2293,7 +2331,7 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
     if (p.shiny || fSh?.shiny) {
       const m = melhorNivelShiny(fSh, nivelDeXp(p.xp || 0), null);
       const alvo = m ? m.L : Math.max(base, CFG.nivelMaxCasa);
-      M.alvoCache[k] = { em: Date.now(), alvo, como: m ? `shiny: ~${fmt(m.venda)} 💠 no Nv ${m.L}` : 'shiny sem preço: Nv máx.' };
+      M.alvoCache[k] = { em: Date.now(), alvo, como: m ? `shiny: ~${fmt(m.venda)} 🔮 no Nv ${m.L}` : 'shiny sem preço: Nv máx.' };
       return alvo;
     }
     const pontos = [];
@@ -2900,7 +2938,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     }
     W.querySelectorAll('.pk-sec').forEach((s) => s.classList.toggle('on', s.id === 'sec-' + abaAtual));
     $('#pk-st').innerHTML = `<span class="chip ${M.ligado ? 'ok' : 'off'}"><i></i>${M.ligado ? 'ligado' : 'parado'}</span><span class="chip ${CFG.simulacao ? 'sim' : 'real'}">${CFG.simulacao ? 'simulação' : 'real'}</span>`
-      + `<span class="chip" title="Gemas gastas hoje / limite do dia">💠 ${fmt(E.gemasHoje)}/${fmt(CFG.gemasMaxPorDia)}</span>${M.tokens != null ? `<span class="chip" title="Bronze Boss Tokens">🎟 ${fmt(M.tokens)}</span>` : ''}`
+      + `<span class="chip" title="Gemas gastas hoje / limite do dia">🔮 ${fmt(E.gemasHoje)}/${fmt(CFG.gemasMaxPorDia)}</span>${M.tokens != null ? `<span class="chip" title="Bronze Boss Tokens">🎟 ${fmt(M.tokens)}</span>` : ''}`
       + (Date.now() < (E.disjuntorAte || 0) ? '<span class="chip off">disjuntor</span>' : '') + (emGiro() ? `<span class="chip ok" title="Giro rápido da vitrine: vende a ${Math.round(CFG.giroFator * 100)}% do mercado, casas até Nv ${CFG.giroNivelMax}">🌀 giro</span>` : '');
   }
   function arrastavel(el, alca) {
@@ -2939,7 +2977,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
       <div class="cart"><h4>Adicionar à lista de compras</h4>
         <div class="form">
           <label>Tipo<select id="c-tipo"><option value="pokemon">Pokémon</option><option value="item">Item</option></select></label>
-          <label>Moeda<select id="c-moeda"><option value="gold">Coins</option><option value="orb">Gemas 💠</option></select></label>
+          <label>Moeda<select id="c-moeda"><option value="gold">Coins</option><option value="orb">Gemas 🔮</option></select></label>
           <label class="so-pk">Shiny<select id="c-shiny"><option value="nao">Não</option><option value="so">Só shiny</option><option value="qualquer">Tanto faz</option></select></label>
           <label>Nome <span class="mudo">(* = qualquer)</span><input id="c-nome" list="c-nomes" placeholder="ex.: Dragonite"></label>
           <label class="so-pk">Nível mín.<input id="c-nvmin" inputmode="numeric"></label>
@@ -2949,7 +2987,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
           <label class="so-pk">IV do ataque principal mín.<input id="c-prin" inputmode="numeric"></label>
           <label class="so-pk">Potência mín.<select id="c-pot"><option value="">qualquer</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
           <label>Preço mín.<input id="c-pmin" placeholder="ex.: 10M ou 50"></label>
-          <label>Preço máx.<input id="c-pmax" placeholder="ex.: 45M ou 300 💠"></label>
+          <label>Preço máx.<input id="c-pmax" placeholder="ex.: 45M ou 300 🔮"></label>
           <label>Quantidade<input id="c-qtd" value="1" inputmode="numeric"></label>
           <label>Depois de comprar<select id="c-dep"><option value="guardar">Guardar</option><option value="casa">Upar numa casa</option><option value="revender">Revender</option></select></label>
         </div>
@@ -3040,8 +3078,8 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
         <label>Compras por dia (0 = sem limite)<input id="h-dia"></label><label>Nível máx. na compra<input id="h-nvmax"></label>
       </div><p class="mudo">Cada casa vazia faz no máximo uma busca a cada X min, em até 4 espécies que vendem no nível-alvo.</p></div>
       <div class="cart"><h4>✨ Casa com shiny (Gemas)</h4><div class="form">
-        <label>Comprar shiny para upar<select id="h-sh"><option value="0">Não</option><option value="1">Sim</option></select></label><label>Preço máx. (💠)<input id="h-shp"></label>
-        <label>Lucro mín. (💠)<input id="h-shl"></label><label>Lucro mín. vs custo<input id="h-shm"></label>
+        <label>Comprar shiny para upar<select id="h-sh"><option value="0">Não</option><option value="1">Sim</option></select></label><label>Preço máx. (🔮)<input id="h-shp"></label>
+        <label>Lucro mín. (🔮)<input id="h-shl"></label><label>Lucro mín. vs custo<input id="h-shm"></label>
         <label>Nível máx. na compra<input id="h-shn"></label><label>Shiny por dia (0 = sem limite)<input id="h-shd"></label>
         <label>Vendas mín. da família (30 d)<input id="h-shv"></label>
       </div><p class="mudo">Compra shiny barato de nível baixo, sobe até o nível que mais rende pelo precificador (até ${CFG.nivelMaxCasa}) e vende em Gemas. Precisa de "Operar em Gemas"; os limites de Gemas do dia e a conferência do Claude valem. Veja a análise em Análise → Mercado.</p></div>
@@ -3110,13 +3148,13 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
   function pintarLucro(k) {
     const pk = k === 'opPk', tipo = pk ? 'pokemon' : 'item', cb = cambioImplicito()?.taxa || 0;
     $('#' + k + '-em').textContent = E.real ? `lido às ${new Date(E.real.em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} · lê sozinho a cada 10–30 min` : 'ainda não lido';
-    const linha = (h, r2, luc) => `<tr><td>${h}</td><td class="num">${r2.gold.nC + r2.orb.nC}<br><span class="mudo">${curto(r2.gold.gasto)} · ${fmt(Math.round(r2.orb.gasto))} 💠</span></td><td class="num">${r2.gold.nV + r2.orb.nV}<br><span class="mudo">${curto(r2.gold.rec)} · ${fmt(Math.round(r2.orb.rec))} 💠</span></td>${luc}</tr>`;
+    const linha = (h, r2, luc) => `<tr><td>${h}</td><td class="num">${r2.gold.nC + r2.orb.nC}<br><span class="mudo">${curto(r2.gold.gasto)} · ${fmt(Math.round(r2.orb.gasto))} 🔮</span></td><td class="num">${r2.gold.nV + r2.orb.nV}<br><span class="mudo">${curto(r2.gold.rec)} · ${fmt(Math.round(r2.orb.rec))} 🔮</span></td>${luc}</tr>`;
     let lucCols = (h) => '<td class="num mudo">—</td>';
     if (pk) {
       const rv = (d) => { const L = revendasDoApp(d); const g = L.filter((x) => x.compra.moeda === 'orb' && x.venda.moeda === 'orb').reduce((s2, x) => s2 + x.venda.liquido - x.compra.preco, 0); return { n: L.length, c: L.reduce((s2, x) => s2 + x.lucroC, 0), g }; };
-      lucCols = (d) => { const r = rv(d); return `<td class="num ${!r.n ? '' : r.c >= 0 ? 'bom' : 'ruim'}">${r.n ? curto(r.c) : '—'}<br><span class="mudo">${r.n} revendas${r.g ? ` · ${fmt(Math.round(r.g))} 💠` : ''}</span></td>`; };
+      lucCols = (d) => { const r = rv(d); return `<td class="num ${!r.n ? '' : r.c >= 0 ? 'bom' : 'ruim'}">${r.n ? curto(r.c) : '—'}<br><span class="mudo">${r.n} revendas${r.g ? ` · ${fmt(Math.round(r.g))} 🔮` : ''}</span></td>`; };
     } else {
-      lucCols = (d) => { const L = lucroPorItem(d).filter((x) => x.lucro != null); const c = L.filter((x) => x.moeda === 'gold').reduce((s2, x) => s2 + x.lucro, 0), g = L.filter((x) => x.moeda === 'orb').reduce((s2, x) => s2 + x.lucro, 0); return `<td class="num ${!L.length ? '' : c + g * cb >= 0 ? 'bom' : 'ruim'}">${L.length ? `${curto(c)}${g ? `<br>${fmt(Math.round(g))} 💠` : ''}` : '—'}</td>`; };
+      lucCols = (d) => { const L = lucroPorItem(d).filter((x) => x.lucro != null); const c = L.filter((x) => x.moeda === 'gold').reduce((s2, x) => s2 + x.lucro, 0), g = L.filter((x) => x.moeda === 'orb').reduce((s2, x) => s2 + x.lucro, 0); return `<td class="num ${!L.length ? '' : c + g * cb >= 0 ? 'bom' : 'ruim'}">${L.length ? `${curto(c)}${g ? `<br>${fmt(Math.round(g))} 🔮` : ''}` : '—'}</td>`; };
     }
     $('#' + k + '-res').innerHTML = E.real ? `<table><tr><th>Janela</th><th class="num">Comprados</th><th class="num">Vendidos (líquido)</th><th class="num">Lucro realizado</th></tr>${linha('24 h', resumoTipo(tipo, 24), lucCols(1))}${linha('7 dias', resumoTipo(tipo, 168), lucCols(7))}</table>
       <p class="mudo" style="margin:6px 0 0">${pk ? 'Lucro realizado = só o que já foi revendido, casando a venda com a compra do mesmo pokémon (moedas diferentes pelo câmbio).' : 'Lucro realizado = unidades vendidas × (venda média − compra média). Tokens usados no boss não entram: o ganho deles aparece na aba Boss.'}</p>`
@@ -3124,13 +3162,13 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     if (pk) {
       const L = revendasDoApp(7).slice(0, 30);
       $('#opPk-luc').innerHTML = L.length ? `<table><tr><th>Pokémon</th><th class="num">Compra</th><th class="num">Venda</th><th class="num">Lucro</th></tr>${L.map((x) => { const mesmaG = x.compra.moeda === 'orb' && x.venda.moeda === 'orb', lg = x.venda.liquido - x.compra.preco;
-        return `<tr class="${x.lucroC >= 0 ? 'bom' : 'ruim'}"><td>${esc(x.desc || '')}<br><span class="mudo">${x.compra.origem || ''} · ${quando(x.venda.em)} · ${x.horas < 48 ? x.horas.toFixed(1) + ' h' : Math.round(x.horas / 24) + ' d'}</span></td><td class="num">${curtoM(x.compra.preco, x.compra.moeda)}</td><td class="num">${curtoM(Math.round(x.venda.liquido), x.venda.moeda)}</td><td class="num">${mesmaG ? fmt(Math.round(lg)) + ' 💠' : curto(x.lucroC)}</td></tr>`; }).join('')}</table>` : '<span class="mudo">Nenhuma revenda casada nos últimos 7 dias.</span>';
+        return `<tr class="${x.lucroC >= 0 ? 'bom' : 'ruim'}"><td>${esc(x.desc || '')}<br><span class="mudo">${x.compra.origem || ''} · ${quando(x.venda.em)} · ${x.horas < 48 ? x.horas.toFixed(1) + ' h' : Math.round(x.horas / 24) + ' d'}</span></td><td class="num">${curtoM(x.compra.preco, x.compra.moeda)}</td><td class="num">${curtoM(Math.round(x.venda.liquido), x.venda.moeda)}</td><td class="num">${mesmaG ? fmt(Math.round(lg)) + ' 🔮' : curto(x.lucroC)}</td></tr>`; }).join('')}</table>` : '<span class="mudo">Nenhuma revenda casada nos últimos 7 dias.</span>';
       const viv = M.meus.filter((a) => a.tipo === 'pokemon'), casas = Object.entries(E.postos || {}).filter(([, p]) => p?.pokemonId && p.bot && !p.naFila);
       $('#opPk-and').innerHTML = `<div class="kv" style="margin:0"><span>Anunciados</span><b>${viv.length} / ${CFG.vagasPk}</b><span>Na fila de venda</span><b>${(E.filaVenda || []).length}</b><span>Upando nas casas</span><b>${casas.length}</b></div>`
         + (casas.length ? `<table><tr><th>Casa</th><th>Pokémon</th><th class="num">Custo</th><th class="num">Nv → alvo</th></tr>${casas.map(([key, p]) => { const cid = Number(key.split(':')[0]); return `<tr><td>${cid}</td><td>${esc(p.nome)}${p.shiny ? ' ✨' : ''}</td><td class="num">${p.custo ? curtoM(p.custo, p.moedaCompra || 'gold') : '—'}</td><td class="num">${p.xp ? nivelDeXp(p.xp) : '?'} → ${alvoDoPokemon(p, cid)}</td></tr>`; }).join('')}</table>` : '');
     } else {
       const L = lucroPorItem(7);
-      $('#opIt-luc').innerHTML = L.length ? `<table><tr><th>Item</th><th class="num">Comprado</th><th class="num">Vendido</th><th class="num">Lucro</th></tr>${L.map((x) => `<tr class="${x.lucro > 0 ? 'bom' : x.lucro < 0 ? 'ruim' : ''}"><td>${esc(x.nome)}</td><td class="num">${fmt(x.cq)}${x.custoU != null ? `<br><span class="mudo">${x.moeda === 'orb' ? x.custoU.toFixed(1) + ' 💠' : curto(x.custoU)} cada</span>` : ''}</td><td class="num">${fmt(x.vq)}${x.vendaU != null ? `<br><span class="mudo">${x.moeda === 'orb' ? x.vendaU.toFixed(1) + ' 💠' : curto(x.vendaU)} cada</span>` : ''}</td><td class="num">${x.lucro == null ? '—' : x.moeda === 'orb' ? fmt(Math.round(x.lucro)) + ' 💠' : curto(x.lucro)}</td></tr>`).join('')}</table>` : '<span class="mudo">Nenhuma compra ou venda de item nos últimos 7 dias.</span>';
+      $('#opIt-luc').innerHTML = L.length ? `<table><tr><th>Item</th><th class="num">Comprado</th><th class="num">Vendido</th><th class="num">Lucro</th></tr>${L.map((x) => `<tr class="${x.lucro > 0 ? 'bom' : x.lucro < 0 ? 'ruim' : ''}"><td>${esc(x.nome)}</td><td class="num">${fmt(x.cq)}${x.custoU != null ? `<br><span class="mudo">${x.moeda === 'orb' ? x.custoU.toFixed(1) + ' 🔮' : curto(x.custoU)} cada</span>` : ''}</td><td class="num">${fmt(x.vq)}${x.vendaU != null ? `<br><span class="mudo">${x.moeda === 'orb' ? x.vendaU.toFixed(1) + ' 🔮' : curto(x.vendaU)} cada</span>` : ''}</td><td class="num">${x.lucro == null ? '—' : x.moeda === 'orb' ? fmt(Math.round(x.lucro)) + ' 🔮' : curto(x.lucro)}</td></tr>`).join('')}</table>` : '<span class="mudo">Nenhuma compra ou venda de item nos últimos 7 dias.</span>';
     }
     const lim = Date.now() - 7 * 86400_000;
     const mov = [...(E.real?.compras || []).map((c) => ({ ...c, lado: 'C', val: c.bruto })), ...(E.real?.vendas || []).map((v) => ({ ...v, lado: 'V', val: v.liquido }))]
@@ -3141,14 +3179,14 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
   }
   function montarBoss() {
     $('#sec-boss').innerHTML = `
-      <div class="cart"><h4>Quantos tokens dá</h4><div class="form"><label>Gastar (💠)<input id="b-calc" value="150"></label><label>Só até o teto<select id="b-calc-t"><option value="1">Sim</option><option value="0">Não, qualquer preço</option></select></label></div><div id="b-calc-out" style="margin-top:6px"></div></div>
+      <div class="cart"><h4>Quantos tokens dá</h4><div class="form"><label>Gastar (🔮)<input id="b-calc" value="150"></label><label>Só até o teto<select id="b-calc-t"><option value="1">Sim</option><option value="0">Não, qualquer preço</option></select></label></div><div id="b-calc-out" style="margin-top:6px"></div></div>
       <div class="form">
         <label>Região<select id="b-reg">${Object.keys(REGIOES).map((r) => `<option value="${r}">${r[0].toUpperCase() + r.slice(1)} (Nv ${fmt(nivelRegiao(REGIOES[r]))})</option>`).join('')}</select></label>
         <label>Boss que você farma<select id="b-key"></select></label>
         <label>Modo<select id="b-modo"><option value="desligado">Só calcular</option><option value="avisar">Avisar nos dias bons</option><option value="auto">Automático (série + volta à hunt)</option></select></label>
         <label>Tokens: estoque-alvo<input id="b-est"></label>
         <label>Teto por token em Coins <span class="mudo">(0 = automático)</span><input id="b-teto"></label>
-        <label>Teto por token em 💠 <span class="mudo">(0 = automático)</span><input id="b-tetog"></label>
+        <label>Teto por token em 🔮 <span class="mudo">(0 = automático)</span><input id="b-tetog"></label>
         <label>Lucro mín. por token<input id="b-evmin"></label>
         <label>Tokens comprados em<select id="b-tm"><option value="ambas">Coins e Gemas</option><option value="gold">Coins</option><option value="orb">Gemas</option></select></label>
         <label>Comprar tokens<select id="b-auto"><option value="1">Todos até o seu preço</option><option value="0">Só até o estoque-alvo (módulo Boss)</option></select></label>
@@ -3157,6 +3195,8 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
       <div class="kv" id="b-num"></div>
       <div class="cart"><h4>Lucro esperado de cada rotação (24 h)</h4><div id="b-rot"></div></div>
       <div class="cart"><h4>Por boss e por token</h4><div id="b-quadro"></div></div>
+      <div class="cart"><h4>📈 Boss hoje: lucro e ritmo</h4><div id="b-dia"></div></div>
+      <div class="cart"><h4>🎟 Vale comprar token a quanto?</h4><div id="b-tok"></div></div>
       <div class="cart"><h4>Seus resultados</h4><div id="b-res"></div></div>
       <div class="aviso">No modo automático o app entra no boss com "Repetir automaticamente" nos dias bons e volta para a sua hunt no fim da série. Durante o boss as casas não ganham XP: o Claude pesa isso se estiver ligado.</div>`;
     const pintaKeys = () => { $('#b-key').innerHTML = BOSSES[CFG.bossRegiao].map((k) => `<option value="${k}">${k}</option>`).join(''); $('#b-key').value = CFG.bossKey; };
@@ -3166,7 +3206,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     $('#b-modo').value = CFG.bossModo; $('#b-modo').onchange = (e) => { CFG.bossModo = e.target.value; salvarCfg(); };
     $('#b-est').value = CFG.tokenEstoqueAlvo; $('#b-est').onchange = (e) => { const v = num(e.target.value); if (v != null) { CFG.tokenEstoqueAlvo = v; salvarCfg(); } };
     $('#b-teto').value = CFG.tokenPrecoMax ? curto(CFG.tokenPrecoMax) : '0'; $('#b-teto').onchange = (e) => { CFG.tokenPrecoMax = lerPreco(e.target.value) || 0; salvarCfg(); log(`⚙️ teto do token em Coins = ${curto(CFG.tokenPrecoMax)}`); pintar(); };
-    $('#b-tetog').value = CFG.tokenPrecoMaxGemas || 0; $('#b-tetog').onchange = (e) => { CFG.tokenPrecoMaxGemas = num(e.target.value) || 0; salvarCfg(); log(`⚙️ teto do token em Gemas = ${CFG.tokenPrecoMaxGemas} 💠`); pintar(); };
+    $('#b-tetog').value = CFG.tokenPrecoMaxGemas || 0; $('#b-tetog').onchange = (e) => { CFG.tokenPrecoMaxGemas = num(e.target.value) || 0; salvarCfg(); log(`⚙️ teto do token em Gemas = ${CFG.tokenPrecoMaxGemas} 🔮`); pintar(); };
     $('#b-tm').value = CFG.bossTokenMoeda; $('#b-tm').onchange = (e) => { CFG.bossTokenMoeda = e.target.value; salvarCfg(); pintar(); };
     $('#b-calc').oninput = () => pintar(); $('#b-calc-t').onchange = () => pintar();
     $('#b-auto').value = CFG.tokenAutoCompra ? '1' : '0'; $('#b-auto').onchange = (e) => { CFG.tokenAutoCompra = e.target.value === '1'; salvarCfg(); log(CFG.tokenAutoCompra ? '👑 tokens: compra todos abaixo do teto' : '👑 tokens: só até o estoque-alvo'); pintar(); };
@@ -3238,7 +3278,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
         <div style="margin-top:6px"><button class="bt verde" id="v-calc">Avaliar</button></div>
         <div id="v-out" style="margin-top:8px"></div>
       </div>
-      <div class="cart"><h4>💠 Precificador: cole a ficha do jogo</h4>
+      <div class="cart"><h4>🔮 Precificador: cole a ficha do jogo</h4>
         <p class="mudo" style="margin-top:0">Na ficha do pokémon, toque em <b>Copiar p/ ChatGPT</b> e cole aqui. O preço em Gemas vem das vendas dos últimos 30 dias (motor do Precificador de Pokémon, de briaoAle). O de Coins vem das vendas que o app coletou.</p>
         <textarea id="v-ficha" rows="5" style="width:100%;box-sizing:border-box;background:#0007;color:inherit;border:1px solid #6b3b55;border-radius:5px;font:inherit" placeholder="- Espécie: Dragonite (#149) …"></textarea>
         <div class="grade" style="margin-top:4px"><label style="flex-direction:row;align-items:center;gap:4px;display:flex"><input type="checkbox" id="v-z" style="width:auto"> tem Z-Move</label><label style="flex-direction:row;align-items:center;gap:4px;display:flex"><input type="checkbox" id="v-aoe" style="width:auto"> tem AoE</label></div>
@@ -3263,13 +3303,13 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     const escolha = moedaVendaPokemon({ nome: f.nome, nv: f.level, nota: f.nota, pot: f.potencia, iv: ivTot, shiny: f.shiny, ficha: f });
     out.innerHTML = `<div class="kv">
       <span>${f.shiny ? '✨ ' : ''}${esc(f.nome)} Nv ${fmt(f.level)} · P${f.potencia} · Q ${f.quality} · nota ${f.nota ?? '—'}</span><b class="mudo">PvE ${fmt(r.pve)}${r.familia && r.familia !== f.nome ? ' (como ' + esc(r.familia) + ')' : ''}</b>
-      <span>Vender rápido</span><b>${fmt(r.rapido)} 💠</b>
-      <span>Preço justo</span><b class="bom">${fmt(r.justo)} 💠</b>
-      <span>Esperar</span><b>${fmt(r.esperar)} 💠</b>
-      <span>Você recebe no preço justo</span><b>${fmt(Math.round(liqG))} 💠${cb ? ` <span class="mudo">≈ ${curto(liqG * cb)} Coins</span>` : ''}</b>
+      <span>Vender rápido</span><b>${fmt(r.rapido)} 🔮</b>
+      <span>Preço justo</span><b class="bom">${fmt(r.justo)} 🔮</b>
+      <span>Esperar</span><b>${fmt(r.esperar)} 🔮</b>
+      <span>Você recebe no preço justo</span><b>${fmt(Math.round(liqG))} 🔮${cb ? ` <span class="mudo">≈ ${curto(liqG * cb)} Coins</span>` : ''}</b>
       ${coins ? `<span>Em Coins (vendas coletadas)</span><b>${curto(coins.preco)} <span class="mudo">(${esc(coins.como)}, ${coins.n} vendas)</span></b>` : ''}
-      ${escolha.melhor ? `<span>Melhor moeda para vender</span><b class="bom">${escolha.melhor.moeda === 'orb' ? '💠 Gemas' : 'Coins'}</b>` : ''}
-      ${r.adicionais ? `<span>Adicionais (fragmentos)</span><b>${fmt(r.adicionais)} 💠</b>` : ''}
+      ${escolha.melhor ? `<span>Melhor moeda para vender</span><b class="bom">${escolha.melhor.moeda === 'orb' ? '🔮 Gemas' : 'Coins'}</b>` : ''}
+      ${r.adicionais ? `<span>Adicionais (fragmentos)</span><b>${fmt(r.adicionais)} 🔮</b>` : ''}
       ${pv ? `<span>IV de PvE (SPD + ataque principal)</span><b class="${pv.score >= 0.85 ? 'bom' : pv.score < 0.5 ? 'ruim' : ''}">${Math.round(pv.score * 100)}%</b>` : ''}
       <span>Base da conta</span><b class="mudo">${r.nFamilia} vendas da família${r.confianca ? ` · confiança ${r.confianca}%` : ''}${r.piso ? ` · piso pela forma ${esc(r.piso)}` : ''}</b></div>`;
   }
@@ -3338,7 +3378,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
         <label>Consultar a cada (min)<input id="k-int"></label>
         <label>Conferir compras com o Claude<select id="k-conf"><option value="todas">Todas, antes de comprar</option><option value="acima">Só as acima dos valores ao lado</option><option value="nenhuma">Nenhuma</option></select></label>
         <label>Aprovar compras acima de (Coins)<input id="k-apr"></label>
-        <label>Aprovar compras acima de (💠)<input id="k-aprg"></label>
+        <label>Aprovar compras acima de (🔮)<input id="k-aprg"></label>
       </div>
       <div class="cart"><h4>🎓 Estudo inicial</h4><div id="k-estudo"></div>
         <div class="form" style="margin-top:6px">
@@ -3411,8 +3451,8 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
       ['disjuntorCoins', 'Disjuntor: Coins em 10 min', 'preco'], ['pkReajusteH', 'Vitrine: baixar preço após (h)', 'num'], ['pkReajustePct', 'Vitrine: baixa por vez (0,04)', 'num'],
     ];
     $('#sec-config').innerHTML = `
-      <div class="cart"><h4>💠 Gemas</h4>
-        <p class="mudo" style="margin-top:0">Gemas valem dinheiro: 1 💠 sai por US$ 0,01 e saca por US$ 0,009. Com isto desligado, nenhum módulo compra ou vende em Gemas.</p>
+      <div class="cart"><h4>🔮 Gemas</h4>
+        <p class="mudo" style="margin-top:0">Gemas valem dinheiro: 1 🔮 sai por US$ 0,01 e saca por US$ 0,009. Com isto desligado, nenhum módulo compra ou vende em Gemas.</p>
         <div class="grade"><button class="bt" id="g-gemas"></button><button class="bt" id="g-cgemas"></button></div>
         <div class="form" id="g-form-gemas" style="margin-top:6px">
           <label>Vender em Gemas<select id="g-vg"><option value="melhor">Quando render mais (pelo câmbio)</option><option value="sempre">Sempre que der</option><option value="nunca">Nunca</option></select></label>
@@ -3449,15 +3489,15 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     $('#g-out').value = CFG.evitarOutland ? '1' : '0'; $('#g-out').onchange = (e) => { CFG.evitarOutland = e.target.value === '1'; salvarCfg(); log(CFG.evitarOutland ? '⚙️ Outland: nunca comprar' : '⚙️ Outland: pode comprar'); };
     $('#g-pg').value = String(CFG.premioGemas || 0); $('#g-pg').onchange = (e) => { CFG.premioGemas = Number(e.target.value); salvarCfg(); pintar(); };
     const fg = $('#g-form-gemas');
-    for (const [k, rot] of [['gemasMaxPorCompra', 'Máx. por compra 💠'], ['gemasMaxPorDia', 'Máx. por dia 💠'], ['reservaGemas', 'Reserva de Gemas 💠'], ['disjuntorGemas', 'Disjuntor: 💠 em 10 min']]) {
+    for (const [k, rot] of [['gemasMaxPorCompra', 'Máx. por compra 🔮'], ['gemasMaxPorDia', 'Máx. por dia 🔮'], ['reservaGemas', 'Reserva de Gemas 🔮'], ['disjuntorGemas', 'Disjuntor: 🔮 em 10 min']]) {
       const l = document.createElement('label'); l.textContent = rot;
       const i = document.createElement('input'); i.value = CFG[k];
       i.onchange = () => { const v = num(i.value); if (v == null) return; CFG[k] = v; salvarCfg(); log(`⚙️ ${rot} = ${v}`); };
       l.appendChild(i); fg.appendChild(l);
     }
     $('#g-gemas').onclick = () => {
-      if (!CFG.gemasAtivas && !confirm(`Ativar operações em Gemas?\n\nGemas valem dinheiro (USDT). O app poderá gastar até ${CFG.gemasMaxPorCompra} 💠 por compra e ${CFG.gemasMaxPorDia} 💠 por dia (≈ US$ ${(CFG.gemasMaxPorDia * 0.01).toFixed(2)}), mantendo ${CFG.reservaGemas} 💠 de reserva. Compras podem dar prejuízo.`)) return;
-      CFG.gemasAtivas = !CFG.gemasAtivas; salvarCfg(); log(CFG.gemasAtivas ? '💠 Gemas ATIVADAS' : '💠 Gemas desligadas'); pintar();
+      if (!CFG.gemasAtivas && !confirm(`Ativar operações em Gemas?\n\nGemas valem dinheiro (USDT). O app poderá gastar até ${CFG.gemasMaxPorCompra} 🔮 por compra e ${CFG.gemasMaxPorDia} 🔮 por dia (≈ US$ ${(CFG.gemasMaxPorDia * 0.01).toFixed(2)}), mantendo ${CFG.reservaGemas} 🔮 de reserva. Compras podem dar prejuízo.`)) return;
+      CFG.gemasAtivas = !CFG.gemasAtivas; salvarCfg(); log(CFG.gemasAtivas ? '🔮 Gemas ATIVADAS' : '🔮 Gemas desligadas'); pintar();
     };
     $('#g-cgemas').onclick = () => {
       if (!CFG.claudePodeGemas && !confirm('Deixar o Claude criar regras de compra em Gemas (até 2 unidades por regra, dentro do teto por compra)?')) return;
@@ -3483,9 +3523,9 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     $('#i-num').innerHTML = `
       <span>Coins</span><b>${fmt(M.gold)}</b>
       <span>Gasto hoje</span><b>${curto(E.gastoHoje)} / ${curto(CFG.gastoMaxPorDia)}</b>
-      <span>Gemas</span><b>${fmt(M.gemas)} 💠 ${CFG.gemasAtivas ? '' : '<span class="mudo">(desligado)</span>'}</b>
-      <span>Gemas gastas hoje</span><b>${fmt(E.gemasHoje)} / ${fmt(CFG.gemasMaxPorDia)} 💠</b>
-      <span>Lucro estimado (acumulado)</span><b>${curto(E.lucroEstimado)} · ${fmt(E.lucroGemas)} 💠</b>
+      <span>Gemas</span><b>${fmt(M.gemas)} 🔮 ${CFG.gemasAtivas ? '' : '<span class="mudo">(desligado)</span>'}</b>
+      <span>Gemas gastas hoje</span><b>${fmt(E.gemasHoje)} / ${fmt(CFG.gemasMaxPorDia)} 🔮</b>
+      <span>Lucro estimado (acumulado)</span><b>${curto(E.lucroEstimado)} · ${fmt(E.lucroGemas)} 🔮</b>
       <span>Bronze Boss Tokens</span><b>${M.tokens ?? '?'}</b>
       <span>Conexão com o jogo</span><b>${M.ws?.readyState === 1 ? 'ok' : '…'}</b>
       <span>Pedidos ao mercado</span><b>${pedidosPorMin()}/min <span class="mudo">(teto ${CFG.pedidosPorMin})</span>${Date.now() < M.pausaAte ? ` · <span class="ruim">pausa ${Math.ceil((M.pausaAte - Date.now()) / 1000)} s</span>` : ''}</b>
@@ -3499,13 +3539,13 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     if (abaAtual === 'compras') {
       pintarNomes();
       $('#c-lista').innerHTML = E.regras.length ? `<table><tr><th>O quê</th><th>Faixa</th><th class="num">Qtd</th><th></th></tr>${E.regras.map((r) => `
-        <tr class="${r.ativa ? '' : 'mudo'}"><td>${r.tipo === 'item' ? '📦 ' + esc(E.nomesItens[r.itemId] || r.itemId) : (r.shiny === 'so' ? '✨ ' : '🐾 ') + esc(r.nome)}${r.origem === 'claude' ? ' 🧠' : ''}${r.moeda === 'orb' ? ' 💠' : ''}<br><span class="mudo">${[r.nvMin || r.nvMax ? `Nv ${r.nvMin || 0}–${r.nvMax || '∞'}` : '', r.notaMin ? 'nota ≥' + r.notaMin : '', r.potMin ? 'P' + r.potMin + '+' : '', r.ivSpdMin ? 'SPD ≥' + r.ivSpdMin : '', r.ivPrinMin ? 'ataque ≥' + r.ivPrinMin : '', '→ ' + r.depois].filter(Boolean).join(' · ')}</span></td>
+        <tr class="${r.ativa ? '' : 'mudo'}"><td>${r.tipo === 'item' ? '📦 ' + esc(E.nomesItens[r.itemId] || r.itemId) : (r.shiny === 'so' ? '✨ ' : '🐾 ') + esc(r.nome)}${r.origem === 'claude' ? ' 🧠' : ''}${r.moeda === 'orb' ? ' 🔮' : ''}<br><span class="mudo">${[r.nvMin || r.nvMax ? `Nv ${r.nvMin || 0}–${r.nvMax || '∞'}` : '', r.notaMin ? 'nota ≥' + r.notaMin : '', r.potMin ? 'P' + r.potMin + '+' : '', r.ivSpdMin ? 'SPD ≥' + r.ivSpdMin : '', r.ivPrinMin ? 'ataque ≥' + r.ivPrinMin : '', '→ ' + r.depois].filter(Boolean).join(' · ')}</span></td>
         <td>${r.precoMin ? curtoM(r.precoMin, r.moeda) + '–' : 'até '}${curtoM(r.precoMax, r.moeda)}</td><td class="num">${r.compradas || 0}/${r.qtd}</td>
         <td><button class="bt cinza" data-tog="${r.id}">${r.ativa ? '⏸' : '▶'}</button> <button class="bt verm" data-del="${r.id}">✕</button></td></tr>`).join('')}</table>` : '<span class="mudo">Nenhuma regra ainda.</span>';
       W.querySelectorAll('[data-tog]').forEach((b) => (b.onclick = () => { const r = E.regras.find((x) => x.id === b.dataset.tog); r.ativa = !r.ativa; persistir(); pintar(); }));
       W.querySelectorAll('[data-del]').forEach((b) => (b.onclick = () => { E.regras = E.regras.filter((x) => x.id !== b.dataset.del); persistir(); pintar(); }));
     }
-    const avisoGemas = '<div class="aviso">💠 Gemas desligadas. Para operar em Gemas, ative em ⚙️ Config → "Operar em Gemas".</div>';
+    const avisoGemas = '<div class="aviso">🔮 Gemas desligadas. Para operar em Gemas, ative em ⚙️ Config → "Operar em Gemas".</div>';
     if (abaAtual === 'sniperPk') {
       const vgs = vagasPk();
       { const L = revendasDoApp(7), el = $('#sp-rev');
@@ -3519,9 +3559,9 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     }
     if (abaAtual === 'sniperIt') {
       const cb = cambioImplicito();
-      $('#si-num').innerHTML = `<span>Câmbio implícito</span><b>${cb ? curto(cb.taxa) + ' Coins por 💠' : '—'}</b><span></span><b class="mudo">${cb ? esc(cb.como) : ''}</b><span>Gemas</span><b>${fmt(M.gemas)} 💠</b>${!CFG.gemasAtivas && CFG.snipeItMoeda !== 'gold' ? '' : ''}`;
+      $('#si-num').innerHTML = `<span>Câmbio implícito</span><b>${cb ? curto(cb.taxa) + ' Coins por 🔮' : '—'}</b><span></span><b class="mudo">${cb ? esc(cb.como) : ''}</b><span>Gemas</span><b>${fmt(M.gemas)} 🔮</b>${!CFG.gemasAtivas && CFG.snipeItMoeda !== 'gold' ? '' : ''}`;
       const its = Object.keys(M.resumo).filter((id) => (M.medias[id]?.gold?.media || M.medias[id]?.orb?.media) && !/Stone$/.test(E.nomesItens[id] || ''));
-      $('#si-tab').innerHTML = (CFG.snipeItMoeda !== 'gold' && !CFG.gemasAtivas ? avisoGemas : '') + (its.length ? `<table><tr><th>Item</th><th class="num">Coins: menor / média</th><th class="num">💠: menor / média</th></tr>${its.map((id) => { const r = M.resumo[id], g = M.medias[id]?.gold?.media, o = M.medias[id]?.orb?.media; return `<tr><td>${esc(E.nomesItens[id] || id)}</td><td class="num"><span class="${r.minGold && g && r.minGold < g * 0.9 ? 'bom' : ''}">${curto(r.minGold)}</span> / ${curto(g)}</td><td class="num"><span class="${r.minOrb && o && r.minOrb < o * 0.9 ? 'bom' : ''}">${fmt(r.minOrb)}</span> / ${fmt(o)}</td></tr>`; }).join('')}</table>` : '<span class="mudo">Ligue o app para ler o mercado.</span>');
+      $('#si-tab').innerHTML = (CFG.snipeItMoeda !== 'gold' && !CFG.gemasAtivas ? avisoGemas : '') + (its.length ? `<table><tr><th>Item</th><th class="num">Coins: menor / média</th><th class="num">🔮: menor / média</th></tr>${its.map((id) => { const r = M.resumo[id], g = M.medias[id]?.gold?.media, o = M.medias[id]?.orb?.media; return `<tr><td>${esc(E.nomesItens[id] || id)}</td><td class="num"><span class="${r.minGold && g && r.minGold < g * 0.9 ? 'bom' : ''}">${curto(r.minGold)}</span> / ${curto(g)}</td><td class="num"><span class="${r.minOrb && o && r.minOrb < o * 0.9 ? 'bom' : ''}">${fmt(r.minOrb)}</span> / ${fmt(o)}</td></tr>`; }).join('')}</table>` : '<span class="mudo">Ligue o app para ler o mercado.</span>');
     }
     if (abaAtual === 'casas') {
       { const el = $('#h-giro-st'); if (el) { const ev = eventoXp(); el.innerHTML = emGiro() ? `<span class="bom">Ligado agora</span>${ev ? ` — evento de XP ×${ev.mult}${ev.ate ? ' até ' + new Date(ev.ate).toLocaleString('pt-BR', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : ''}` : ''}` : `Desligado agora${CFG.giro === 'auto' ? ' (sem evento de XP)' : ''}`; } }
@@ -3551,25 +3591,34 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
         const est = !L.length && minO ? Math.floor(orc / minO) : null;
         const idade = M.listaToken?.orb ? Math.round((Date.now() - M.listaToken.orb.em) / 60000) : null;
         $('#b-calc-out').innerHTML = orc <= 0 ? '' : L.length
-          ? `<div class="kv" style="margin:0"><span>Tokens que ${fmt(orc)} 💠 compram agora</span><b class="bom">${fmt(qtd)} tokens</b><span>Gasto / preço médio</span><b>${fmt(gasto)} 💠 · ${qtd ? (gasto / qtd).toFixed(2) : '—'} 💠 cada${maior ? ` (até ${fmt(maior)})` : ''}</b>${ev ? `<span>Lucro esperado (${NOME_PREMIO[ev.premio]})</span><b class="${ev.liq * qtd - gasto > 0 ? 'bom' : 'ruim'}">${(ev.liq * qtd - gasto).toFixed(0)} 💠 <span class="mudo">(${ev.liq.toFixed(1)} 💠 por token)</span></b>` : ''}</div><p class="mudo" style="margin:4px 0 0">Pelos anúncios lidos há ${idade} min${soTeto && teto ? `, só até o teto de ${teto.toFixed(1)} 💠` : ''}.</p>`
-          : est != null ? `<span class="mudo">Sem a lista de anúncios ainda: pelo menor preço (${minO} 💠), ${fmt(orc)} 💠 dão uns <b>${fmt(est)} tokens</b>.</span>` : '<span class="mudo">Ainda sem preços de token em Gemas.</span>';
+          ? `<div class="kv" style="margin:0"><span>Tokens que ${fmt(orc)} 🔮 compram agora</span><b class="bom">${fmt(qtd)} tokens</b><span>Gasto / preço médio</span><b>${fmt(gasto)} 🔮 · ${qtd ? (gasto / qtd).toFixed(2) : '—'} 🔮 cada${maior ? ` (até ${fmt(maior)})` : ''}</b>${ev ? `<span>Lucro esperado (${NOME_PREMIO[ev.premio]})</span><b class="${ev.liq * qtd - gasto > 0 ? 'bom' : 'ruim'}">${(ev.liq * qtd - gasto).toFixed(0)} 🔮 <span class="mudo">(${ev.liq.toFixed(1)} 🔮 por token)</span></b>` : ''}</div><p class="mudo" style="margin:4px 0 0">Pelos anúncios lidos há ${idade} min${soTeto && teto ? `, só até o teto de ${teto.toFixed(1)} 🔮` : ''}.</p>`
+          : est != null ? `<span class="mudo">Sem a lista de anúncios ainda: pelo menor preço (${minO} 🔮), ${fmt(orc)} 🔮 dão uns <b>${fmt(est)} tokens</b>.</span>` : '<span class="mudo">Ainda sem preços de token em Gemas.</span>';
       }
       const t = Date.now(), q = quadroBoss(t), troca = proximaTroca(t), par = REGIOES[CFG.bossRegiao] ?? 2, cb = cambioImplicito();
-      $('#b-num').innerHTML = `<span>Tokens no inventário</span><b>${M.tokens ?? '?'}</b><span>Token agora</span><b>${curto(tokenPreco())}${M.resumo[ITEM.TOKEN]?.minOrb ? ' · ' + fmt(M.resumo[ITEM.TOKEN].minOrb) + ' 💠' : ''}</b>
-        <span>Câmbio usado</span><b>${cb ? curto(cb.taxa) + ' Coins/💠' : '—'}</b><span>Teto de compra de token</span><b>${(() => { const tg = tetoDoJogador(ITEM.TOKEN, 'orb'), tc = tetoDoJogador(ITEM.TOKEN, 'gold'), ev = evTokenGemas(); return `${tg ? tg.toFixed(1) + ' 💠' : '—'} · ${tc ? curto(tc) : '—'}${CFG.tokenPrecoMaxGemas ? ' <span class="mudo">(seu preço)</span>' : ev ? ` <span class="mudo">(automático: ${NOME_PREMIO[ev.premio]} rende ${ev.liq.toFixed(1)} 💠)</span>` : ''}`; })()}</b>
-        <span>Preço dos drops</span><b class="mudo">${[ITEM.ZFRAG, ITEM.AOE, ITEM.MEGA, ITEM.MEGASH, ITEM.SAFARI].map((id) => { const f = fonteGemaItem(id); return `${esc((E.nomesItens[id] || id).toString().replace(' Stone Fragment', '').replace(' TM Disk Piece', ' TM'))} ${fmt(Math.round(f.preco))}`; }).join(' · ')} 💠 <br>(${esc(fonteGemaItem(ITEM.MEGA).como)}${M.resumoEm ? ', lido ' + new Date(M.resumoEm).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : ''})</b>
+      $('#b-num').innerHTML = `<span>Tokens no inventário</span><b>${M.tokens ?? '?'}</b><span>Token agora</span><b>${curto(tokenPreco())}${M.resumo[ITEM.TOKEN]?.minOrb ? ' · ' + fmt(M.resumo[ITEM.TOKEN].minOrb) + ' 🔮' : ''}</b>
+        <span>Câmbio usado</span><b>${cb ? curto(cb.taxa) + ' Coins/🔮' : '—'}</b><span>Teto de compra de token</span><b>${(() => { const tg = tetoDoJogador(ITEM.TOKEN, 'orb'), tc = tetoDoJogador(ITEM.TOKEN, 'gold'), ev = evTokenGemas(); return `${tg ? tg.toFixed(1) + ' 🔮' : '—'} · ${tc ? curto(tc) : '—'}${CFG.tokenPrecoMaxGemas ? ' <span class="mudo">(seu preço)</span>' : ev ? ` <span class="mudo">(automático: ${NOME_PREMIO[ev.premio]} rende ${ev.liq.toFixed(1)} 🔮)</span>` : ''}`; })()}</b>
+        <span>Preço dos drops</span><b class="mudo">${[ITEM.ZFRAG, ITEM.AOE, ITEM.MEGA, ITEM.MEGASH, ITEM.SAFARI].map((id) => { const f = fonteGemaItem(id); return `${esc((E.nomesItens[id] || id).toString().replace(' Stone Fragment', '').replace(' TM Disk Piece', ' TM'))} ${fmt(Math.round(f.preco))}`; }).join(' · ')} 🔮 <br>(${esc(fonteGemaItem(ITEM.MEGA).como)}${M.resumoEm ? ', lido ' + new Date(M.resumoEm).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : ''})</b>
         <span>Próxima troca da rotação</span><b>${new Date(troca).toLocaleString('pt-BR', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}</b>
-        <span>Venda dos drops</span><b>${CFG.gemasAtivas ? 'em Gemas 💠' : '<span class="ruim">Gemas desligadas</span>'}</b>
+        <span>Venda dos drops</span><b>${CFG.gemasAtivas ? 'em Gemas 🔮' : '<span class="ruim">Gemas desligadas</span>'}</b>
         <span>Bônus de XP agora</span><b>×${(multXp(t) || 1).toFixed(2)}${eventoXp() ? ` · evento ×${eventoXp().mult} até ${new Date(eventoXp().ate).toLocaleString('pt-BR', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}` : ' · sem evento'}</b>
         <span>Caça rende agora</span><b>${curto(ganhoCacaH(t))}/h</b>`;
       const rot = ['Hoje', 'Amanhã', 'Depois de amanhã'], pos = BOSSES[CFG.bossRegiao].indexOf(CFG.bossKey);
-      $('#b-rot').innerHTML = M.mediasEm ? `<table><tr><th>Rotação</th><th>${esc(CFG.bossKey)} dá</th><th class="num">Lutas</th><th class="num">Lucro 💠</th><th class="num">Em Coins*</th></tr>${[0, 1, 2].map((d) => {
+      $('#b-rot').innerHTML = M.mediasEm ? `<table><tr><th>Rotação</th><th>${esc(CFG.bossKey)} dá</th><th class="num">Lutas</th><th class="num">Lucro 🔮</th><th class="num">Em Coins*</th></tr>${[0, 1, 2].map((d) => {
           const premio = premioDe(pos, t + d * 86400_000), ini = d === 0 ? t : troca + (d - 1) * 86400_000, r = lucroDaRotacao(premio, par, d === 0 ? (troca - t) / 3600_000 : 24, ini);
           return `<tr class="${r.lucroRotG > 0 ? 'bom' : 'ruim'}"><td>${rot[d]}${d === 0 ? ' <span class="mudo">(resto)</span>' : ''}</td><td>${NOME_PREMIO[premio]}</td><td class="num">${fmt(r.lutas)}<br><span class="mudo">${r.horasBoss.toFixed(1)} h${r.horasEvitadas ? ` · ${r.horasEvitadas.toFixed(0)} h caçando` : ''}</span></td><td class="num">${r.lucroRotG >= 0 ? '+' : ''}${fmt(r.lucroRotG)}</td><td class="num">${r.lucroRot != null ? (r.lucroRot >= 0 ? '+' : '') + curto(r.lucroRot) : '—'}</td></tr>`;
         }).join('')}</table><p class="mudo">Lutas = só nas horas em que o boss rende mais que a caça (o evento de XP e os bônus que vencem entram na conta), a ${segPorLuta()} s por luta, limitado aos tokens. Vitória ${Math.round(taxaVitoria() * 100)}%. *Em Coins já desconta o que a hunt (ouro + casas) renderia nesse tempo.</p>` : '<span class="mudo">Ligue o app para ler os preços.</span>';
-      $('#b-quadro').innerHTML = M.mediasEm ? `<table><tr><th></th>${BOSSES[CFG.bossRegiao].map((k) => `<th>${k === CFG.bossKey ? '★ ' : ''}${k}</th>`).join('')}</tr>${q.map((dia, i) => `<tr><td>${rot[i].split(' ')[0]}</td>${dia.map((b) => `<td class="${b.pct >= CFG.bossEvMinPct ? 'bom' : b.pct < 0 ? 'ruim' : ''}">${NOME_PREMIO[b.premio]}<br>${b.pct != null ? (b.lucroG >= 0 ? '+' : '') + fmt(b.lucroG) + ' 💠 (' + Math.round(b.pct * 100) + '%)' : '—'}<br><span class="mudo">${b.itens.map((x) => `${(x.chance * 100).toFixed(2)}% × ${fmt(x.gemas)}`).join(' + ')}</span></td>`).join('')}</tr>`).join('')}</table><p class="mudo">Por token: chance × preço em Gemas − 15% − custo do token convertido.</p>` : '';
+      $('#b-quadro').innerHTML = M.mediasEm ? `<table><tr><th></th>${BOSSES[CFG.bossRegiao].map((k) => `<th>${k === CFG.bossKey ? '★ ' : ''}${k}</th>`).join('')}</tr>${q.map((dia, i) => `<tr><td>${rot[i].split(' ')[0]}</td>${dia.map((b) => `<td class="${b.pct >= CFG.bossEvMinPct ? 'bom' : b.pct < 0 ? 'ruim' : ''}">${NOME_PREMIO[b.premio]}<br>${b.pct != null ? (b.lucroG >= 0 ? '+' : '') + fmt(b.lucroG) + ' 🔮 (' + Math.round(b.pct * 100) + '%)' : '—'}<br><span class="mudo">${b.itens.map((x) => `${(x.chance * 100).toFixed(2)}% × ${fmt(x.gemas)}`).join(' + ')}</span></td>`).join('')}</tr>`).join('')}</table><p class="mudo">Por token: chance × preço em Gemas − 15% − custo do token convertido.</p>` : '';
       const B = E.boss;
-      $('#b-res').innerHTML = `<div class="kv"><span>Lutas</span><b>${B.lutas} (${B.vitorias} vitórias)</b><span>Tempo médio por luta</span><b>${mediana(B.duracoes) ? mediana(B.duracoes) + ' s' : '—'}</b>${Object.entries(B.drops).map(([id, n]) => `<span>${esc(E.nomesItens[id] || id)}</span><b>${n} · ~${fmt(n * precoGemaItem(id) * (1 - COMISSAO))} 💠</b>`).join('')}</div>`;
+      { const r = resultadoBossDia(); $('#b-dia').innerHTML = r ? `<div class="kv" style="margin:0"><span>Lutas hoje</span><b>${fmt(r.lutas)} · ${Math.round(r.vitPct * 100)}% vitórias</b><span>Ritmo</span><b>~${Math.round(r.porHora)} lutas/h${r.seg ? ` · ${r.seg} s por luta` : ''}</b>
+          <span>Drops</span><b>${Object.entries(r.drops).map(([id, n]) => `${esc((E.nomesItens[id] || id).toString().replace(' Stone Fragment', '').replace(' TM Disk Piece', ' TM'))} ×${n}`).join(' · ') || '—'}</b>
+          <span>Recebido (drops vendidos)</span><b class="bom">${fmt(Math.round(r.recebido))} 🔮 <span class="mudo">(${r.vendidos} vendidos)</span></b><span>Ainda à venda / no inventário</span><b>~${fmt(Math.round(r.pendente))} 🔮</b>
+          <span>Tokens usados</span><b>${fmt(r.lutas)} × ${r.custoTk.toFixed(2)} 🔮 = ${fmt(Math.round(r.custo))} 🔮</b><span>Lucro do dia</span><b class="${r.lucro >= 0 ? 'bom' : 'ruim'}">~${fmt(Math.round(r.lucro))} 🔮${cambioImplicito()?.taxa ? ` (~${curto(r.lucro * cambioImplicito().taxa)})` : ''}</b></div>
+          <p class="mudo" style="margin:4px 0 0">Cada drop é anunciado logo (até ${CFG.bossAnunciosPorItem} anúncios por item), um degrau abaixo do menor anúncio, nunca abaixo de ${Math.round(CFG.bossDropPisoMedia * 100)}% da média de 7 dias.</p>` : '<span class="mudo">Nenhuma luta hoje ainda.</span>';
+        const t2 = estudoToken(), meu = tetoDoJogador(ITEM.TOKEN, 'orb');
+        $('#b-tok').innerHTML = `<table><tr><th>Dia</th><th>Prêmio</th><th class="num">Rende por token (agora / 7 d)</th></tr>${t2.dias.map((x) => `<tr class="${x.premio === 'tickets' ? 'ruim' : ''}"><td>${['Hoje', 'Amanhã', 'Depois'][x.d]}</td><td>${NOME_PREMIO[x.premio]}</td><td class="num">${x.agora.toFixed(2)} / ${x.media.toFixed(2)} 🔮</td></tr>`).join('')}</table>
+          <table style="margin-top:6px"><tr><th>Token a</th><th class="num">Lucro por token (dia bom, pior caso)</th></tr>${t2.precos.map((x) => `<tr class="${x.lucro > 0.5 ? 'bom' : x.lucro > 0 ? '' : 'ruim'}"><td>${x.t} 🔮${meu && Math.abs(meu - x.t) < 0.01 ? ' ← seu teto' : ''}</td><td class="num">${x.lucro >= 0 ? '+' : ''}${x.lucro.toFixed(2)} 🔮 (${Math.round(x.pct * 100)}%)</td></tr>`).join('')}</table>
+          <p class="mudo" style="margin:4px 0 0">Teto sugerido: ${t2.tetoSugerido.toFixed(1)} 🔮 (85% do que o token rende no pior dia bom). Só vale usar tokens nos dias de Mega e de TM; no dia do Safari Ticket o token rende ~${(t2.dias.find((x) => x.premio === 'tickets')?.agora || 0).toFixed(1)} 🔮.</p>`; }
+      $('#b-res').innerHTML = `<div class="kv"><span>Lutas</span><b>${B.lutas} (${B.vitorias} vitórias)</b><span>Tempo médio por luta</span><b>${mediana(B.duracoes) ? mediana(B.duracoes) + ' s' : '—'}</b>${Object.entries(B.drops).map(([id, n]) => `<span>${esc(E.nomesItens[id] || id)}</span><b>${n} · ~${fmt(n * precoGemaItem(id) * (1 - COMISSAO))} 🔮</b>`).join('')}</div>`;
     }
     if (abaAtual === 'opPk' || abaAtual === 'opIt') pintarLucro(abaAtual);
     if (abaAtual === 'estudo') $('#e-corpo').innerHTML = painelEstudo();
@@ -3580,7 +3629,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
         else {
           const lin = (h, r2) => `<tr><td>${h}</td><td class="num">${curto(r2.gold.gasto)}<br><span class="mudo">${r2.gold.nC} compras</span></td><td class="num">${curto(r2.gold.recebido)}<br><span class="mudo">${r2.gold.nV} vendas</span></td><td class="num ${r2.gold.saldo >= 0 ? 'bom' : 'ruim'}">${r2.gold.saldo >= 0 ? '+' : ''}${curto(r2.gold.saldo)}</td><td class="num">${fmt(r2.orb.gasto)} / ${fmt(Math.round(r2.orb.recebido))}</td><td class="num ${r2.orb.saldo >= 0 ? 'bom' : 'ruim'}">${r2.orb.saldo >= 0 ? '+' : ''}${fmt(Math.round(r2.orb.saldo))}</td></tr>`;
           const ult = [...(E.real.vendas || [])].sort((a, z) => z.em - a.em).slice(0, 6);
-          el.innerHTML = `<table><tr><th>Janela</th><th class="num">Coins gastos</th><th class="num">Coins recebidos</th><th class="num">Saldo</th><th class="num">💠 gastas / recebidas</th><th class="num">Saldo 💠</th></tr>${lin('24 h', resumoReal(24))}${lin('7 dias', resumoReal(24 * 7))}</table>
+          el.innerHTML = `<table><tr><th>Janela</th><th class="num">Coins gastos</th><th class="num">Coins recebidos</th><th class="num">Saldo</th><th class="num">🔮 gastas / recebidas</th><th class="num">Saldo 🔮</th></tr>${lin('24 h', resumoReal(24))}${lin('7 dias', resumoReal(24 * 7))}</table>
             <p class="mudo" style="margin:6px 0 2px">Saldo de caixa: compras para guardar (tokens, pokémon nas casas) entram como gasto até serem vendidas. Recebido = já sem a comissão. Lido às ${new Date(E.real.em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.</p>
             ${ult.length ? `<table><tr><th>Últimas vendas</th><th class="num">Recebido</th></tr>${ult.map((v) => `<tr><td>${esc(v.desc || '')}<br><span class="mudo">${new Date(v.em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span></td><td class="num">${curtoM(v.liquido, v.moeda)}</td></tr>`).join('')}</table>` : ''}`;
         }
@@ -3591,15 +3640,15 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
       const fx = {}, fo = {}, fs = {}, vg = valorGema();
       for (const v of M.base) (fx[faixaDe(v.nv)] ??= []).push(v.preco);
       for (const v of M.baseOrb) (v.shiny ? fs : fo)[faixaDe(v.nv)] ??= [], (v.shiny ? fs : fo)[faixaDe(v.nv)].push(v.preco);
-      $('#a-faixas').innerHTML = Object.keys(fx).length || Object.keys(fo).length ? `<table><tr><th>Nível</th><th class="num">Coins</th><th class="num">💠 (não shiny)</th><th class="num">💠 em Coins</th><th>Melhor</th><th class="num">✨ shiny 💠</th></tr>${['100-149', '150-299', '300-499', '500-799', '800-1199', '1200+'].filter((k) => fx[k] || fo[k]).map((k) => {
+      $('#a-faixas').innerHTML = Object.keys(fx).length || Object.keys(fo).length ? `<table><tr><th>Nível</th><th class="num">Coins</th><th class="num">🔮 (não shiny)</th><th class="num">🔮 em Coins</th><th>Melhor</th><th class="num">✨ shiny 🔮</th></tr>${['100-149', '150-299', '300-499', '500-799', '800-1199', '1200+'].filter((k) => fx[k] || fo[k]).map((k) => {
           const mc = fx[k] ? mediana(fx[k]) : null, mo = fo[k] ? mediana(fo[k]) : null, eqC = mc ? mc * (1 - COMISSAO) : 0, eqO = mo && vg ? liquidoVenda(mo, 'orb', 'pokemon') * vg : 0;
-          return `<tr><td>Nv ${k}</td><td class="num">${mc ? curto(mc) : '—'} <span class="mudo">(${fx[k]?.length || 0})</span></td><td class="num">${mo ? fmt(mo) : '—'} <span class="mudo">(${fo[k]?.length || 0})</span></td><td class="num">${eqO ? curto(mo * vg) : '—'}</td><td class="${eqO > eqC ? 'bom' : ''}">${eqO && eqC ? (eqO > eqC ? '💠 Gemas' : 'Coins') : eqO ? '💠' : 'Coins'}</td><td class="num">${fs[k] ? fmt(mediana(fs[k])) + ' <span class="mudo">(' + fs[k].length + ')</span>' : '—'}</td></tr>`;
-        }).join('')}</table><p class="mudo">Melhor = o que entra mais depois das comissões, com 💠 convertida pelo câmbio de ${vg ? curto(vg) : '—'} Coins.</p>` : '<span class="mudo">Aguardando a planilha.</span>';
+          return `<tr><td>Nv ${k}</td><td class="num">${mc ? curto(mc) : '—'} <span class="mudo">(${fx[k]?.length || 0})</span></td><td class="num">${mo ? fmt(mo) : '—'} <span class="mudo">(${fo[k]?.length || 0})</span></td><td class="num">${eqO ? curto(mo * vg) : '—'}</td><td class="${eqO > eqC ? 'bom' : ''}">${eqO && eqC ? (eqO > eqC ? '🔮 Gemas' : 'Coins') : eqO ? '🔮' : 'Coins'}</td><td class="num">${fs[k] ? fmt(mediana(fs[k])) + ' <span class="mudo">(' + fs[k].length + ')</span>' : '—'}</td></tr>`;
+        }).join('')}</table><p class="mudo">Melhor = o que entra mais depois das comissões, com 🔮 convertida pelo câmbio de ${vg ? curto(vg) : '—'} Coins.</p>` : '<span class="mudo">Aguardando a planilha.</span>';
       const its = Object.keys(M.resumo).filter((id) => M.medias[id]?.gold?.media && !/Stone$/.test(E.nomesItens[id] || '')).slice(0, 20);
-      $('#a-itens').innerHTML = its.length ? `<table><tr><th>Item</th><th class="num">Coins menor / média</th><th class="num">💠 menor / média</th><th>Vender em</th></tr>${its.map((id) => { const mn = M.resumo[id].minGold, md = M.medias[id].gold.media, mo = M.resumo[id].minOrb, mdo = M.medias[id]?.orb?.media; const mv = moedaVendaItem(Number(id)); return `<tr><td>${esc(E.nomesItens[id] || id)}</td><td class="num ${mn < md * 0.9 ? 'bom' : ''}">${curto(mn)} / ${curto(md)}</td><td class="num">${mo ? fmt(mo) : '—'} / ${mdo ? fmt(mdo) : '—'}</td><td class="${mv === 'orb' ? 'bom' : ''}">${mv === 'orb' ? '💠 Gemas' : 'Coins'}</td></tr>`; }).join('')}</table>` : '<span class="mudo">Ligue o app para ler o mercado.</span>';
+      $('#a-itens').innerHTML = its.length ? `<table><tr><th>Item</th><th class="num">Coins menor / média</th><th class="num">🔮 menor / média</th><th>Vender em</th></tr>${its.map((id) => { const mn = M.resumo[id].minGold, md = M.medias[id].gold.media, mo = M.resumo[id].minOrb, mdo = M.medias[id]?.orb?.media; const mv = moedaVendaItem(Number(id)); return `<tr><td>${esc(E.nomesItens[id] || id)}</td><td class="num ${mn < md * 0.9 ? 'bom' : ''}">${curto(mn)} / ${curto(md)}</td><td class="num">${mo ? fmt(mo) : '—'} / ${mdo ? fmt(mdo) : '—'}</td><td class="${mv === 'orb' ? 'bom' : ''}">${mv === 'orb' ? '🔮 Gemas' : 'Coins'}</td></tr>`; }).join('')}</table>` : '<span class="mudo">Ligue o app para ler o mercado.</span>';
     }
     if (abaAtual === 'config') {
-      const g = $('#g-gemas'); g.textContent = CFG.gemasAtivas ? '💠 Operar em Gemas: LIGADO' : '💠 Operar em Gemas: desligado'; g.className = 'bt ' + (CFG.gemasAtivas ? 'lar' : 'cinza');
+      const g = $('#g-gemas'); g.textContent = CFG.gemasAtivas ? '🔮 Operar em Gemas: LIGADO' : '🔮 Operar em Gemas: desligado'; g.className = 'bt ' + (CFG.gemasAtivas ? 'lar' : 'cinza');
       const c = $('#g-cgemas'); c.textContent = CFG.claudePodeGemas ? '🧠 Claude em Gemas: sim' : '🧠 Claude em Gemas: não'; c.className = 'bt ' + (CFG.claudePodeGemas ? 'lar' : 'cinza');
     }
     if (abaAtual === 'prey') {
@@ -3621,12 +3670,12 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
       const ec = estudoCasas();
       $('#n-casas').innerHTML = `<p class="mudo" style="margin-top:0">Cada 1% de XP Share rende ~${curto(ec.porPctH)}/h com o nível-alvo ${CFG.nivelAlvo}${ec.limitado ? ' — <b>limitado pela demanda do mercado</b>: mais casas no mesmo alvo não vendem mais' : ''}.</p>
         <table><tr><th>Opção</th><th class="num">Custo</th><th class="num">Δ por hora</th><th class="num">Paga em</th></tr>${ec.linhas.map((l) => `<tr class="${l.payback != null && l.payback <= CFG.investPaybackDias ? 'bom' : ''}"><td>${esc(l.acao)}${l.nota || l.moeda ? `<br><span class="mudo">${esc([l.nota, l.moeda].filter(Boolean).join(' · '))}</span>` : ''}</td><td class="num">${curto(l.custo)}</td><td class="num">${l.ganhoH ? (l.ganhoH > 0 ? '+' : '') + curto(l.ganhoH) : '—'}</td><td class="num">${l.payback != null ? l.payback.toFixed(1) + ' d' : '—'}</td></tr>`).join('')}</table>
-        <p class="mudo">Preços: ${RAR_CASA.slice(0, 3).map(([n]) => `${n} ${ec.pc[n].coins ? curto(ec.pc[n].coins) : ec.pc[n].gemas ? fmt(ec.pc[n].gemas) + ' 💠' : '—'}`).join(' · ')}. Casas pagas em Gemas são convertidas pelo câmbio.</p>`;
+        <p class="mudo">Preços: ${RAR_CASA.slice(0, 3).map(([n]) => `${n} ${ec.pc[n].coins ? curto(ec.pc[n].coins) : ec.pc[n].gemas ? fmt(ec.pc[n].gemas) + ' 🔮' : '—'}`).join(' · ')}. Casas pagas em Gemas são convertidas pelo câmbio.</p>`;
       const dl = $('#n-esp-l'); if (dl && !dl.childElementCount && M.base.length) dl.innerHTML = [...new Set(M.base.map((v) => v.nome))].sort().map((n) => `<option value="${esc(n)}">`).join('');
     }
     if (abaAtual === 'avaliar') {
       const pi = PRC.info();
-      $('#v-prc-st').textContent = pi.vendas ? `${fmt(pi.vendas)} vendas em 💠 · lidas ${new Date(pi.geradoEm).toLocaleString('pt-BR')} · acerta a até 25% em ${Math.round((pi.teste?.ate25 || 0) * 100)}% das vendas` : pi.carregando ? 'baixando preços…' : pi.erro ? 'erro: ' + pi.erro : '';
+      $('#v-prc-st').textContent = pi.vendas ? `${fmt(pi.vendas)} vendas em 🔮 · lidas ${new Date(pi.geradoEm).toLocaleString('pt-BR')} · acerta a até 25% em ${Math.round((pi.teste?.ate25 || 0) * 100)}% das vendas` : pi.carregando ? 'baixando preços…' : pi.erro ? 'erro: ' + pi.erro : '';
       const dl = $('#v-nomes'); if (dl && !dl.childElementCount && M.base.length) dl.innerHTML = [...new Set([...M.base, ...M.baseOrb].map((v) => v.nome))].sort().map((n) => `<option value="${esc(n)}">`).join('');
       const linha = (t, rot) => Object.entries(t).sort((a, z) => (parseFloat(a[0]) || 0) - (parseFloat(z[0]) || 0)).map(([k, x]) => `<tr><td>${rot(k)}</td><td class="num">×${x.f.toFixed(2)}</td><td class="num mudo">${x.n}${x.n < 8 ? ' (pouco)' : ''}</td></tr>`).join('');
       $('#v-fat').innerHTML = FAT.amostras ? `<p class="mudo" style="margin-top:0">${fmt(FAT.amostras)} vendas em Coins comparadas dentro da mesma espécie e faixa de nível. Potência e IV medem o que sobra depois da nota.</p>
@@ -3658,7 +3707,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     }
   }
 
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.29' }, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.30' }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));
