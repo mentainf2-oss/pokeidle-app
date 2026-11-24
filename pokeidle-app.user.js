@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.16
+// @version      5.17
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -464,6 +464,20 @@
     persistir();
     if (Math.abs(antes.orb - E.gemasHoje) >= 10 || Math.abs(antes.gold - E.gastoHoje) >= 1e6)
       log(`🧾 orçamento do dia acertado pelo histórico: 💠 ${fmt(antes.orb)} → ${fmt(E.gemasHoje)} · Coins ${curto(antes.gold)} → ${curto(E.gastoHoje)} (${E.gemasHoje < antes.orb || E.gastoHoje < antes.gold ? 'a diferença eram sorteios perdidos, que não custaram nada' : 'inclui compras feitas fora do app'})`, 'ok');
+  }
+  // o que o app comprou e já vendeu: casa a venda (histórico) com a compra (registro do app ou histórico) pelo id do pokémon
+  function revendasDoApp(dias = 7) {
+    const lim = Date.now() - dias * 86400_000, cb = cambioImplicito()?.taxa || 0, out = [];
+    for (const v of E.real?.vendas || []) {
+      if (v.em < lim || v.pokemonId == null) continue;
+      const o = E.ops.find((x) => x.tipo === 'compra' && x.pokemonId != null && String(x.pokemonId) === String(v.pokemonId) && x.em < v.em);
+      const c = o ? { preco: o.unit ?? o.preco, moeda: o.moeda, em: o.em, origem: /casa/.test(o.motivo || '') ? 'casa' : 'sniper' } : (() => { const h = (E.real?.compras || []).find((x) => x.pokemonId != null && String(x.pokemonId) === String(v.pokemonId) && x.em < v.em); return h ? { preco: h.bruto, moeda: h.moeda, em: h.em, origem: 'histórico' } : null; })();
+      if (!c) continue;
+      const conv = (val, de) => (de === 'gold' ? val : val * cb);                       // tudo em Coins para comparar
+      const lucroC = conv(v.liquido, v.moeda) - conv(c.preco, c.moeda);
+      out.push({ desc: v.desc, compra: c, venda: { liquido: v.liquido, moeda: v.moeda, em: v.em }, lucroC, horas: (v.em - c.em) / 3600_000 });
+    }
+    return out.sort((a, z) => z.venda.em - a.venda.em);
   }
   // soma por moeda numa janela: gasto (compras), recebido (vendas líquidas da comissão) e saldo
   function resumoReal(horas) {
@@ -2593,6 +2607,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     $('#sec-sniperPk').innerHTML = `
       <div class="aviso">Lê os anúncios novos a cada ${CFG.snipeSeg}–${Math.max(CFG.snipeSeg * 3, 45)} s (mais devagar quando o mercado está parado). Todo anúncio fica 2 min retido, então ler devagar não perde nada. Só compra para revender quando há vaga na vitrine (10 pokémon), deixando vaga para as casas que estão terminando.</div>
       <div class="kv" id="sp-num"></div>
+      <div class="cart"><h4>Revendas do app (7 dias, histórico da conta)</h4><div id="sp-rev"></div></div>
       <div class="cart"><h4>Configuração</h4>
         <div class="form">
           <label>Moeda${opMoeda('sp-moeda')}</label>
@@ -3025,6 +3040,10 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     const avisoGemas = '<div class="aviso">💠 Gemas desligadas. Para operar em Gemas, ative em ⚙️ Config → "Operar em Gemas".</div>';
     if (abaAtual === 'sniperPk') {
       const vgs = vagasPk();
+      { const L = revendasDoApp(7), el = $('#sp-rev');
+        if (el) el.innerHTML = !E.real ? '<span class="mudo">Aparece depois da primeira leitura do histórico (Análise ligada).</span>' : !L.length ? '<span class="mudo">Nenhuma revenda casada ainda nos últimos 7 dias.</span>'
+          : `<div class="kv" style="margin:0"><span>Revendas</span><b>${L.length} · ${L.filter((x) => x.lucroC > 0).length} com lucro</b><span>Lucro total</span><b class="${L.reduce((s2, x) => s2 + x.lucroC, 0) >= 0 ? 'bom' : 'ruim'}">${curto(L.reduce((s2, x) => s2 + x.lucroC, 0))} Coins (em Coins, pelo câmbio)</b><span>Tempo médio até vender</span><b>${(L.reduce((s2, x) => s2 + x.horas, 0) / L.length).toFixed(1)} h</b></div>
+             <table><tr><th>Pokémon</th><th class="num">Compra → venda</th><th class="num">Lucro</th></tr>${L.slice(0, 8).map((x) => `<tr><td>${esc(x.desc || '')}<br><span class="mudo">${x.compra.origem} · ${x.horas.toFixed(1)} h</span></td><td class="num">${curtoM(x.compra.preco, x.compra.moeda)} → ${curtoM(Math.round(x.venda.liquido), x.venda.moeda)}</td><td class="num ${x.lucroC >= 0 ? 'bom' : 'ruim'}">${curto(x.lucroC)}</td></tr>`).join('')}</table>`; }
       $('#sp-num').innerHTML = `<span>Situação</span><b class="${M.snipeStats.pausa ? 'ruim' : 'bom'}">${M.snipeStats.pausa ? '⏸ ' + M.snipeStats.pausa : `lendo a cada ~${Math.round(M.snipeStats.espera || CFG.snipeSeg)} s`}</b><span>Vagas p/ revenda</span><b>${vgs.paraSnipe} <span class="mudo">(${vgs.usadas}/${CFG.vagasPk} anunciados, ${vgs.reserva} reservadas p/ casas)</span></b><span>Anúncios analisados</span><b>${fmt(M.snipeStats.vistos)}</b><span>Oportunidades</span><b>${fmt(M.snipeStats.oportunidades)}</b><span>Compras enviadas</span><b>${fmt(M.snipeStats.compras)}</b><span>Base de preços</span><b>${fmt(M.base.length)} em Coins · ${fmt(M.baseOrb.length)} em Gemas</b>`;
       $('#sp-gem').innerHTML = CFG.snipePkMoeda !== 'gold' && !CFG.gemasAtivas ? avisoGemas : '';
       const ops = E.ops.filter((o) => /compra/.test(o.tipo) && /sniper/.test(o.motivo || '') && o.motivo && !/flip|cruzado/.test(o.motivo)).slice(0, 15);
@@ -3167,7 +3186,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     }
   }
 
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.16' }, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.17' }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));

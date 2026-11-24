@@ -2,6 +2,7 @@
 
 | Versão | Data | O que mudou |
 | --- | --- | --- |
+| 5.17 | 2026-11-24 | Aba Sniper pokémon: revendas do app nos últimos 7 dias, casando cada venda do histórico com a compra (lucro em Coins pelo câmbio, tempo até vender, origem sniper/casa). |
 | 5.16 | 2026-11-24 | Orçamento do dia acertado pelo histórico da conta a cada 10 min: conta só o que foi comprado de verdade (o sorteio de 3 s perdido não custa nada) mais o que está em andamento. Antes, 9.999 💠 contados contra 687 💠 gastos de fato travavam as compras. |
 | 5.15 | 2026-11-24 | Casa vazia: o app coloca primeiro um pokémon da sua coleção (fora da equipe, vendável, abaixo do nível-alvo), o que mais ganha valor até o alvo; só compra se não houver. Conferência do Claude: recebe as contas já feitas (lucro, margem, vendas de referência) e só veta por critérios claros; resposta em JSON com o número que decidiu. |
 | 5.13 | 2026-11-23 | Aba Claude: histórico das conferências de compra (aprovadas, vetadas e o motivo de cada uma), com o resumo das últimas 24 h. |
