@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.37
+// @version      5.38
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -31,7 +31,7 @@
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.37';
+  const VERSAO_APP = '5.38';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -2254,6 +2254,35 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
       }
     }
   }
+  /* 🔎 AUDITORIA: a cada 10 min o app confere o próprio trabalho e avisa (e corrige o que dá) antes de virar prejuízo:
+   *  - drop de boss parado no inventário → anuncia;  - anúncio de drop acima do menor preço listado → marca para o reajuste;
+   *  - anúncio vendendo abaixo do custo → avisa;  - item comprado para revender cujo menor preço de hoje não paga o custo + taxa → avisa. */
+  function auditoria() {
+    if (Date.now() - (M._auditEm || 0) < 10 * 60_000) return;
+    M._auditEm = Date.now();
+    const achados = [];
+    const drops = [ITEM.ZFRAG, ITEM.AOE, ITEM.MEGA, ITEM.MEGASH, ITEM.SAFARI];
+    for (const id of drops) {
+      const tem = Number(M.itens[id] || 0), nome = (E.nomesItens[id] || id).toString();
+      const abertos = M.meus.filter((x) => x.itemId === id && x.moeda === 'orb').length;
+      if (tem && CFG.bossVenderDrops && CFG.gemasAtivas && abertos < CFG.bossAnunciosPorItem && M.meus.length < 20) achados.push(`${tem}× ${nome} no inventário sem anúncio`);
+      for (const a of M.meus.filter((x) => x.itemId === id && x.moeda === 'orb')) { const menor = menorListadoItem(id, 'orb', a.id); if (menor && a.preco > menor) achados.push(`${nome} anunciado a ${fmt(a.preco)} 🔮, acima do menor listado (${fmt(menor)})`); }
+    }
+    for (const a of M.meus) {
+      const c = custoDoAnuncio(a); if (!c || !(c.custo > 0)) continue;
+      const liq = liquidoVenda(a.preco, a.moeda, a.tipo === 'pokemon' ? 'pokemon' : 'item') / (a.tipo === 'item' ? 1 : 1);
+      if (liq < c.custo * 0.98) achados.push(`${a.ficha?.nome || E.nomesItens[a.itemId] || 'anúncio'} a ${curtoM(a.preco, a.moeda)} paga menos que o custo (~${curtoM(Math.round(c.custo), a.moeda)})`);
+    }
+    for (const [k, c] of Object.entries(E.custosItens || {})) {
+      if (!c?.custoMedio || !c.qtd) continue; const [id, m] = k.split(':'); const moeda = m === 'orb' ? 'orb' : 'gold';
+      const menor = menorListadoItem(Number(id), moeda); if (!menor) continue;
+      if (menor * (1 - COMISSAO) < c.custoMedio) achados.push(`${E.nomesItens[id] || id}: comprado a ~${curtoM(Math.round(c.custoMedio), moeda)}, hoje o menor anúncio é ${curtoM(menor, moeda)} (não paga a taxa)`);
+    }
+    M.auditoria = { em: Date.now(), achados };
+    if (achados.length) log(`🔎 auditoria: ${achados.slice(0, 4).join(' · ')}${achados.length > 4 ? ` (+${achados.length - 4})` : ''}`, 'erro');
+    if (achados.some((x) => /sem anúncio/.test(x))) { M._dropsEm = 0; }   // força a venda dos drops na próxima volta
+    if (achados.some((x) => /acima do menor listado/.test(x))) M.reajTodosEm = 0;
+  }
   async function cicloBoss() {
     // drops que ficaram no inventário (o inventário às vezes chega depois do aviso do drop): anuncia a cada 2 min
     if (CFG.bossVenderDrops && Date.now() - (M._dropsEm || 0) > 120_000) { M._dropsEm = Date.now(); try { await venderDropsBoss(); } catch (e) { log('👑 venda dos drops: ' + e.message, 'erro'); } }
@@ -2835,7 +2864,8 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
       try {
         novoDia();
         if (CFG.mod.analise) { pedirPlanilhaSeHora(); await retratoItens(); }
-        await conferirLucroReal();                                   // histórico da conta: orçamento real e abas de Lucro (a cada 10–30 min)
+        await conferirLucroReal();
+        try { auditoria(); } catch (e) { console.warn('[PKApp] auditoria', e); }                                   // histórico da conta: orçamento real e abas de Lucro (a cada 10–30 min)
         if (CFG.mod.compras) await cicloCompras();
         if (CFG.mod.casas) await cicloCasas();
         if (CFG.mod.casas || CFG.mod.sniperPk || E.filaVenda?.length) { await processarFilaVenda(); if (!CFG.vendaRapida) await reajustarPokemons(); }
@@ -3769,7 +3799,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
         boss: bd && { lutas: bd.lutas, vit: bd.vit, porHora: bd.porHora, drops: bd.drops, recebido: bd.recebido, pendente: bd.pendente, custo: bd.custo, lucro: bd.lucro },
         emBoss: !!M.emBoss, bossAuto: !!M.bossAuto,
         casas: Object.values(E.postos || {}).filter(Boolean).map((p) => ({ nome: p.nome, nv: p.xp ? nivelDeXp(p.xp) : null, bot: !!p.bot, shiny: !!p.shiny })),
-        ideias: M.estudo?.ideias || [], log: M.log.slice(0, 25).map((l) => ({ t: l.t, msg: l.msg, tipo: l.tipo })),
+        ideias: M.estudo?.ideias || [], auditoria: M.auditoria?.achados || [], log: M.log.slice(0, 25).map((l) => ({ t: l.t, msg: l.msg, tipo: l.tipo })),
       }));
     },
     definirIrmas(lista) {

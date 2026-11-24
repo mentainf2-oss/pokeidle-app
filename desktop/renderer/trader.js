@@ -74,6 +74,7 @@ async function renderTrader() {
       sel.onchange = async () => { pkEstado = await window.idle.invoke('poke:pkapp:papel', c.id, sel.value); toast(`Papel de ${(r && r.nick) || c.nome}: ${pkNomePapel[sel.value]}`); renderTrader(); };
       const lin = el('div', 'actions'); lin.append(el('span', 'muted', 'Papel desta conta:'), sel, button('Abrir no jogo', 'ghost', async () => { await window.idle.invoke('poke:select', c.id).catch(() => {}); go('poke'); }));
       card.append(lin);
+      if (r.auditoria && r.auditoria.length) card.append(el('p', 'tip bad', `🔎 ${r.auditoria.join(' · ')}`));
       if (r.casas && r.casas.length) card.append(el('p', 'tip', `🏠 ${r.casas.map((x) => `${x.nome}${x.shiny ? ' ✨' : ''} Nv ${x.nv ?? '?'}${x.bot ? '' : ' (seu)'}`).join(' · ')}`));
       grid.append(card);
     }

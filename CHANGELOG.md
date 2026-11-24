@@ -2,6 +2,7 @@
 
 | Versão | Data | O que mudou |
 | --- | --- | --- |
+| 5.38 | 2026-11-24 | 🔎 Auditoria a cada 10 min: drop de boss parado no inventário (anuncia na hora), anúncio de drop acima do menor preço listado (reajusta), anúncio que paga menos que o custo e item comprado para revenda que o mercado de hoje não paga — tudo no log e na aba Lucro do app de PC. |
 | 5.37 | 2026-11-24 | Drops do boss vendidos pelo menor preço listado agora (antes: um degrau abaixo, com piso de 80% da média de 7 dias) — pedido do jogador. O reajuste dos anúncios de drop segue o mesmo preço. |
 | 5.36 | 2026-11-24 | Config → "Levar a configuração para outro lugar": copia todos os ajustes (menos a chave do Claude) e importa em outro lugar, como o app de PC; ao importar, fica em simulação. App de PC: atualiza sozinho a cada 15 min sem precisar de token enquanto o repositório for público, e instala quando o PC fica 2 min sem uso. |
 | 5.35 | 2026-11-24 | Log de reajuste de item mostrava "Nv undefined" no nome (ex.: Mega Shiny Stone Fragment). |
