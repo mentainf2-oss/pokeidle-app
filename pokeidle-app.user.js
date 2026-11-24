@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.46
+// @version      5.47
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -31,7 +31,7 @@
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.46';
+  const VERSAO_APP = '5.47';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -228,7 +228,11 @@
   const WSOrig = PAGINA.WebSocket;
   PAGINA.WebSocket = function (url, p) {
     const ws = p ? new WSOrig(url, p) : new WSOrig(url);
-    if (String(url).includes('pokeidle.io')) { M.ws = ws; ws.addEventListener('message', (ev) => { if (typeof ev.data === 'string') receber(ev.data); }); }
+    if (String(url).includes('pokeidle.io')) {
+      M.ws = ws; ws.addEventListener('message', (ev) => { if (typeof ev.data === 'string') receber(ev.data); });
+      const s0 = ws.send.bind(ws);
+      ws.send = (d) => { try { if (!M.enviandoNosso && typeof d === 'string') explorar('saida', d); } catch {} return s0(d); };   // o que o JOGO manda quando você clica
+    }
     return ws;
   };
   PAGINA.WebSocket.prototype = WSOrig.prototype;
@@ -236,7 +240,7 @@
   const enviar = (o) => {
     if (!M.ws || M.ws.readyState !== 1) return false;
     if (/^(market|csv)\./.test(o.t || '')) { M.reqs.push(Date.now()); M.reqTotal++; }
-    M.ws.send(JSON.stringify(o)); return true;
+    M.enviandoNosso = true; try { M.ws.send(JSON.stringify(o)); } finally { M.enviandoNosso = false; } return true;
   };
   // espera a vez: intervalo mínimo entre pedidos, teto por minuto e pausa quando o servidor pede calma
   async function esperarVez() {
@@ -297,7 +301,20 @@
     if (typeof s.nick === 'string' && s.nick) M.nick = s.nick;
     if (s.boss && typeof s.boss === 'object') { M.emBoss = !!(s.boss.key || s.boss.dentro); if ('auto' in s.boss) M.bossAuto = s.boss.auto; }
   }
+  // 🔭 explorador: cataloga os tipos de mensagem do jogo (as que chegam e as que o jogo manda quando VOCÊ clica em algo),
+  // com as chaves e um exemplo curto — é assim que o app descobre novas automações (resgatar passe, missões, eventos…)
+  const EXP = (() => { const x = ler('pkapp.explorar', null); return x && x.entrada && x.saida ? x : { entrada: {}, saida: {} }; })();
+  let expSujo = false;
+  function explorar(lado, txt) {
+    const t = String(txt).slice(0, 60).match(/"t":"([^"]{1,40})"/)?.[1]; if (!t) return;
+    const e = (EXP[lado][t] ??= { n: 0, prim: Date.now() }); e.n++; e.ult = Date.now();
+    if (/^(chat|comercio|mensagem|dm)/i.test(t)) { expSujo = true; return; }       // conversa: só conta, não guarda o texto
+    if (!e.ex || (lado === 'saida' && Date.now() - (e.exEm || 0) > 3600_000)) { try { const o = JSON.parse(txt); e.chaves = Object.keys(o).slice(0, 20); e.ex = (lado === 'saida' ? JSON.stringify(o) : JSON.stringify(Object.fromEntries(Object.entries(o).map(([k, v]) => [k, typeof v === 'object' && v ? (Array.isArray(v) ? `[${v.length}]` : '{…}') : v])))).slice(0, 240); e.exEm = Date.now(); } catch {} }
+    expSujo = true;
+  }
+  setInterval(() => { if (expSujo) { expSujo = false; salvar('pkapp.explorar', EXP); } }, 120_000);
   function receber(txt) {
+    try { explorar('entrada', txt); } catch {}
     const c = txt.slice(0, 22);
     if (!/"t":"(market|estado|batalha|erro|csv|welcome|comercio)"/.test(c)) return;
     let m; try { m = JSON.parse(txt); } catch { return; }
@@ -4169,6 +4186,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
       const r = importarCfg(JSON.stringify(j)); if (r.ok) { log(`⚙️ ajustes copiados de outra conta no app de PC (${r.n}); a conta fica em simulação até você ligar o modo real`, 'ok'); pintar(); }
       return r;
     },
+    explorador: () => ({ entrada: Object.entries(EXP.entrada).map(([t, e]) => ({ t, ...e })).sort((a, z) => z.ult - a.ult), saida: Object.entries(EXP.saida).map(([t, e]) => ({ t, ...e })).sort((a, z) => z.ult - a.ult) }),
     relatorios: () => JSON.parse(JSON.stringify((E.relatorios || []).filter((r) => !r.parcial))),
     parecerHoje: () => JSON.parse(JSON.stringify(compilarParecer(hoje(), true))),
     decisoes: (cat) => DEC.filter((x) => !cat || x.cat === cat).slice(0, 300),

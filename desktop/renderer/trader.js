@@ -163,6 +163,18 @@ async function pkParecer(root, s) {
     }
     root.append(card);
   }
+  // explorador: os tipos de mensagem do jogo que o app já viu (base para novas automações)
+  const ex = await window.idle.invoke('poke:pkapp:explorador').catch(() => []);
+  if (ex && ex.length) {
+    const card = el('div', 'card'); card.append(el('h2', 'section first', 'O que o app já viu no jogo'));
+    card.append(el('p', 'sub', 'Cada ação que o jogo manda quando você clica (resgatar, abrir, trocar…) fica anotada aqui com um exemplo. É daqui que saem as próximas automações.'));
+    const saida = new Map(); for (const c of ex) for (const x of c.saida || []) { const y = saida.get(x.t); if (!y || x.ult > y.ult) saida.set(x.t, { ...x, n: (y ? y.n : 0) + x.n }); }
+    const L = [...saida.values()].sort((a2, z) => z.ult - a2.ult).slice(0, 40);
+    card.append(pkTabela(['Ação do jogo', 'Vezes', 'Última', 'Exemplo'], L.map((x) => pkLinha(x.t, String(x.n), new Date(x.ult).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }), el('code', 'pk-ex', x.ex || '')))));
+    const ent = new Set(); for (const c of ex) for (const x of c.entrada || []) ent.add(x.t);
+    card.append(el('p', 'tip', `Mensagens que o jogo envia: ${[...ent].sort().join(', ')}`));
+    root.append(card);
+  }
   // o que o app aprendeu (vale para todas as contas)
   const ap = R.flatMap((x) => ((x.aprendizado && x.aprendizado.hist) || []).map((a) => ({ conta: x.nome, ...a }))).sort((a, z) => z.em - a.em).slice(0, 15);
   const ev = R.flatMap((x) => ((x.aprendizado && x.aprendizado.itensEvitar) || []).map((a) => ({ conta: x.nome, ...a })));

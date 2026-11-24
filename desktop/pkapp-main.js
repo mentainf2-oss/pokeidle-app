@@ -206,6 +206,11 @@ module.exports = function pkappMain({ ipcMain, views, config, send, ctx, app, pa
     }
     return out;
   });
+  ipcMain.handle('poke:pkapp:explorador', async () => {
+    const out = [];
+    for (const a of accounts()) { const x = await ponte(a.id, 'explorador'), r = resumos.get(a.id); if (x) out.push({ conta: (r && r.r && r.r.nick) || a.name, ...x }); }
+    return out;
+  });
   ipcMain.handle('poke:pkapp:decisoes', async (_e, cat) => {
     const out = [];
     for (const a of accounts()) { const L = await ponte(a.id, 'decisoes', cat || null), x = resumos.get(a.id); for (const d of L || []) out.push({ conta: (x && x.r && x.r.nick) || a.name, ...d }); }
