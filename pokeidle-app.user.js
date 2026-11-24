@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.27
+// @version      5.28
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -131,6 +131,10 @@
   }
   if (!CFG.migSemLimite526) {                                     // v5.26: o jogador pediu sem limite de quantidade (o lucro e a conferência decidem)
     CFG.casaComprasDia = 0; CFG.casaShinyDia = 0; CFG.filaMax = Math.max(CFG.filaMax || 0, 15); CFG.migSemLimite526 = true; salvarCfg();
+  }
+  if (!CFG.migSegBoss528) {                                       // v5.28: o jogador faz ~4.440 lutas/dia no Rayquaza (4× fraco a gelo) ≈ 19,5 s por luta
+    if (!(CFG.bossSegPorLuta > 0) && CFG.bossKey === 'rayquaza') CFG.bossSegPorLuta = 19.5;
+    CFG.migSegBoss528 = true; salvarCfg();
   }
   if (!E.casaContaReal) { E.casaComprasHoje = null; E.casaShinyHoje = null; E.casaContaReal = true; }   // v5.25: a conta antiga somava sorteios perdidos
   for (const r of E.regras || []) r.reservadas = 0;                 // compras agendadas não sobrevivem a recarregar a página
@@ -3645,7 +3649,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     }
   }
 
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.27' }, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.28' }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));
