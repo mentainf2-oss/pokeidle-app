@@ -23,8 +23,16 @@ module.exports = function pkappMain({ ipcMain, views, config, send, ctx, app, pa
   const arqBase = () => path.join(app.getPath('userData'), 'pkapp-base.json');
   const base = { vendas: new Map(), itens: new Map(), lider: null, liderDesde: 0, enviado: {}, em: 0, sujo: false };
   try { const j = JSON.parse(fs.readFileSync(arqBase(), 'utf8')); for (const v of j.vendas || []) base.vendas.set(v.k, v); for (const v of j.itens || []) base.itens.set(v.k, v); base.liderDesde = j.liderDesde || 0; } catch {}
-  function podarBase() { const lim = Date.now() - 30 * 86400_000; for (const m of [base.vendas, base.itens]) for (const [k, v] of m) if (v.em < lim) m.delete(k); }
-  function salvarBase() { if (!base.sujo) return; base.sujo = false; podarBase(); try { fs.writeFileSync(arqBase(), JSON.stringify({ liderDesde: base.liderDesde, vendas: [...base.vendas.values()], itens: [...base.itens.values()] })); } catch {} }
+  // 21 dias e no máximo 150 mil vendas de pokémon (o arquivo não pode travar o app); grava sem travar a janela
+  function podarBase() {
+    const lim = Date.now() - 21 * 86400_000; for (const m of [base.vendas, base.itens]) for (const [k, v] of m) if (v.em < lim) m.delete(k);
+    for (const [m, max] of [[base.vendas, 150000], [base.itens, 60000]]) if (m.size > max) { const velhos = [...m.entries()].sort((a, z) => a[1].em - z[1].em).slice(0, m.size - max); for (const [k] of velhos) m.delete(k); }
+  }
+  let salvando = false;
+  async function salvarBase() {
+    if (!base.sujo || salvando) return; base.sujo = false; salvando = true; podarBase();
+    try { await fs.promises.writeFile(arqBase() + '.tmp', JSON.stringify({ liderDesde: base.liderDesde, vendas: [...base.vendas.values()], itens: [...base.itens.values()] })); await fs.promises.rename(arqBase() + '.tmp', arqBase()); } catch {} finally { salvando = false; }
+  }
   async function sincronizarBase() {
     if (Date.now() - base.em < 2 * 60_000) return; base.em = Date.now();
     const ligadas = accounts().filter((a) => { const x = resumos.get(a.id); return x && x.r && x.r.ligado && x.r.mod && x.r.mod.analise; });
@@ -50,9 +58,8 @@ module.exports = function pkappMain({ ipcMain, views, config, send, ctx, app, pa
       const r = await ponte(a.id, 'baseImportar', { vendas: v, itens: it }, nomeLider);   // mesmo sem nada novo: avisa que a líder segue entregando
       if (r && r.ok) base.enviado[a.id] = { v: v.length ? v[v.length - 1].em : e.v, i: it.length ? it[it.length - 1].em : e.i };
     }
-    salvarBase();
   }
-  setInterval(() => salvarBase(), 10 * 60_000);
+  setInterval(() => { salvarBase().catch(() => {}); }, 10 * 60_000);
   const vistos = new Map();       // accId -> último log visto (texto + hora)
 
   // ---------- rede do script (no lugar do GM_xmlhttpRequest do Tampermonkey) ----------

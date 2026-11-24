@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.50
+// @version      5.51
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -31,7 +31,7 @@
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.50';
+  const VERSAO_APP = '5.51';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -216,8 +216,8 @@
     const sim2 = /^\[SIM\] /.test(msg), m = msg.replace(/^\[SIM\] /, '');
     if (IGNORAR_DEC.test(m)) return;
     const c = CATS_DEC.find(([, f]) => f(m, tipo)); if (!c) return;
-    DEC.unshift({ em: Date.now(), cat: c[0], msg: m.slice(0, 400), sim: sim2 || undefined }); decSujo = true;
-    const lim = Date.now() - 4 * 86400_000; while (DEC.length > 2500 || (DEC.length && DEC[DEC.length - 1].em < lim)) DEC.pop();
+    DEC.unshift({ em: Date.now(), cat: c[0], msg: m.slice(0, 280), sim: sim2 || undefined }); decSujo = true;
+    const lim = Date.now() - 4 * 86400_000; while (DEC.length > 1500 || (DEC.length && DEC[DEC.length - 1].em < lim)) DEC.pop();
   }
   setInterval(() => { if (decSujo) { decSujo = false; salvar('pkapp.decisoes', DEC); } }, 60_000);
   function op(o) { E.ops.unshift({ em: Date.now(), ...o }); E.ops.length = Math.min(E.ops.length, 300); persistir(); }
