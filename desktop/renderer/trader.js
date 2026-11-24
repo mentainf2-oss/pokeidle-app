@@ -304,17 +304,19 @@ async function pkFarmTela(root, s) {
   root.append(resumo);
   // seus pokémon
   const c1 = el('div', 'card'); c1.append(el('h2', 'section first', 'Seus pokémon para estas hunts'));
-  c1.append(pkTabela(['Pokémon', 'Tipos + Z', '×4 em', 'Média', 'Melhor Z-Move'], F.meus.map((m) => {
+  c1.append(pkTabela(['Pokémon', 'Tipos + Z', '×4 em', 'Média', 'Z-Move'], F.meus.map((m) => {
     const nome = el('div', 'pk-pk'); nome.append(el('b', null, m.nome), el('small', 'muted', ` Nv ${m.level}`));
     const tags = el('div', 'pk-tags');
     if (m.emCampo) tags.append(pkPill('em campo', 'ok')); if (m.shiny) tags.append(pkPill('shiny', 'real')); if (m.mega) tags.append(pkPill('mega', 'sim')); if (m.aoe) tags.append(pkPill('AoE', 'ok'));
     nome.append(tags);
     const tp = el('div', 'pk-tags'); for (const t of m.tipos) tp.append(pkTipo(t)); if (m.z) { tp.append(el('small', 'muted', ' Z ')); tp.append(pkTipo(m.z)); } else tp.append(el('small', 'muted', ' sem Z'));
     const x4 = el('span', m.x4 >= Math.ceil(F.hunts.length / 2) ? 'ok' : m.x4 ? '' : 'bad', `${m.x4}/${F.hunts.length}`);
-    const zm = el('div', 'pk-tags'); if (m.zMelhor) { zm.append(pkTipo(m.zMelhor.t), el('small', 'muted', ` → ×4 em ${m.zMelhor.x4}/${F.hunts.length}`)); } else zm.append(el('small', 'muted', m.z ? 'o atual já é o melhor' : '—'));
+    const zm = el('div', 'pk-tags');
+    if (m.zMelhor) { zm.append(el('small', 'muted', m.z ? 'trocar para ' : 'fazer um de '), pkTipo(m.zMelhor.t), el('small', 'muted', ` (×4 em ${m.zMelhor.x4}/${F.hunts.length})`)); }
+    else zm.append(el('small', 'muted', m.z ? 'o atual já é o melhor' : '—'));
     return pkLinha(nome, tp, x4, pkMult(m.media), zm);
   })));
-  c1.append(el('p', 'tip', 'Só entram os que podem ir a campo: até o nível do treinador + 5 e pelo menos metade dele. ×4 = efetividade 4× no tipo do selvagem (×5,5 na hunt). A ordem pesa o ataque do pokémon e o AoE (pega a onda inteira).'));
+  c1.append(el('p', 'tip', 'Só entram os que podem ir a campo: até o nível do treinador + 5 e pelo menos metade dele. ×4 = efetividade 4× no tipo do selvagem (×5,5 na hunt). Z-Move: sempre de um dos tipos do próprio pokémon (poder 2800, área 3×3, a cada 60 s) — não muda a cobertura, aumenta o dano e pega a onda; sai com 10 peças de boss. A ordem pesa o ataque, o AoE e o Z.'));
   root.append(c1);
   // por hunt
   const c2 = el('div', 'card'); c2.append(el('h2', 'section first', 'Hunt por hunt'));
@@ -328,7 +330,7 @@ async function pkFarmTela(root, s) {
   // comprar
   if (F.comprar && F.comprar.length) {
     const c3 = el('div', 'card'); c3.append(el('h2', 'section first', 'Espécies que valem comprar para estas hunts'));
-    c3.append(pkTabela(['Espécie', 'Tipos + Z sugerido', '×4 em', 'Status base'], F.comprar.map((x) => {
+    c3.append(pkTabela(['Espécie', 'Tipos · Z de', '×4 em', 'Status base'], F.comprar.map((x) => {
       const nm = el('div', 'pk-pk'); nm.append(el('b', null, x.nome)); if (x.mega) nm.append(pkPill('mega', 'sim'));
       const tp = el('div', 'pk-tags'); for (const t of x.tipos) tp.append(pkTipo(t)); tp.append(el('small', 'muted', ' Z ')); tp.append(pkTipo(x.z));
       return pkLinha(nm, tp, `${x.x4}/${F.hunts.length}`, String(x.bst));

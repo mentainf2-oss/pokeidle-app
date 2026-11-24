@@ -475,7 +475,9 @@ contextBridge.executeInMainWorld({
       if (!hs.length) return { pronto: true, L, hunts: [], meus: [], comprar: [] };
       const ehMega = (id) => (id >= 3000 && id < 4000) || (id >= 9000 && id < 10000) || (id >= 13000 && id < 14000);
       const perfil = (tipos) => { const ms = hs.map((h) => multNaHunt(tipos, h)); return { ms, media: ms.reduce((a, b) => a + b, 0) / ms.length, x4: ms.filter((m) => m >= 4.5).length }; };
-      const melhorZ = (base) => { let best = null; for (const T of TIPOS) { const p = perfil([...new Set([...base, T])]); if (!best || p.media > best.media + 1e-9) best = { t: T, ...p }; } return best; };
+      // Z-Move (TM elemental, /shared/tm-elemental.mjs): golpe especial de poder 2800, área 3×3, recarga 60 s — e SEMPRE de um dos
+      // tipos do próprio pokémon (dá STAB). Não acrescenta cobertura de tipo: muda o dano e pega a onda. O melhor é o tipo dele que mais rende.
+      const melhorZ = (base) => { let best = null; for (const T of base) { const p = perfil([T]); if (!best || p.media > best.media + 1e-9) best = { t: T, ...p }; } return best; };
       const ativo = jogo.eu.activeId;
       const vistos = new Map();
       for (const k of jogo.pks.values()) {
@@ -484,10 +486,10 @@ contextBridge.executeInMainWorld({
         let st = null; try { st = k.ivs ? gi.statsNoNivel(k, c, k.level) : null; } catch {}
         const ataque = st ? Math.max(Number(st.atk) || 0, Number(st.spAtk) || 0) : 0;
         const tipos = tiposDe(c), z = k.el ? String(k.el).toUpperCase() : null;
-        const agora = perfil([...new Set([...tipos, z].filter(Boolean))]), mz = melhorZ(tipos);
+        const agora = perfil(tipos), mz = tipos.length > 1 ? melhorZ(tipos) : null;
         const x = { id: k.id, nome: c.name, level: k.level, shiny: !!k.shiny, mega: ehMega(Number(k.speciesId)), aoe: !!k.aoe, z, tipos, ataque, emCampo: k.id === ativo,
-          media: agora.media, x4: agora.x4, ms: agora.ms, zMelhor: mz && mz.t !== z && mz.media > agora.media + 0.05 ? { t: mz.t, media: mz.media, x4: mz.x4 } : null,
-          score: agora.media * (ataque || k.level) * (k.aoe ? 1.25 : 1) };
+          media: agora.media, x4: agora.x4, ms: agora.ms, zMelhor: mz && mz.t !== z ? { t: mz.t, media: mz.media, x4: mz.x4 } : (!z && tipos.length === 1 ? { t: tipos[0], media: agora.media, x4: agora.x4 } : null),
+          score: agora.media * (ataque || k.level) * (k.aoe ? 1.25 : 1) * (z ? 1.15 : 1) };
         const ant = vistos.get(c.name); if (!ant || x.score > ant.score) vistos.set(c.name, x);
       }
       const meus = [...vistos.values()].sort((a, b) => b.score - a.score).slice(0, 12);
@@ -502,8 +504,8 @@ contextBridge.executeInMainWorld({
       const nomes = new Set();
       for (const c of map.values()) {
         const t = tiposDe(c); if (!t.length || nomes.has(c.name)) continue; nomes.add(c.name);
-        const mz = melhorZ(t); if (!mz) continue;
-        cand.push({ speciesId: c.pokeId, nome: c.name, tipos: t, z: mz.t, media: mz.media, x4: mz.x4, bst: bst(c), mega: ehMega(Number(c.pokeId)), score: mz.media * Math.max(Number(c.baseAtk) || 0, Number(c.baseSpAtk) || 0) });
+        const pf = perfil(t), mz = melhorZ(t); if (!mz) continue;
+        cand.push({ speciesId: c.pokeId, nome: c.name, tipos: t, z: mz.t, media: pf.media, x4: pf.x4, bst: bst(c), mega: ehMega(Number(c.pokeId)), score: pf.media * Math.max(Number(c.baseAtk) || 0, Number(c.baseSpAtk) || 0) });
       }
       const comprar = cand.filter((x) => x.x4 >= Math.ceil(hs.length / 2)).sort((a, b) => b.score - a.score).slice(0, 12);
       return { pronto: true, L, hunts, meus, comprar, tipoDia: tipoDoDia ? tipoDoDia() : null, em: Date.now() };
