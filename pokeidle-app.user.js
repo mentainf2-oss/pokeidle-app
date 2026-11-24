@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.17
+// @version      5.18
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -54,13 +54,13 @@
     compraNivelMax: 200, compraNotaMin: 3.6, compraPrecoMax: 60_000_000,
     evitarOutland: true,                                           // nunca compra pokémon de Outland (#2001–2999)
     // compra para casa: só o que dá muito lucro, uma busca por casa a cada X min, poucas compras por dia
-    casaLucroMin: 40_000_000, casaMargemMin: 0.6, casaLucroHMin: 1_000_000, casaBuscaMin: 15, casaComprasDia: 6, casaVendasMinAlvo: 4,
+    casaLucroMin: 40_000_000, casaMargemMin: 0.6, casaLucroHMin: 1_000_000, casaBuscaMin: 15, casaComprasDia: 12, casaVendasMinAlvo: 4,
     // vitrine: até 10 pokémon anunciados; anúncio parado baixa um pouco de preço (nunca abaixo do custo)
     vagasPk: 10, pkReajusteH: 8, pkReajustePct: 0.04, pkReajusteCadaMin: 120,
     // ritmo de pedidos ao servidor (ele segura rajadas por conta)
     pedidoMinMs: 1500, pedidosPorMin: 24,
     vendaFatorMediana: 0.95, vendaDias: 7, especiesPreferidas: [],
-    vendaRapida: true, fatorRapido: 0.9, mexerEmTodos: true, casaDaColecao: true, negociar: true, negociarMaxRespostas: 8,   // vender rápido (com lucro) e gerir todos os seus anúncios, não só os do app
+    vendaRapida: true, fatorRapido: 0.9, mexerEmTodos: true, casaDaColecao: true, casaNaoParar: true, filaMax: 8,   // casa pronta com vitrine cheia: vai para a fila e entra outro negociar: true, negociarMaxRespostas: 8,   // vender rápido (com lucro) e gerir todos os seus anúncios, não só os do app
 
     // itens
     margemMin: 0.08, liquidezMin: 30, maxUnidadesPorItem: 5,
@@ -1181,7 +1181,7 @@
         try {
           const moedaFiltro = CFG.snipePkMoeda === 'ambas' ? (CFG.gemasAtivas ? '' : 'gold') : (CFG.snipePkMoeda === 'orb' && !CFG.gemasAtivas ? null : CFG.snipePkMoeda);
           const temRegra = E.regras.some((r) => r.ativa && r.tipo !== 'item' && (r.compradas || 0) < r.qtd);
-          const vaga = CFG.snipeAutoPokemon ? vagasPk().paraSnipe : 0;
+          const vaga = CFG.snipeAutoPokemon ? vagasPk().paraSnipe + Math.max(0, CFG.filaMax - (E.filaVenda || []).length) : 0;
           if (!temRegra && vaga < 1) {                                // sem vaga na vitrine e sem lista: não adianta ler o mercado
             M.snipeStats.pausa = 'vitrine sem vaga para revenda'; espera = 60;
           } else if (moedaFiltro != null) {
@@ -1235,8 +1235,10 @@
     const lucro = liquidoVenda(venda, moedaVenda, 'pokemon') - a.preco - custoPensao;
     const vg = vagasPk();
     // vaga na vitrine é escassa: com poucas sobrando, só entra o que dá o dobro do lucro mínimo
+    // vaga na vitrine é escassa: com poucas sobrando, só entra o dobro do lucro mínimo; sem vaga, compra para a fila (até filaMax) com o dobro também
+    const naFila = vg.paraSnipe < 1;
+    if (naFila && (E.filaVenda || []).length >= CFG.filaMax) return;
     const lucroMin = (a.moeda === 'orb' ? CFG.snipeLucroMinGemas : CFG.snipeLucroMin) * (vg.paraSnipe <= 2 ? 2 : 1);
-    if (vg.paraSnipe < 1) return;
     if (a.preco <= ref.preco * (1 - CFG.snipeDescontoMin) && lucro >= lucroMin) {
       M.snipeStats.oportunidades++;
       await comprar(a, { tipo: 'pokemon', pokemonId: f.id, nome: `${f.shiny ? '✨' : ''}${f.nome} Nv ${f.level} n${f.nota}`, nv: f.level, nota: f.nota, pot: f.potencia, iv: f.ivTotal, shiny: !!f.shiny, ficha: fichaMin(f), depois: 'revender', revenderPor: Math.round(venda), lucro, motivo: `${pve && pve.score >= 0.85 ? '⚡IV PvE ' + Math.round(pve.score * 100) + '% · ' : ''}sniper: ${Math.round((1 - a.preco / ref.preco) * 100)}% abaixo do justo ${curtoM(ref.preco, a.moeda)} (${ref.prc ? `precificador ${ref.prc.rapido}/${ref.prc.justo}/${ref.prc.esperar} 💠, ${ref.prc.nFamilia} vendas da família` : `${textoFatores(ref.fatores, f.potencia)}; ${ref.n} vendas`})` });
@@ -1375,6 +1377,7 @@
         const key = `${c.id}:${slot}`, atual = E.postos[key], pct = (M.raridadesCasa || PCT_RAR)[c.rar] ?? PCT_RAR[c.rar];
         if (!pid) { if (atual && !atual.bot) E.postos[key] = null; else if (atual) atual.pct = pct; return; }
         const pk = (M.pokemons || []).find((p) => p.id === pid);
+        if (!atual && (E.filaVenda || []).some((x) => String(x.pokemonId) === String(pid))) { E.postos[key] = { pokemonId: pid, nome: pk?.nome || '?', xp: pk?.xp ?? null, pct, bot: true, naFila: true }; return; }
         if (atual && atual.pokemonId === pid) { atual.pct = pct; if (pk?.xp != null) atual.xp = pk.xp; if (pk?.nome) atual.nome = pk.nome; return; }
         E.postos[key] = { pokemonId: pid, nome: pk?.nome || '?', xp: pk?.xp ?? null, nota: pk?.nota, pot: pk?.potencia, iv: pk?.ivs ? Object.values(pk.ivs).reduce((a, b) => a + b, 0) : null, pct, bot: false };
       });
@@ -1388,10 +1391,16 @@
     for (const cid of CFG.casas) {
       const key = `${cid}:0`, p = E.postos[key];
       if (Object.values(E.pendentes).some((x) => x.casaKey === key)) continue;
-      if (p?.bot && p.xp != null && nivelDeXp(p.xp) >= alvoDaCasa(cid)) {
-        const ok = await anunciarPokemon({ pokemonId: p.pokemonId, nome: p.nome, nv: nivelDeXp(p.xp), nota: p.nota, pot: p.pot, iv: p.iv, custo: p.custo, ficha: p.ficha, fila: false });
+      if (p?.bot && !p.naFila && p.xp != null && nivelDeXp(p.xp) >= alvoDaCasa(cid)) {
+        const nv = nivelDeXp(p.xp), fichaP = fichaDoPokemon(p.pokemonId) || p.ficha;
+        const ok = await anunciarPokemon({ pokemonId: p.pokemonId, nome: p.nome, nv, nota: p.nota, pot: p.pot, iv: p.iv, custo: p.custo, ficha: fichaP, fila: false });
         if (ok && !CFG.simulacao) { E.postos[key] = null; persistir(); }
-        continue;
+        if (ok || !CFG.casaNaoParar) continue;
+        // vitrine cheia: a casa não fica parada. O pronto vai para a fila de venda (anuncia quando abrir vaga) e entra outro no lugar.
+        if ((E.filaVenda || []).length >= CFG.filaMax) { avisoRaro('filaCheia', `🪟 fila de venda cheia (${CFG.filaMax}): as casas seguem upando o que já têm`, 30); continue; }
+        (E.filaVenda = E.filaVenda || []).some((x) => x.pokemonId === p.pokemonId) || E.filaVenda.push({ pokemonId: p.pokemonId, nome: p.nome, nv, nota: p.nota, pot: p.pot, iv: p.iv, custo: p.custo || 0, moedaCompra: 'gold', ficha: fichaP ? { ...fichaP, level: nv } : null, lucro: 0, em: Date.now(), daCasa: true });
+        p.naFila = true; persistir();
+        log(`${sim()}🏠 casa ${cid}: ${p.nome} Nv ${nv} pronto e a vitrine está cheia → fila de venda; entra outro para não perder XP`, 'ok');
       }
       if (p?.pokemonId && !p.bot) {
         if (CFG.casasOcupadas === 'manter') continue;                         // pokémon seu: não mexe
@@ -1401,8 +1410,9 @@
         const op2 = E.ops.find((o) => o.tipo === 'compra' && o.casaKey === key && o.ctx && Date.now() - o.em < 30 * 60_000 && !o.registrado);
         if (op2) { op2.registrado = true; persistir(); log(`🏠 casa ${cid}: registrando ${op2.nome} comprado há ${Math.round((Date.now() - op2.em) / 60000)} min`); registrarNoPosto({ ...op2.ctx, casaKey: key }); continue; }
       }
-      if ((!p || !p.pokemonId) && CFG.casaDaColecao && encherComColecao(key, cid)) continue;   // primeiro um pokémon que já é seu
-      if (!p || !p.pokemonId || !p.bot) await comprarParaUpar(key, cid);
+      const livre = !p || !p.pokemonId || p.naFila;
+      if (livre && CFG.casaDaColecao && encherComColecao(key, cid)) continue;   // primeiro um pokémon que já é seu
+      if (livre || !p.bot) await comprarParaUpar(key, cid);
     }
   }
   // casa vazia: coloca o pokémon da sua coleção que mais ganha valor até o nível-alvo (vendável: nota 3,5+, shiny ou P5)
@@ -1486,7 +1496,7 @@
     if (!CFG.mod.casas) return 0;
     let n = 0;
     for (const cid of CFG.casas) {
-      const p = E.postos[`${cid}:0`]; if (!p?.bot || p.xp == null) continue;
+      const p = E.postos[`${cid}:0`]; if (!p?.bot || p.naFila || p.xp == null) continue;
       const al = alvoDaCasa(cid);
       if (nivelDeXp(p.xp) >= al || (p.xpHora && (xpDoNivel(al) - p.xp) / p.xpHora <= h)) n++;
     }
@@ -1512,7 +1522,8 @@
     E.filaVenda.sort((a, z) => (z.lucro || 0) - (a.lucro || 0));
     while (livres > 0 && E.filaVenda.length) {
       const x = E.filaVenda.shift(); persistir();
-      if (await anunciarPokemon({ ...x, fila: false })) livres--; else break;
+      if (await anunciarPokemon({ ...x, fila: false })) { livres--; for (const [k, p] of Object.entries(E.postos)) if (p?.naFila && String(p.pokemonId) === String(x.pokemonId)) E.postos[k] = null; persistir(); }
+      else break;
     }
   }
   // anúncio parado ocupa vaga: depois de X h baixa um pouco o preço, nunca abaixo do custo + pensão
@@ -1520,7 +1531,7 @@
   function custoDoAnuncio(a) {
     const cb = cambioImplicito()?.taxa || 0, conv = (v, de) => (de === a.moeda ? v : !cb ? null : de === 'gold' ? v / cb : v * cb);
     if (a.tipo === 'pokemon') {
-      const reg = E.anunciosPk?.[a.pokemonId]; if (reg && reg.custo != null && reg.moeda === a.moeda && reg.custo > 0) return { custo: reg.custo, fonte: 'app' };
+      const reg = E.anunciosPk?.[a.pokemonId]; if (reg && reg.custo != null && reg.moeda === a.moeda && (reg.custo > 0 || reg.adotado || !E.ops.some((x) => x.tipo === 'compra' && String(x.pokemonId) === String(a.pokemonId)))) return { custo: reg.custo, fonte: reg.custo ? 'app' : 'seu (sem custo)' };
       const o = E.ops.find((x) => x.tipo === 'compra' && x.pokemonId != null && String(x.pokemonId) === String(a.pokemonId));
       if (o) { const v = conv(o.unit ?? o.preco, o.moeda); if (v != null) return { custo: v, fonte: 'compra do app' }; }
       const c = (E.real?.compras || []).filter((x) => x.pokemonId != null && String(x.pokemonId) === String(a.pokemonId)).sort((x, z) => z.em - x.em)[0];
@@ -3186,7 +3197,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     }
   }
 
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.17' }, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.18' }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));

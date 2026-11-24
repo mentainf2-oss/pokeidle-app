@@ -2,6 +2,7 @@
 
 | Versão | Data | O que mudou |
 | --- | --- | --- |
+| 5.18 | 2026-11-24 | Casas não param: pokémon pronto com a vitrine cheia vai para a fila de venda (até 8) e entra outro na casa (da coleção ou comprado; até 12 compras/dia). Sniper compra para a fila quando a vitrine está cheia, com o dobro do lucro mínimo. Pokémon seu (sem custo) também entra na venda rápida. |
 | 5.17 | 2026-11-24 | Aba Sniper pokémon: revendas do app nos últimos 7 dias, casando cada venda do histórico com a compra (lucro em Coins pelo câmbio, tempo até vender, origem sniper/casa). |
 | 5.16 | 2026-11-24 | Orçamento do dia acertado pelo histórico da conta a cada 10 min: conta só o que foi comprado de verdade (o sorteio de 3 s perdido não custa nada) mais o que está em andamento. Antes, 9.999 💠 contados contra 687 💠 gastos de fato travavam as compras. |
 | 5.15 | 2026-11-24 | Casa vazia: o app coloca primeiro um pokémon da sua coleção (fora da equipe, vendável, abaixo do nível-alvo), o que mais ganha valor até o alvo; só compra se não houver. Conferência do Claude: recebe as contas já feitas (lucro, margem, vendas de referência) e só veta por critérios claros; resposta em JSON com o número que decidiu. |
