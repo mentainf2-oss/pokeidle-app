@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.31
+// @version      5.32
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -1439,7 +1439,7 @@
   }
   const REVENDAVEIS = ['loot', 'key-item'];
   // só flip do que pode ser anunciado de novo: categoria conhecida e nunca pedra (pedra comprada fica presa à conta)
-  const ehRevendavel = (id) => REVENDAVEIS.includes(M.cats[id] || E.catsItens?.[id]) && !/Stone$/i.test(E.nomesItens[id] || '') && ![70040, 70041, 70042, 70043, 70044, 70080, 70081, 70082, 70083, 70084].includes(Number(id));
+  const ehRevendavel = (id) => REVENDAVEIS.includes(M.cats[id] || E.catsItens?.[id]) && !/Stone$/i.test(E.nomesItens[id] || '') && Number(id) !== ITEM.TOKEN && ![70040, 70041, 70042, 70043, 70044, 70080, 70081, 70082, 70083, 70084].includes(Number(id));
   async function snipeItens() {
     const regrasIt = E.regras.some((r) => r.tipo === 'item' && r.ativa);
     if (M.meus.length >= 20 && !regrasIt) return avisoRaro('it20', '🔮 20 anúncios abertos — sniper de itens esperando vaga');
@@ -2098,12 +2098,13 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
   const tetoTokenGemas = () => { const e = evTokenGemas(); return e && e.liq > 0 ? e.liq : 0; };   // só quando você não define um preço
   function registrarLutaBoss(venceu, drops) {
     const b = E.boss; b.lutas++; venceu ? b.vitorias++ : b.derrotas++;
-    if (M.bossEntrouEm) { const d = (Date.now() - M.bossEntrouEm) / 1000; if (d > 5 && d < 1800) { b.duracoes.push(Math.round(d)); b.duracoes = b.duracoes.slice(-60); } }
+    let dNova = null;
+    if (M.bossEntrouEm) { const d = (Date.now() - M.bossEntrouEm) / 1000; if (d > 5 && d < 1800) { dNova = Math.round(d); b.duracoes.push(dNova); b.duracoes = b.duracoes.slice(-60); } }
     M.bossEntrouEm = Date.now();                                    // na série automática a próxima luta começa logo
     for (const x of drops || []) if (x.itemId) b.drops[x.itemId] = (b.drops[x.itemId] || 0) + (x.qtd || 1);
     novoDia();
     const bd = E.bossDia?.dia === E.dia ? E.bossDia : (E.bossDia = { dia: E.dia, lutas: 0, vit: 0, inicio: Date.now(), fim: Date.now(), drops: {}, durs: [] });
-    bd.lutas++; if (venceu) bd.vit++; bd.fim = Date.now(); if (b.duracoes.length) { bd.durs.push(b.duracoes[b.duracoes.length - 1]); bd.durs = bd.durs.slice(-200); }
+    bd.lutas++; if (venceu) bd.vit++; bd.fim = Date.now(); if (dNova != null) { bd.durs.push(dNova); bd.durs = bd.durs.slice(-200); }   // só o tempo medido nesta luta (antes repetia o último)
     for (const x of drops || []) if (x.itemId) bd.drops[x.itemId] = (bd.drops[x.itemId] || 0) + (x.qtd || 1);
     persistir();
   }
@@ -2131,7 +2132,8 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
     return { dias, evBom, tetoSugerido: Math.floor(evBom * 0.85 * 10) / 10, precos: [3, 4, 5, 6, 7, 8].map((t) => ({ t, lucro: evBom - t, pct: (evBom - t) / t })) };
   }
   const taxaVitoria = () => (E.boss.lutas >= 5 ? E.boss.vitorias / E.boss.lutas : 1);
-  const segPorLuta = () => CFG.bossSegPorLuta || mediana(E.boss.duracoes) || 60;
+  // ritmo medido hoje (lutas ÷ horas desde a primeira luta) vale mais que o número digitado, quando já há 30+ lutas
+  const segPorLuta = () => { const bd = E.bossDia; if (bd && bd.dia === E.dia && bd.lutas >= 30 && bd.fim - bd.inicio > 0.3 * 3600_000) return Math.round((bd.fim - bd.inicio) / 1000 / bd.lutas); return CFG.bossSegPorLuta || mediana(E.boss.duracoes) || 60; };
   function evBoss(premio, par) {
     const cb = cambioImplicito()?.taxa || 0;
     const itens = DROPS_DO_PREMIO(premio, par).map(([id, p]) => ({ id, chance: p, gemas: precoGemaItem(id) }));
@@ -3710,7 +3712,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     }
   }
 
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.31' }, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, estudoToken, resultadoBossDia, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.32' }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));
