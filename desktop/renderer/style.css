@@ -1017,3 +1017,23 @@ input[type=password] { background: var(--s2); border: 1px solid var(--line-2); b
 .pk-barra .sub { margin: 0; max-width: 90ch; }
 .pk-barra .pk-chips { margin-bottom: 0; align-items: center; }
 #page-trader .pk-base { margin: 12px 0 0; }
+/* Painel: abas e chips com ícones */
+.pk-ico { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.pk-tabs button { display: inline-flex; align-items: center; gap: 7px; }
+.pk-tabs button.on .pk-ico { stroke: var(--pk); }
+.pk-chip { display: inline-flex; align-items: center; gap: 6px; }
+.pk-chip .pk-ico { width: 13px; height: 13px; }
+.pk-cat { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); white-space: nowrap; }
+.pk-cat .pk-ico { width: 14px; height: 14px; }
+.pk-cat[data-cat="venda"] .pk-ico, .pk-chip[data-cat="venda"] .pk-ico { stroke: #9ff0c8; }
+.pk-cat[data-cat="compra"] .pk-ico, .pk-chip[data-cat="compra"] .pk-ico { stroke: #ffcf66; }
+.pk-cat[data-cat="erro"] .pk-ico, .pk-chip[data-cat="erro"] .pk-ico { stroke: #ff9b9b; }
+.pk-cat[data-cat="boss"] .pk-ico, .pk-chip[data-cat="boss"] .pk-ico { stroke: #c9a2ff; }
+.pk-cat[data-cat="preço"] .pk-ico, .pk-chip[data-cat="preço"] .pk-ico { stroke: #9cc9ff; }
+.pk-cat[data-cat="aprendizado"] .pk-ico, .pk-chip[data-cat="aprendizado"] .pk-ico { stroke: #ff8fb1; }
+.pk-farm-top p { margin: 6px 0 0; font-size: 15px; }
+.pk-pk { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pk-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.pk-mult { display: inline-block; min-width: 34px; text-align: center; padding: 1px 7px; border-radius: 7px; font-variant-numeric: tabular-nums; }
+.pk-mult.x4 { background: rgba(69, 227, 155, .14); color: #9ff0c8; } .pk-mult.x2 { background: rgba(255, 207, 74, .12); color: #ffcf66; }
+.pk-mult.x1 { background: var(--s3); color: var(--muted); } .pk-mult.x0 { background: rgba(255, 90, 90, .12); color: #ff9b9b; }

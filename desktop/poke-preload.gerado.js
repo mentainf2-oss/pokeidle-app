@@ -458,6 +458,56 @@ contextBridge.executeInMainWorld({
       }
       return [...por.values()].sort((a, b) => b.level - a.level);
     }
+    // ---- Farm (PokeIdle App): os melhores pokémon para as hunts que ESTA conta farma, com AoE e Z-Move ----
+    // Hunts = as 8 de nível mais alto que a conta alcança (sem Outland). Para cada pokémon que pode entrar em campo
+    // (até o nível do treinador + 5 e pelo menos metade dele): efetividade média nessas hunts com os tipos dele + o Z-Move,
+    // em quantas chega a ×4 (×5,5 na hunt), o Z-Move que mais renderia e o ataque. E as espécies que valem comprar.
+    async function pveFarm() {
+      if (!jogo.hunts || !jogo.tabelaTipos) return { pronto: false };
+      const { map, gi } = await catalogoNota();
+      const L = Number(jogo.eu.level) || 0;
+      const TIPOS = Object.keys(jogo.tabelaTipos);
+      const hs = (jogo.hunts || []).filter((h) => Array.isArray(h.especies) && h.especies.length && (Number(h.nivel) || 0) <= L && String(h.area || '').toLowerCase() !== 'outland')
+        .sort((a, b) => (Number(b.nivel) || 0) - (Number(a.nivel) || 0)).slice(0, 8)
+        .map((h) => ({ slug: h.slug, nome: String(h.nome || h.slug), nivel: Number(h.nivel) || 0, regiao: REGIOES[regiaoDe(h)][0], peso: 1,
+          esp: h.especies.map((e) => { const c = map.get(e.pokeId) || {}; return { t: tiposDe(c), w: Number(e.pontos) || 1, nome: c.name || '' }; }).filter((e) => e.t.length) }))
+        .filter((h) => h.esp.length);
+      if (!hs.length) return { pronto: true, L, hunts: [], meus: [], comprar: [] };
+      const ehMega = (id) => (id >= 3000 && id < 4000) || (id >= 9000 && id < 10000) || (id >= 13000 && id < 14000);
+      const perfil = (tipos) => { const ms = hs.map((h) => multNaHunt(tipos, h)); return { ms, media: ms.reduce((a, b) => a + b, 0) / ms.length, x4: ms.filter((m) => m >= 4.5).length }; };
+      const melhorZ = (base) => { let best = null; for (const T of TIPOS) { const p = perfil([...new Set([...base, T])]); if (!best || p.media > best.media + 1e-9) best = { t: T, ...p }; } return best; };
+      const ativo = jogo.eu.activeId;
+      const vistos = new Map();
+      for (const k of jogo.pks.values()) {
+        if (!(k.level <= L + 5 && k.level >= L * 0.5)) continue;
+        const c = map.get(k.speciesId); if (!c) continue;
+        let st = null; try { st = k.ivs ? gi.statsNoNivel(k, c, k.level) : null; } catch {}
+        const ataque = st ? Math.max(Number(st.atk) || 0, Number(st.spAtk) || 0) : 0;
+        const tipos = tiposDe(c), z = k.el ? String(k.el).toUpperCase() : null;
+        const agora = perfil([...new Set([...tipos, z].filter(Boolean))]), mz = melhorZ(tipos);
+        const x = { id: k.id, nome: c.name, level: k.level, shiny: !!k.shiny, mega: ehMega(Number(k.speciesId)), aoe: !!k.aoe, z, tipos, ataque, emCampo: k.id === ativo,
+          media: agora.media, x4: agora.x4, ms: agora.ms, zMelhor: mz && mz.t !== z && mz.media > agora.media + 0.05 ? { t: mz.t, media: mz.media, x4: mz.x4 } : null,
+          score: agora.media * (ataque || k.level) * (k.aoe ? 1.25 : 1) };
+        const ant = vistos.get(c.name); if (!ant || x.score > ant.score) vistos.set(c.name, x);
+      }
+      const meus = [...vistos.values()].sort((a, b) => b.score - a.score).slice(0, 12);
+      // por hunt: o melhor seu e os tipos que dão ×4 nela
+      const hunts = hs.map((h, i) => {
+        let melhor = null; for (const m of meus) if (!melhor || m.ms[i] * (m.ataque || m.level) > melhor.ms[i] * (melhor.ataque || melhor.level)) melhor = m;
+        const x4 = TIPOS.map((T) => ({ t: T, m: multNaHunt([T], h) })).filter((a) => a.m >= 4.5).sort((a, b) => b.m - a.m).slice(0, 4).map((a) => a.t);
+        return { slug: h.slug, nome: h.nome, nivel: h.nivel, regiao: h.regiao, especies: [...new Set(h.esp.map((e) => e.nome))].slice(0, 6), melhor: melhor ? { nome: melhor.nome, level: melhor.level, m: melhor.ms[i], z: melhor.z } : null, x4 };
+      });
+      // espécies para comprar: tipos + o melhor Z-Move, pesando os status base (sem megas e sem lendários de evento repetidos)
+      const cand = [];
+      const nomes = new Set();
+      for (const c of map.values()) {
+        const t = tiposDe(c); if (!t.length || nomes.has(c.name)) continue; nomes.add(c.name);
+        const mz = melhorZ(t); if (!mz) continue;
+        cand.push({ speciesId: c.pokeId, nome: c.name, tipos: t, z: mz.t, media: mz.media, x4: mz.x4, bst: bst(c), mega: ehMega(Number(c.pokeId)), score: mz.media * Math.max(Number(c.baseAtk) || 0, Number(c.baseSpAtk) || 0) });
+      }
+      const comprar = cand.filter((x) => x.x4 >= Math.ceil(hs.length / 2)).sort((a, b) => b.score - a.score).slice(0, 12);
+      return { pronto: true, L, hunts, meus, comprar, tipoDia: tipoDoDia ? tipoDoDia() : null, em: Date.now() };
+    }
     async function pveProximas() {
       if (!jogo.hunts || !jogo.tabelaTipos) return { pronto: false };
       const { map } = await catalogoNota();
@@ -1996,7 +2046,7 @@ contextBridge.executeInMainWorld({
         canais() { return JSON.parse(JSON.stringify(canais)); },
         // Aba PvE do app (só leitura).
         pve(o, arg) {
-          const f = o === 'nivel' ? async () => ({ L: Number(jogo.eu.level) || 0 }) : o === 'proximas' ? pveProximas : o === 'evolucoes' ? () => pveEvolucoes(arg) : o === 'meus' ? pveMeus : o === 'buscar' ? () => pveBuscar(arg) : o === 'casas' ? () => pveCasas(arg) : o === 'shiny' ? () => pveShiny(arg) : o === 'boss' ? () => pveBoss(arg) : o === 'outland' ? () => pveOutland(arg) : o === 'prey' ? pvePrey : o === 'bestiario' ? pveBestiario : o === 'mercado' ? () => (arg && typeof arg === 'object' ? pveMercado(arg.moeda, arg.dias, arg.valor) : pveMercado(arg)) : null;
+          const f = o === 'nivel' ? async () => ({ L: Number(jogo.eu.level) || 0 }) : o === 'proximas' ? pveProximas : o === 'farm' ? pveFarm : o === 'evolucoes' ? () => pveEvolucoes(arg) : o === 'meus' ? pveMeus : o === 'buscar' ? () => pveBuscar(arg) : o === 'casas' ? () => pveCasas(arg) : o === 'shiny' ? () => pveShiny(arg) : o === 'boss' ? () => pveBoss(arg) : o === 'outland' ? () => pveOutland(arg) : o === 'prey' ? pvePrey : o === 'bestiario' ? pveBestiario : o === 'mercado' ? () => (arg && typeof arg === 'object' ? pveMercado(arg.moeda, arg.dias, arg.valor) : pveMercado(arg)) : null;
           return f ? f().catch((e) => ({ erro: String(e && e.message || e) })) : null;
         },
         // Comércio: nota, stats e espécie da ficha de um anúncio (mesma conta da ficha do jogo).

@@ -3,7 +3,31 @@
 // Decisões (o catálogo de tudo o que o app fez, com o motivo) e Controle (ligar, modo, módulos, papel de cada conta).
 // Os números vêm do app que roda dentro de cada conta (lido a cada 30 s pelo pkapp-main.js).
 let pkEstado = null;
-let pkTab = (() => { try { const t = localStorage.getItem('pkTab'); return ['hoje', 'parecer', 'decisoes', 'controle'].includes(t) ? t : 'hoje'; } catch { return 'hoje'; } })();
+let pkTab = (() => { try { const t = localStorage.getItem('pkTab'); return ['hoje', 'parecer', 'decisoes', 'farm', 'controle'].includes(t) ? t : 'hoje'; } catch { return 'hoje'; } })();
+let pkFarm = null, pkFarmConta = null, pkFarmCarregando = false;
+// ícones de traço (mesmo estilo da barra lateral)
+const PK_ICO = {
+  hoje: '<path d="M4 14a8 8 0 0 1 16 0"/><path d="M12 14l4.2-4.2"/><path d="M3 18h18"/>',
+  parecer: '<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/><path d="M10 13h6M10 17h4"/>',
+  decisoes: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/>',
+  farm: '<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>',
+  controle: '<path d="M4 7h9"/><path d="M17 7h3"/><circle cx="15" cy="7" r="2"/><path d="M4 17h3"/><path d="M11 17h9"/><circle cx="9" cy="17" r="2"/>',
+  compra: '<path d="M3 4h2l2.4 11h10.4l2.2-8H6.3"/><circle cx="9.5" cy="19" r="1.4"/><circle cx="16.5" cy="19" r="1.4"/>',
+  venda: '<path d="M12 3v18"/><path d="M17 7.5c0-1.9-2.2-3-5-3s-5 1.1-5 3 2.2 2.7 5 3.2 5 1.3 5 3.3-2.2 3-5 3-5-1.1-5-3"/>',
+  'preço': '<path d="M3 12l9-9h8v8l-9 9z"/><circle cx="16" cy="8" r="1.5"/>',
+  casa: '<path d="M4 11.5 12 5l8 6.5"/><path d="M6 10v9h12v-9"/><path d="M10 19v-5h4v5"/>',
+  boss: '<path d="M4 8l4.2 4L12 5.5 15.8 12 20 8l-2 10H6z"/><path d="M6 21h12"/>',
+  'negociação': '<path d="M4 5h16v10H9l-5 4z"/>',
+  pulou: '<circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/>',
+  claude: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/>',
+  auditoria: '<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/>',
+  aprendizado: '<path d="M4 5h6a2 2 0 0 1 2 2v12a2 2 0 0 0-2-2H4z"/><path d="M20 5h-6a2 2 0 0 0-2 2v12a2 2 0 0 1 2-2h6z"/>',
+  ajuste: '<path d="M4 7h9"/><path d="M17 7h3"/><circle cx="15" cy="7" r="2"/><path d="M4 17h3"/><path d="M11 17h9"/><circle cx="9" cy="17" r="2"/>',
+  erro: '<path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17h.01"/>',
+  base: '<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6"/><path d="M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/>',
+};
+function pkIco(k) { const ns = 'http://www.w3.org/2000/svg'; const svg = document.createElementNS(ns, 'svg'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('class', 'pk-ico'); svg.innerHTML = PK_ICO[k] || ''; return svg; }
+function pkBotao(ico, rot, cls, onclick) { const b = el('button', cls); b.append(pkIco(ico), el('span', null, rot)); b.onclick = onclick; return b; }
 let pkRel = null, pkRelCarregando = false, pkDec = null, pkDecCat = '', pkDecConta = '';
 const pkFmt = (n) => (n == null || !isFinite(n) ? '—' : Math.abs(n) >= 1e9 ? (n / 1e9).toFixed(2) + 'B' : Math.abs(n) >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : Math.abs(n) >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(Math.round(n)));
 const pkG = (n) => (n == null || !isFinite(n) ? '—' : `${Math.round(n).toLocaleString('pt-BR')} 🔮`);
@@ -39,8 +63,9 @@ async function renderTrader() {
   t.append(el('h1', null, 'PokeIdle App'), el('p', 'sub', 'O resultado do dia, o parecer de cada dia fechado, tudo o que o app decidiu e os controles de cada conta.'));
   head.append(t);
   const tabs = el('div', 'pvp-tabs');
-  for (const [k, l] of [['hoje', 'Hoje'], ['parecer', 'Parecer'], ['decisoes', 'Decisões'], ['controle', 'Controle']]) {
-    tabs.append(button(l, pkTab === k ? 'on' : '', () => { pkTab = k; try { localStorage.setItem('pkTab', k); } catch {} if (k === 'parecer') pkRel = null; if (k === 'decisoes') pkDec = null; renderTrader(); }));
+  tabs.classList.add('pk-tabs');
+  for (const [k, l] of [['hoje', 'Hoje'], ['parecer', 'Parecer'], ['decisoes', 'Decisões'], ['farm', 'Farm'], ['controle', 'Controle']]) {
+    tabs.append(pkBotao(k, l, pkTab === k ? 'on' : '', () => { pkTab = k; try { localStorage.setItem('pkTab', k); } catch {} if (k === 'parecer') pkRel = null; if (k === 'decisoes') pkDec = null; if (k === 'farm') pkFarm = null; renderTrader(); }));
   }
   root.append(head, tabs);
   const s = pkEstado;
@@ -48,6 +73,7 @@ async function renderTrader() {
   if (pkTab === 'hoje') pkHoje(root, s);
   if (pkTab === 'parecer') await pkParecer(root, s);
   if (pkTab === 'decisoes') await pkDecisoes(root, s);
+  if (pkTab === 'farm') await pkFarmTela(root, s);
   if (pkTab === 'controle') pkControle(root, s);
   root.scrollTop = rolagem;
 }
@@ -68,7 +94,7 @@ function pkHoje(root, s) {
   );
   hero.append(esq, dir);
   root.append(hero);
-  if (s.total.base && s.total.base.lider) root.append(el('p', 'tip pk-base', `🗄️ Banco de dados único: ${Number(s.total.base.vendas).toLocaleString('pt-BR')} vendas de pokémon e ${Number(s.total.base.itens).toLocaleString('pt-BR')} de itens (30 dias), coletadas por ${s.total.base.lider} e repassadas às outras contas — só ela baixa planilhas.`));
+  if (s.total.base && s.total.base.lider) root.append(el('p', 'tip pk-base', `Banco de dados único: ${Number(s.total.base.vendas).toLocaleString('pt-BR')} vendas de pokémon e ${Number(s.total.base.itens).toLocaleString('pt-BR')} de itens (30 dias), coletadas por ${s.total.base.lider} e repassadas às outras contas — só ela baixa planilhas.`));
 
   const lista = el('div', 'card'); lista.append(el('h2', 'section first', 'Contas'));
   const t = el('table', 'pk-tab pk-contas');
@@ -153,7 +179,7 @@ async function pkDecisoes(root, s) {
   const card = el('div', 'card');
   const filtros = el('div', 'pk-chips');
   const cont = {}; for (const d of L) cont[d.cat] = (cont[d.cat] || 0) + 1;
-  const chip = (k, rot, n) => { const b = button(`${rot}${n != null ? ` ${n}` : ''}`, 'pk-chip' + (pkDecCat === k ? ' on' : ''), () => { pkDecCat = k; renderTrader(); }); return b; };
+  const chip = (k, rot, n) => { const b = pkBotao(k || 'decisoes', `${rot}${n != null ? ` · ${n}` : ''}`, 'pk-chip' + (pkDecCat === k ? ' on' : ''), () => { pkDecCat = k; renderTrader(); }); b.dataset.cat = k; return b; };
   filtros.append(chip('', 'Todas', L.length));
   for (const [k, rot] of Object.entries(pkCats)) if (cont[k]) filtros.append(chip(k, rot, cont[k]));
   const contas = [...new Set(L.map((d) => d.conta))];
@@ -167,7 +193,8 @@ async function pkDecisoes(root, s) {
   const F = L.filter((d) => (!pkDecCat || d.cat === pkDecCat) && (!pkDecConta || d.conta === pkDecConta)).slice(0, 250);
   card.append(F.length ? pkTabela(['Quando', 'Conta', 'Tipo', 'Decisão e motivo'], F.map((d) => {
     const msg = el('span', d.cat === 'erro' ? 'bad' : null, d.msg + (d.sim ? '  (simulação)' : ''));
-    return pkLinha(`${new Date(d.em).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} ${pkHora(d.em)}`, d.conta, pkCats[d.cat] || d.cat, msg);
+    const tipo = el('span', 'pk-cat'); tipo.dataset.cat = d.cat; tipo.append(pkIco(d.cat), el('span', null, pkCats[d.cat] || d.cat));
+    return pkLinha(`${new Date(d.em).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} ${pkHora(d.em)}`, d.conta, tipo, msg);
   })) : el('p', 'tip', 'Nada nesse filtro ainda. O catálogo guarda 4 dias de decisões de cada conta.'));
   root.append(card);
 }
@@ -235,4 +262,65 @@ function pkControle(root, s) {
   card.append(act);
   card.append(el('p', 'tip', 'Baseado no Idleterino, de VinniiSaantos (licença MIT).'));
   root.append(card);
+}
+
+// ---------- Farm: os melhores pokémon para as hunts de cada conta (tipos + Z-Move, AoE, ×4) ----------
+const pkTipoPt = (t) => (typeof TIPO_PT !== 'undefined' && TIPO_PT[t]) || t;
+function pkTipo(t) { if (typeof tipoChip === 'function') return tipoChip(t); return el('span', 'tchip', t); }
+function pkMult(m) { const e = el('b', 'pk-mult ' + (m >= 4.5 ? 'x4' : m >= 2.2 ? 'x2' : m >= 1 ? 'x1' : 'x0'), `×${(m >= 4.5 ? 4 : m >= 2.2 ? 2 : m >= 1 ? 1 : 0.5).toString().replace('.', ',')}`); e.title = `na hunt ×${m.toFixed(1).replace('.', ',')}`; return e; }
+async function pkFarmTela(root, s) {
+  const contas = s.contas.filter((c) => c.r);
+  if (!contas.length) { root.append(emptyBox('Farm', 'Nenhuma conta logada.')); return; }
+  if (!pkFarmConta || !contas.some((c) => c.id === pkFarmConta)) pkFarmConta = contas[0].id;
+  const barra = el('div', 'pk-barra');
+  const sel = el('div', 'pk-chips');
+  for (const c of contas) sel.append(button(pkNome(c), 'pk-chip' + (c.id === pkFarmConta ? ' on' : ''), () => { pkFarmConta = c.id; pkFarm = null; renderTrader(); }));
+  barra.append(sel, button('Atualizar', 'ghost', () => { pkFarm = null; renderTrader(); }));
+  root.append(barra);
+  if (!pkFarm && !pkFarmCarregando) { pkFarmCarregando = true; pkFarm = await window.idle.invoke('poke:pve', pkFarmConta, 'farm', null).catch(() => null); pkFarmCarregando = false; }
+  const F = pkFarm;
+  if (!F || !F.pronto) { root.append(emptyBox('Farm', 'A conta ainda não carregou as hunts e a tabela de tipos. Abra o jogo dela um instante e clique em Atualizar.')); return; }
+  const nomeConta = pkNome(contas.find((c) => c.id === pkFarmConta));
+  // resumo em uma linha
+  const em4 = F.meus.filter((m) => m.x4 >= Math.ceil(F.hunts.length / 2));
+  const resumo = el('div', 'card pk-farm-top');
+  resumo.append(el('span', 'pk-rot', `${nomeConta} · treinador Nv ${Number(F.L).toLocaleString('pt-BR')} · ${F.hunts.length} hunts do topo`),
+    el('p', null, em4.length ? `${em4.length === 1 ? '1 pokémon seu dá' : em4.length + ' pokémon seus dão'} ×4 em metade ou mais dessas hunts. O melhor agora: ${F.meus[0].nome} (Nv ${F.meus[0].level}).`
+      : 'Nenhum pokémon seu dá ×4 em metade dessas hunts. Veja abaixo o Z-Move que resolve e as espécies que valem comprar.'));
+  root.append(resumo);
+  // seus pokémon
+  const c1 = el('div', 'card'); c1.append(el('h2', 'section first', 'Seus pokémon para estas hunts'));
+  c1.append(pkTabela(['Pokémon', 'Tipos + Z', '×4 em', 'Média', 'Melhor Z-Move'], F.meus.map((m) => {
+    const nome = el('div', 'pk-pk'); nome.append(el('b', null, m.nome), el('small', 'muted', ` Nv ${m.level}`));
+    const tags = el('div', 'pk-tags');
+    if (m.emCampo) tags.append(pkPill('em campo', 'ok')); if (m.shiny) tags.append(pkPill('shiny', 'real')); if (m.mega) tags.append(pkPill('mega', 'sim')); if (m.aoe) tags.append(pkPill('AoE', 'ok'));
+    nome.append(tags);
+    const tp = el('div', 'pk-tags'); for (const t of m.tipos) tp.append(pkTipo(t)); if (m.z) { tp.append(el('small', 'muted', ' Z ')); tp.append(pkTipo(m.z)); } else tp.append(el('small', 'muted', ' sem Z'));
+    const x4 = el('span', m.x4 >= Math.ceil(F.hunts.length / 2) ? 'ok' : m.x4 ? '' : 'bad', `${m.x4}/${F.hunts.length}`);
+    const zm = el('div', 'pk-tags'); if (m.zMelhor) { zm.append(pkTipo(m.zMelhor.t), el('small', 'muted', ` → ×4 em ${m.zMelhor.x4}/${F.hunts.length}`)); } else zm.append(el('small', 'muted', m.z ? 'o atual já é o melhor' : '—'));
+    return pkLinha(nome, tp, x4, pkMult(m.media), zm);
+  })));
+  c1.append(el('p', 'tip', 'Só entram os que podem ir a campo: até o nível do treinador + 5 e pelo menos metade dele. ×4 = efetividade 4× no tipo do selvagem (×5,5 na hunt). A ordem pesa o ataque do pokémon e o AoE (pega a onda inteira).'));
+  root.append(c1);
+  // por hunt
+  const c2 = el('div', 'card'); c2.append(el('h2', 'section first', 'Hunt por hunt'));
+  c2.append(pkTabela(['Hunt', 'Selvagens', 'Seu melhor', 'Tipos que dão ×4'], F.hunts.map((h) => {
+    const nm = el('div'); nm.append(el('b', null, h.nome), el('small', 'muted', ` Nv ${Number(h.nivel).toLocaleString('pt-BR')} · ${h.regiao}`));
+    const mb = el('div', 'pk-tags'); if (h.melhor) mb.append(el('span', null, `${h.melhor.nome} Nv ${h.melhor.level} `), pkMult(h.melhor.m)); else mb.append(el('small', 'muted', '—'));
+    const tx = el('div', 'pk-tags'); for (const t of h.x4) tx.append(pkTipo(t)); if (!h.x4.length) tx.append(el('small', 'muted', 'nenhum tipo dá ×4 em todos'));
+    return pkLinha(nm, h.especies.join(', '), mb, tx);
+  })));
+  root.append(c2);
+  // comprar
+  if (F.comprar && F.comprar.length) {
+    const c3 = el('div', 'card'); c3.append(el('h2', 'section first', 'Espécies que valem comprar para estas hunts'));
+    c3.append(pkTabela(['Espécie', 'Tipos + Z sugerido', '×4 em', 'Status base'], F.comprar.map((x) => {
+      const nm = el('div', 'pk-pk'); nm.append(el('b', null, x.nome)); if (x.mega) nm.append(pkPill('mega', 'sim'));
+      const tp = el('div', 'pk-tags'); for (const t of x.tipos) tp.append(pkTipo(t)); tp.append(el('small', 'muted', ' Z ')); tp.append(pkTipo(x.z));
+      return pkLinha(nm, tp, `${x.x4}/${F.hunts.length}`, String(x.bst));
+    })));
+    const act = el('div', 'actions'); act.append(button('Procurar no Market (aba PvE → Comprar para farm)', 'ghost', () => go('pve')));
+    c3.append(el('p', 'tip', 'Na faixa de nível da conta, com AoE de preferência. Shiny e Mega rendem mais status no mesmo nível.'), act);
+    root.append(c3);
+  }
 }
