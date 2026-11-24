@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.36
+// @version      5.37
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -31,7 +31,7 @@
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.36';
+  const VERSAO_APP = '5.37';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -79,7 +79,7 @@
     // boss
     bossRegiao: 'hoenn', bossKey: 'rayquaza', bossModo: 'avisar',   // 'desligado' | 'avisar' | 'auto'
     bossTokensMin: 20, tokenEstoqueAlvo: 150, tokenPrecoMax: 0, tokenPrecoMaxGemas: 0, tokenAutoCompra: true, tokenLucroMinGemas: 2,   // teto do token em Coins e em 🔮 (0 = automático); vale para TODA compra de token
-    bossVenderDrops: true, bossAnunciosPorItem: 3, bossDropPisoMedia: 0.8, bossEvMinPct: 0.15, bossSegPorLuta: 0, bossTokenMoeda: 'gold',
+    bossVenderDrops: true, bossAnunciosPorItem: 3, bossDropPisoMedia: 0, bossEvMinPct: 0.15, bossSegPorLuta: 0, bossTokenMoeda: 'gold',
     // investir
     meuAtaque: 0, nivelTreinador: 0, investPaybackDias: 7, fatiaDemanda: 0.25,
     // prey
@@ -153,6 +153,7 @@
     if (!(CFG.bossSegPorLuta > 0) && CFG.bossKey === 'rayquaza') CFG.bossSegPorLuta = 19.5;
     CFG.migSegBoss528 = true; salvarCfg();
   }
+  if (!CFG.migDrop537) { CFG.bossDropPisoMedia = 0; CFG.migDrop537 = true; salvarCfg(); }   // v5.37: drops pelo menor preço listado (pedido do jogador)
   if (!CFG.migBoss530) {                                          // v5.30: o jogador pediu para fazer boss (série automática) e vender cada drop logo
     CFG.mod.boss = true; CFG.bossModo = 'auto'; CFG.bossVenderDrops = true; CFG.migBoss530 = true; salvarCfg();
   }
@@ -1515,6 +1516,13 @@
   }
   const cruzadoFixo = (mc, mv) => (mc !== mv ? mv : undefined);            // flip cruzado já decidiu; o normal decide na hora de vender
   // item: um degrau abaixo do menor anúncio dos outros, nunca acima da média de 7 dias nem abaixo de 85% dela
+  // o menor preço anunciado agora por OUTROS vendedores (sem os seus anúncios e sem contas irmãs)
+  function menorListadoItem(id, moeda, meuId = null) {
+    const lista = M.listaItem?.[id + ':' + moeda];
+    const outros = (lista?.linhas || []).filter((a) => a.id !== meuId && !M.meus.some((x) => x.id === a.id) && !ehIrma(a)).map((a) => a.preco);
+    if (outros.length) return Math.min(...outros);
+    return (moeda === 'orb' ? M.resumo[id]?.minOrb : M.resumo[id]?.minGold) || null;
+  }
   function precoRapidoItem(id, moeda, meuId = null) {
     const med = M.medias[id]?.[moeda]?.media, min = moeda === 'orb' ? M.resumo[id]?.minOrb : M.resumo[id]?.minGold;
     if (!med && !min) return null;
@@ -1850,7 +1858,7 @@
     }
     const p = precoRapidoItem(a.itemId, a.moeda, a.id); if (!p) return null;
     const ehDrop = [ITEM.ZFRAG, ITEM.AOE, ITEM.MEGA, ITEM.MEGASH, ITEM.SAFARI].includes(Number(a.itemId)), med = M.medias[a.itemId]?.[a.moeda]?.media;
-    if (ehDrop && med && p < med * CFG.bossDropPisoMedia) return { preco: Math.round(med * CFG.bossDropPisoMedia), ref: `drop de boss: piso de ${Math.round(CFG.bossDropPisoMedia * 100)}% da média de 7 dias` };
+    if (ehDrop) { const menor = menorListadoItem(a.itemId, a.moeda, a.id); if (menor) { const piso = med && CFG.bossDropPisoMedia ? Math.round(med * CFG.bossDropPisoMedia) : 0; return { preco: Math.max(menor, piso), ref: `drop de boss: o menor preço listado (${curtoM(menor, a.moeda)})` }; } }
     return { preco: p, ref: 'um degrau abaixo do menor anúncio' };
   }
   // pokémon parado em Gemas há trocarParaCoinsH horas: passa a vender em Coins (capital gira mais rápido), sempre com lucro.
@@ -2292,8 +2300,8 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
       // cada leva de drop vira um anúncio próprio (até bossAnunciosPorItem por item): vende aos poucos, sem despejar tudo de uma vez
       if (!tem || M.meus.filter((a) => a.itemId === id && a.moeda === 'orb').length >= CFG.bossAnunciosPorItem || M.meus.length >= 20) continue;
       if (Date.now() - (M.listaItem?.[id + ':orb']?.em || 0) > 10 * 60_000) await pedirM({ t: 'market.item', itemId: id, moeda: 'orb' }, 'item', (m) => m.itemId === id && m.moeda === 'orb');
-      const med = M.medias[id]?.orb?.media, rap = precoRapidoItem(id, 'orb') ?? M.resumo[id]?.minOrb ?? med;
-      const preco = Math.round(Math.max(rap || 0, med ? med * CFG.bossDropPisoMedia : 0));
+      const med = M.medias[id]?.orb?.media, menor = menorListadoItem(id, 'orb') ?? med;   // pedido do jogador: pelo menor preço listado, não pela média
+      const preco = Math.round(Math.max(menor || 0, med && CFG.bossDropPisoMedia ? med * CFG.bossDropPisoMedia : 0));
       if (!preco) continue;
       E.custosItens[ck(id, 'orb')] = { qtd: tem, custoTotal: 0, custoMedio: 0 };
       await revenderItem(id, preco, 'orb', true);
@@ -3647,7 +3655,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
           <span>Drops</span><b>${Object.entries(r.drops).map(([id, n]) => `${esc((E.nomesItens[id] || id).toString().replace(' Stone Fragment', '').replace(' TM Disk Piece', ' TM'))} ×${n}`).join(' · ') || '—'}</b>
           <span>Recebido (drops vendidos)</span><b class="bom">${fmt(Math.round(r.recebido))} 🔮 <span class="mudo">(${r.vendidos} vendidos)</span></b><span>Ainda à venda / no inventário</span><b>~${fmt(Math.round(r.pendente))} 🔮</b>
           <span>Tokens usados</span><b>${fmt(r.lutas)} × ${r.custoTk.toFixed(2)} 🔮 = ${fmt(Math.round(r.custo))} 🔮</b><span>Lucro do dia</span><b class="${r.lucro >= 0 ? 'bom' : 'ruim'}">~${fmt(Math.round(r.lucro))} 🔮${cambioImplicito()?.taxa ? ` (~${curto(r.lucro * cambioImplicito().taxa)})` : ''}</b></div>
-          <p class="mudo" style="margin:4px 0 0">Cada drop é anunciado logo (até ${CFG.bossAnunciosPorItem} anúncios por item), um degrau abaixo do menor anúncio, nunca abaixo de ${Math.round(CFG.bossDropPisoMedia * 100)}% da média de 7 dias.</p>` : '<span class="mudo">Nenhuma luta hoje ainda.</span>';
+          <p class="mudo" style="margin:4px 0 0">Cada drop é anunciado logo (até ${CFG.bossAnunciosPorItem} anúncios por item), pelo menor preço listado agora${CFG.bossDropPisoMedia ? `, nunca abaixo de ${Math.round(CFG.bossDropPisoMedia * 100)}% da média de 7 dias` : ''}.</p>` : '<span class="mudo">Nenhuma luta hoje ainda.</span>';
         const t2 = estudoToken(), meu = tetoDoJogador(ITEM.TOKEN, 'orb');
         $('#b-tok').innerHTML = `<table><tr><th>Dia</th><th>Prêmio</th><th class="num">Rende por token (agora / 7 d)</th></tr>${t2.dias.map((x) => `<tr class="${x.premio === 'tickets' ? 'ruim' : ''}"><td>${['Hoje', 'Amanhã', 'Depois'][x.d]}</td><td>${NOME_PREMIO[x.premio]}</td><td class="num">${x.agora.toFixed(2)} / ${x.media.toFixed(2)} 🔮</td></tr>`).join('')}</table>
           <table style="margin-top:6px"><tr><th>Token a</th><th class="num">Lucro por token (dia bom, pior caso)</th></tr>${t2.precos.map((x) => `<tr class="${x.lucro > 0.5 ? 'bom' : x.lucro > 0 ? '' : 'ruim'}"><td>${x.t} 🔮${meu && Math.abs(meu - x.t) < 0.01 ? ' ← seu teto' : ''}</td><td class="num">${x.lucro >= 0 ? '+' : ''}${x.lucro.toFixed(2)} 🔮 (${Math.round(x.pct * 100)}%)</td></tr>`).join('')}</table>

@@ -2,6 +2,7 @@
 
 | Versão | Data | O que mudou |
 | --- | --- | --- |
+| 5.37 | 2026-11-24 | Drops do boss vendidos pelo menor preço listado agora (antes: um degrau abaixo, com piso de 80% da média de 7 dias) — pedido do jogador. O reajuste dos anúncios de drop segue o mesmo preço. |
 | 5.36 | 2026-11-24 | Config → "Levar a configuração para outro lugar": copia todos os ajustes (menos a chave do Claude) e importa em outro lugar, como o app de PC; ao importar, fica em simulação. App de PC: atualiza sozinho a cada 15 min sem precisar de token enquanto o repositório for público, e instala quando o PC fica 2 min sem uso. |
 | 5.35 | 2026-11-24 | Log de reajuste de item mostrava "Nv undefined" no nome (ex.: Mega Shiny Stone Fragment). |
 | 5.34 | 2026-11-24 | Drops do boss: 4 Mega Shiny e 2 Mega estavam parados no inventário. A revenda de item recusava um segundo anúncio do mesmo item, e o inventário às vezes chega depois do aviso do drop. Agora cada leva vira anúncio próprio (até 3 por item) e o app confere o inventário a cada 2 min durante o boss. |
