@@ -50,6 +50,7 @@ async function renderTrader() {
       pkKpi('Saldo 7 dias', `${pkFmt(s7.recC - s7.gasC)} · ${pkG(s7.recG - s7.gasG)}`),
       pkKpi('Revendas (7 d)', pkFmt(s.total.revendasC), 'lucro das revendas já concluídas'),
       pkKpi('Boss hoje', pkG(s.total.bossG), 'drops vendidos + à venda − tokens', s.total.bossG >= 0 ? 'ok' : 'bad'),
+      pkKpi('API do Claude hoje', `US$ ${(s.contas.reduce((t, c) => t + ((c.r && c.r.api && c.r.api.usd) || 0), 0)).toFixed(2)}`, `${s.contas.reduce((t, c) => t + ((c.r && c.r.api && c.r.api.chamadas) || 0), 0)} chamadas nas contas`),
     );
     tot.append(g, el('p', 'tip', 'Saldo = vendido − comprado no histórico do jogo. Compras para guardar (tokens, pokémon nas casas) contam como gasto até serem vendidas.'));
     root.append(tot);
@@ -67,7 +68,8 @@ async function renderTrader() {
         pkKpi('24 h (Coins)', d1 ? pkFmt(d1.gold.recebido - d1.gold.gasto) : '—', d1 ? `${d1.gold.nV} vendas · ${d1.gold.nC} compras` : ''),
         pkKpi('24 h (Gemas)', d1 ? pkG(d1.orb.recebido - d1.orb.gasto) : '—'),
         pkKpi('Boss hoje', r.boss ? pkG(r.boss.lucro) : '—', r.boss ? `${r.boss.lutas} lutas · ~${Math.round(r.boss.porHora)}/h` : (r.bossAuto ? 'série ligada' : '')),
-        pkKpi('Revendas 7 d', pkFmt(r.revendas7 && r.revendas7.lucroC), r.revendas7 ? `${r.revendas7.n} revendas` : ''));
+        pkKpi('Revendas 7 d', pkFmt(r.revendas7 && r.revendas7.lucroC), r.revendas7 ? `${r.revendas7.n} revendas` : ''),
+        pkKpi('API do Claude hoje', r.api ? `US$ ${r.api.usd.toFixed(2)}` : '—', r.api ? `${r.api.chamadas} chamadas${r.api.empate ? ` · paga se 1 🔮 > US$ ${r.api.empate.toFixed(4)}` : ''}` : ''));
       card.append(k);
       const sel = el('select'); for (const p of s.papeis) { const o = el('option', null, `${pkNomePapel[p]} — ${pkDicaPapel[p]}`); o.value = p; sel.append(o); }
       sel.value = c.papel || 'tudo';

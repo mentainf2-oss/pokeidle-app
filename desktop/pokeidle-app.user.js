@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.38
+// @version      5.39
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -31,7 +31,7 @@
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.38';
+  const VERSAO_APP = '5.39';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -87,6 +87,7 @@
 
     // claude
     claudeKey: '', claudeModelo: 'claude-sonnet-5-5', claudeModeloRapido: 'claude-haiku-5-5',
+    usdPorGema: 0,   // quanto vale 1 🔮 em dólar (para comparar o custo da API com o lucro); 0 = não informado
     claudeIntervaloMin: 60, estudoHoras: 3, claudeModo: 'auto', interesses: { itens: [], especies: [], casas: true, revenda: true, shinies: false, boss: true },
     claudeAprovaAcima: 300_000_000, claudeAprovaAcimaGemas: 200, claudePodeGemas: false, claudeConfere: 'todas', disjuntorGemas: 400, disjuntorCoins: 1_500_000_000,   // gasto máx. em 10 min antes de pausar as compras   // 'todas' | 'acima' | 'nenhuma'
 
@@ -2650,12 +2651,38 @@ Recomende compras SOMENTE dentro de interesses_do_jogador (listas vazias = qualq
       if (modo === 'auto') corpo.system = SISTEMA + `\n\nResponda SEMPRE chamando a ferramenta ${TOOL.name}, uma única vez, sem texto fora dela.`;
       let r = await postApi(corpo);
       if (!r.ok && r.status === 400 && corpo.thinking && /thinking/i.test(r.text)) { E.semThinking[modelo] = true; persistir(); delete corpo.thinking; r = await postApi(corpo); }   // modelo não aceita o parâmetro: vai sem ele
-      if (r.ok) return JSON.parse(r.text);
+      if (r.ok) { const j = JSON.parse(r.text); try { registrarUsoApi(modelo, sistema, j); } catch {} return j; }
       ultimo = `API ${r.status}: ${r.text.slice(0, 200)}`;
       if (modo === 'tool' && r.status === 400 && /tool_choice/i.test(r.text)) { E.toolAuto[modelo] = true; persistir(); continue; }
       break;
     }
     throw new Error(ultimo);
+  }
+  // 💵 custo da API: tokens de cada chamada × preço do modelo (US$ por milhão de tokens; tabela de preços da Anthropic, 24/11/2026)
+  const PRECO_API = { 'claude-haiku-5-5': (ent) => (ent > 100_000 ? [0.5, 2.5] : [0.1, 0.5]), 'claude-sonnet-5-5': () => [2, 10] };
+  function registrarUsoApi(modelo, sistema, resp) {
+    const u = resp?.usage || {}; const ent = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0), sai = u.output_tokens || 0;
+    const f = PRECO_API[modelo] || PRECO_API['claude-sonnet-5-5'], [pi, po] = f(ent), usd = ent / 1e6 * pi + sai / 1e6 * po;
+    const uso = sistema === CONFERENTE ? 'conferência' : sistema === NEGOCIADOR ? 'negociação' : 'estratégia';
+    novoDia(); E.apiUso = E.apiUso || {};
+    const d = (E.apiUso[E.dia] ??= { chamadas: 0, entrada: 0, saida: 0, usd: 0, por: {} });
+    d.chamadas++; d.entrada += ent; d.saida += sai; d.usd += usd;
+    const q = (d.por[uso] ??= { chamadas: 0, usd: 0 }); q.chamadas++; q.usd += usd;
+    for (const k of Object.keys(E.apiUso)) if (k < new Date(Date.now() - 10 * 86400_000).toISOString().slice(0, 10)) delete E.apiUso[k];
+    persistir();
+  }
+  // vale a pena? custo da API x lucro real (histórico do jogo) na mesma janela
+  function custoApiVsLucro(dias = 1) {
+    const lim = new Date(Date.now() - 3 * 3600_000 - (dias - 1) * 86400_000).toISOString().slice(0, 10);
+    const ds = Object.entries(E.apiUso || {}).filter(([k]) => k >= lim).map(([, v]) => v);
+    const usd = ds.reduce((s2, d) => s2 + d.usd, 0), chamadas = ds.reduce((s2, d) => s2 + d.chamadas, 0), ent = ds.reduce((s2, d) => s2 + d.entrada, 0), sai = ds.reduce((s2, d) => s2 + d.saida, 0);
+    const por = {}; for (const d of ds) for (const [k, v] of Object.entries(d.por || {})) { por[k] = por[k] || { chamadas: 0, usd: 0 }; por[k].chamadas += v.chamadas; por[k].usd += v.usd; }
+    const r = resumoReal(24 * dias), cb = cambioImplicito()?.taxa || 0;
+    const lucroG = (r.orb.recebido - r.orb.gasto) + (cb ? (r.gold.recebido - r.gold.gasto) / cb : 0);     // tudo em Gemas pelo câmbio
+    const lucroUsd = CFG.usdPorGema > 0 ? lucroG * CFG.usdPorGema : null;
+    const vetos = (E.conferencias || []).filter((x) => !x.ok && Date.now() - x.em < dias * 86400_000);
+    const evitado = vetos.reduce((s2, x) => s2 + (x.moeda === 'orb' ? (x.preco || 0) * (x.qtd || 1) : cb ? (x.preco || 0) * (x.qtd || 1) / cb : 0), 0);
+    return { usd, chamadas, ent, sai, por, lucroG, lucroUsd, vetos: vetos.length, evitadoG: evitado, empate: lucroG > 0 && usd > 0 ? usd / lucroG : null };
   }
   // a decisão vem na ferramenta; se o modelo respondeu em texto, tenta ler o JSON
   function decisaoDaResposta(resp) {
@@ -3434,6 +3461,8 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
 
   function montarClaude() {
     $('#sec-claude').innerHTML = `
+      <div class="cart"><h4>💵 Custo da API x lucro</h4><div id="k-api"></div>
+        <div class="form" style="margin-top:6px"><label>1 🔮 vale (US$)<input id="k-usd" placeholder="ex.: 0,01"></label></div></div>
       <div class="cart"><h4>Conferências de compra</h4><div id="k-conf-hist"></div></div>
       <div class="aviso">O app chama a API do Claude com a <b>sua chave</b> (console.anthropic.com). A API é cobrada à parte da assinatura do Claude. A chave fica só neste navegador: use uma chave exclusiva para isto, com limite de gasto, e não a compartilhe.</div>
       <div class="form">
@@ -3756,6 +3785,11 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
         <table style="margin-top:6px"><tr><th>IV total</th><th class="num">Fator</th><th class="num">Vendas</th></tr>${linha(FAT.iv, (k) => k)}</table>` : '<span class="mudo">Aprendendo… precisa de pelo menos 200 vendas na base.</span>';
     }
     if (abaAtual === 'claude') {
+      { const el = $('#k-api'); if (el) { const lin = (rot, x) => `<tr><td>${rot}</td><td class="num">${fmt(x.chamadas)}<br><span class="mudo">${curto(x.ent)} / ${curto(x.sai)} tokens</span></td><td class="num">US$ ${x.usd.toFixed(3)}</td><td class="num ${x.lucroG >= 0 ? 'bom' : 'ruim'}">${fmt(Math.round(x.lucroG))} 🔮${x.lucroUsd != null ? `<br><span class="mudo">US$ ${x.lucroUsd.toFixed(2)}</span>` : ''}</td><td class="num">${x.lucroUsd != null ? (x.lucroUsd > x.usd ? `<b class="bom">vale: ${(x.lucroUsd / Math.max(x.usd, 1e-6)).toFixed(0)}×</b>` : '<b class="ruim">não paga</b>') : x.empate ? `paga se 1 🔮 > US$ ${x.empate.toFixed(4)}` : '—'}</td></tr>`;
+        const d1 = custoApiVsLucro(1), d7 = custoApiVsLucro(7);
+        el.innerHTML = `<table><tr><th>Janela</th><th class="num">Chamadas</th><th class="num">Custo</th><th class="num">Lucro real</th><th class="num">Vale?</th></tr>${lin('Hoje', d1)}${lin('7 dias', d7)}</table>
+          <p class="mudo" style="margin:4px 0 0">Hoje por uso: ${Object.entries(d1.por).map(([k, v]) => `${k} ${v.chamadas}× US$ ${v.usd.toFixed(3)}`).join(' · ') || '—'}. A conferência vetou ${d1.vetos} compra(s) hoje (~${fmt(Math.round(d1.evitadoG))} 🔮 que não foram gastas). Lucro real = vendido − comprado no histórico do jogo, Coins convertidos pelo câmbio. Preços: Haiku 5.5 US$ 0,10/0,50 e Sonnet 5.5 US$ 2/10 por milhão de tokens.</p>`; } }
+      { const i = $('#k-usd'); if (i && !i.dataset.ok) { i.dataset.ok = 1; i.value = CFG.usdPorGema ? String(CFG.usdPorGema).replace('.', ',') : ''; i.onchange = () => { const v = Number(String(i.value).replace(',', '.')); if (v >= 0) { CFG.usdPorGema = v; salvarCfg(); pintar(); } }; } }
       { const L = E.conferencias || [], h = L.filter((x) => Date.now() - x.em < 24 * 3600_000), v = h.filter((x) => !x.ok).length;
         $('#k-conf-hist').innerHTML = L.length ? `<p class="mudo" style="margin-top:0">Últimas 24 h: ${h.length} conferidas, ${h.length - v} aprovadas, ${v} vetadas. Tokens até o seu preço não passam por aqui.</p><table><tr><th>Quando</th><th>Compra</th><th class="num">Preço</th><th>Decisão</th></tr>${L.slice(0, 15).map((x) => `<tr><td class="mudo">${new Date(x.em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</td><td>${esc(x.nome)}${x.qtd > 1 ? ` ×${x.qtd}` : ''}</td><td class="num">${curtoM(x.preco, x.moeda)}</td><td class="${x.ok ? 'bom' : 'ruim'}">${x.ok ? '✔' : '✖'} ${esc(x.motivo || '')}</td></tr>`).join('')}</table>` : '<span class="mudo">Nenhuma compra conferida ainda. Com a conferência ligada, cada compra aparece aqui com a decisão e o motivo.</span>'; }
       const pr = progressoEstudo();
@@ -3799,6 +3833,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
         boss: bd && { lutas: bd.lutas, vit: bd.vit, porHora: bd.porHora, drops: bd.drops, recebido: bd.recebido, pendente: bd.pendente, custo: bd.custo, lucro: bd.lucro },
         emBoss: !!M.emBoss, bossAuto: !!M.bossAuto,
         casas: Object.values(E.postos || {}).filter(Boolean).map((p) => ({ nome: p.nome, nv: p.xp ? nivelDeXp(p.xp) : null, bot: !!p.bot, shiny: !!p.shiny })),
+        api: (() => { try { const x = custoApiVsLucro(1); return { usd: x.usd, chamadas: x.chamadas, lucroG: x.lucroG, empate: x.empate }; } catch { return null; } })(),
         ideias: M.estudo?.ideias || [], auditoria: M.auditoria?.achados || [], log: M.log.slice(0, 25).map((l) => ({ t: l.t, msg: l.msg, tipo: l.tipo })),
       }));
     },
