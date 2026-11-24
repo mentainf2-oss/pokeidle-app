@@ -1,0 +1,1417 @@
+// Idleterino — aba PvP. Tudo é leitura do próprio jogo: o time se monta no jogo ("Editar
+// tabuleiro") e comprar é sempre com a pessoa, no Market do jogo. O app não mexe em nada.
+//
+//  · Meta: arquétipos do top 50 (times que dividem 3+ pokémon) com tier, tendência de 14 dias,
+//    pokémon e tipos mais usados e o top 50.
+//  · Meu time: o seu time contra cada arquétipo (duelo 1×1 do jogo), sugestão com o que você tem,
+//    upgrade, time anti-meta "sem limite" (baleia) com preço no Market, orçamento e contra-times.
+//  · Planejador: os dois lados do tabuleiro — o adversário previsto e o seu posicionamento contra ele.
+//  · Histórico: PR, vitórias e derrotas ao longo dos dias, sequência e decaimento.
+//
+// Como o app pesa um pokémon: o duelo 1×1 do jogo (compararDuelo1v1: status no nível, IV, qualidade,
+// potência, refino, golpe, STAB, tipos e Z-Move) e, onde não há duelo, a tabela de tipos do jogo.
+
+const PVP_DIAG = { FIRE: 0.5, WATER: 0.5, ELECTRIC: 0.5, GRASS: 0.5, ICE: 0.5, POISON: 0.5, PSYCHIC: 0.5, DARK: 0.5, STEEL: 0.5, GHOST: 2, DRAGON: 2 };
+const TIPO_PT = { NORMAL: 'Normal', FIRE: 'Fogo', WATER: 'Água', GRASS: 'Planta', ELECTRIC: 'Elétrico', ICE: 'Gelo', FIGHTING: 'Lutador', POISON: 'Veneno', GROUND: 'Terra', FLYING: 'Voador', PSYCHIC: 'Psíquico', BUG: 'Inseto', ROCK: 'Pedra', GHOST: 'Fantasma', DRAGON: 'Dragão', DARK: 'Sombrio', STEEL: 'Aço', FAIRY: 'Fada' };
+const TIPO_COR = { NORMAL: '#9fa19f', FIRE: '#e62829', WATER: '#2980ef', GRASS: '#3fa129', ELECTRIC: '#fac000', ICE: '#3dcef3', FIGHTING: '#ff8000', POISON: '#9141cb', GROUND: '#915121', FLYING: '#81b9ef', PSYCHIC: '#ef4179', BUG: '#91a119', ROCK: '#afa981', GHOST: '#704170', DRAGON: '#5060e1', DARK: '#624d4e', STEEL: '#60a1b8', FAIRY: '#ef70ef' };
+const TIER_COR = { S: '#ff6b6b', A: '#ffb347', B: '#ffe066', C: '#8fd18f', U: '#8a90a6' };
+let pvpData = null;
+let pvpAcc = (() => { try { return localStorage.getItem('pvpAcc') || null; } catch { return null; } })();
+let pvpTab = (() => { try { return localStorage.getItem('pvpTab') || 'meta'; } catch { return 'meta'; } })();
+let pvpPlan = null;
+let pvpPlanSugestao = false; // o plano veio da sugestão (o time do jogo ainda não tinha chegado)
+let pvpBusca = '';
+let pvpRetry = 0;
+let pvpArqSel = null;
+let pvpSemLend = true;
+let pvpSoVenda = (() => { try { return localStorage.getItem('pvpSoVenda') !== '0'; } catch { return true; } })();
+let pvpBudget = '';      // orçamento: começa vazio, a pessoa diz quanto quer gastar
+let pvpMoeda = 'orb';
+let pvpBuscaMk = null;   // { carregando, lista, em, erro }
+const pvpSimCache = new Map();
+// No PvP (ranqueado, Mundial e Amador) NÃO existe trava de nível: o "treinador + 5" é regra de hunt. Acima do
+// teto da arena o nível só é comprimido pela régua dela ("conta como Nv X" na ficha) — o duelo do jogo já faz isso.
+let pvpTrainerLv = 0;
+const podeUsar = () => true;
+
+function pvpEff(tabela, atq, def1, def2) {
+  const one = (a, d) => { if (!d) return 1; if (a === d) return PVP_DIAG[a] ?? 1; return ((tabela || {})[a] || {})[d] ?? 1; };
+  let v = one(atq, def1);
+  if (def2 && def2 !== def1) v *= one(atq, def2);
+  return v;
+}
+const pvpBest = (tab, atks, defs) => Math.max(0, ...atks.map((a) => pvpEff(tab, a, defs[0], defs[1])));
+const tipoChip = (t) => { const s = el('span', 'tchip', TIPO_PT[t] || t); s.style.setProperty('--tc', TIPO_COR[t] || '#777'); return s; };
+const alcIcon = (a) => (a > 1 ? `${a}🏹` : '🗡️');
+const statSum = (st) => (st ? st.hp + st.atk + st.def + st.spa + st.spd + st.spe : 0);
+const ago2 = (t) => { const m = Math.round((Date.now() - t) / 60000); return m < 60 ? `há ${m} min` : m < 48 * 60 ? `há ${Math.round(m / 60)}h` : `há ${Math.round(m / 1440)} dias`; };
+const pct = (x) => `${Math.round((x || 0) * 100)}%`;
+const shortName = (n) => String(n || '').replace(/^Mega /, 'M. ');
+const zChip = (z) => { const s = el('span', 'zchip', `Z ${TIPO_PT[String(z).toUpperCase()] || z}`); s.title = 'Z-Move: dá um tipo de ataque a mais'; return s; };
+
+function pvpMetaEntries(meta) {
+  const out = [];
+  if (!meta) return out;
+  for (const l of meta.linhas) {
+    const p = meta.perfis[l.nick];
+    if (!p) continue;
+    const w = 1 + (51 - Math.min(50, l.pos)) / 50;
+    for (const k of p.time) {
+      const inf = meta.info[k.speciesId] || {};
+      const tipos = inf.tipos || [];
+      out.push({ ...k, pos: l.pos, nick: l.nick, w, arq: meta.porNick ? meta.porNick[l.nick] : null, tipos, atk: [...new Set([...tipos, k.el || k.tmElemental].filter(Boolean))], alcance: inf.alcance || 1, stats: inf.stats, nome: k.nome || inf.nome || `#${k.speciesId}` });
+    }
+  }
+  return out;
+}
+
+function pvpScore(c, entries, tab, refLevel) {
+  let off = 0, def = 0, wsum = 0;
+  const forte = new Map(), fraco = new Map();
+  for (const e of entries) {
+    const o = pvpBest(tab, c.atk, e.tipos);
+    const d = pvpBest(tab, e.atk, c.tipos);
+    off += o * e.w; def += d * e.w; wsum += e.w;
+    if (o >= 2) forte.set(e.nome, Math.max(forte.get(e.nome) || 0, o));
+    if (d >= 2) fraco.set(e.nome, Math.max(fraco.get(e.nome) || 0, d));
+  }
+  off /= wsum || 1; def /= wsum || 1;
+  const lvl = Math.min(1.5, (c.level || 1) / Math.max(1, refLevel));
+  const st = statSum(c.stats) / 600;
+  // AoE não entra: no PvP do jogo (tabuleiro) ele não tem efeito.
+  const score = off * 1.0 - def * 0.8 + lvl * 1.4 + st * 0.5;
+  return { score, off, def, lvl, forte: [...forte.entries()].sort((a, b) => b[1] - a[1]), fraco: [...fraco.entries()].sort((a, b) => b[1] - a[1]) };
+}
+
+function pvpMine(live, info) {
+  if (!live) return [];
+  return Object.values(live.meus || {}).map((m) => {
+    const sid = m.speciesId;
+    const inf = info[sid] || {};
+    const tipos = inf.tipos || [];
+    const el2 = m.el || m.tmElemental || null;
+    const r = { id: m.id, speciesId: Number(sid), nome: inf.nome || `#${sid}`, tipos, atk: [...new Set([...tipos, el2].filter(Boolean))], el: el2, aoe: !!m.aoe, level: m.level, alcance: inf.alcance || 1, stats: inf.stats, pk: m };
+    r.usavel = podeUsar(r);
+    return r;
+  }).sort((a, b) => b.level - a.level);
+}
+
+function pvpSuggest(mine, entries, tab, refLevel) {
+  const pool = mine.map((c) => ({ c, s: pvpScore(c, entries, tab, refLevel) })).sort((a, b) => b.s.score - a.s.score);
+  const team = [];
+  const coberto = new Set();
+  while (team.length < 5 && pool.length) {
+    let best = null, bestV = -1e9;
+    const perto = team.filter((x) => x.c.alcance <= 1).length, longe = team.length - perto;
+    for (const x of pool) {
+      const novos = x.s.forte.filter(([n]) => !coberto.has(n)).length;
+      const equilibrio = (x.c.alcance <= 1 ? (perto >= 3 ? -0.6 : 0) : (longe >= 3 ? -0.6 : 0));
+      const v = x.s.score + novos * 0.08 + equilibrio;
+      if (v > bestV) { bestV = v; best = x; }
+    }
+    if (!best) break;
+    team.push(best);
+    for (const [n] of best.s.forte) coberto.add(n);
+    pool.splice(pool.indexOf(best), 1);
+  }
+  return team;
+}
+
+// ---------- tabuleiro (o REAL do jogo: shared/pvp-tabuleiro.mjs) ----------
+// 5 fileiras e 30 casas numeradas como no jogo; a fileira 0 é a da frente (perto do meio). O lado do adversário é o
+// mesmo tabuleiro girado (cx → 29 − cx, cy → 25 − cy). Distância = a do jogo (a maior entre as diferenças de x e y).
+const TB_FILEIRAS = [{ cy: 13, de: 12, ate: 17 }, { cy: 14, de: 11, ate: 18 }, { cy: 15, de: 11, ate: 18 }, { cy: 16, de: 13, ate: 16 }, { cy: 17, de: 13, ate: 16 }];
+const TB_CASAS = (() => { const l = []; TB_FILEIRAS.forEach((f, r) => { for (let cx = f.de; cx <= f.ate; cx++) l.push({ casa: l.length, r, col: cx - f.de, cx, cy: f.cy }); }); return l; })();
+const PVP_ROWS = TB_FILEIRAS.map((f) => f.ate - f.de + 1);
+// A ordem em que o jogo põe cada alcance quando a pessoa não escolhe a casa (casasDaEquipe do jogo).
+const TB_F0 = [2, 3, 1, 4, 0, 5], TB_F1 = [9, 10, 8, 11, 7, 12, 6, 13], TB_F2M = [17, 18, 16, 19], TB_F2L = [15, 20], TB_F2P = [14, 21], TB_F3 = [23, 24, 22, 25], TB_F4 = [27, 28, 26, 29];
+const TB_F2 = [...TB_F2M, ...TB_F2L, ...TB_F2P];
+const TB_PRIO = { 1: [...TB_F0, ...TB_F1, ...TB_F2, ...TB_F3, ...TB_F4], 2: [...TB_F1, ...TB_F2, ...TB_F0, ...TB_F3, ...TB_F4], 3: [...TB_F2M, ...TB_F3, ...TB_F2L, ...TB_F4, ...TB_F2P, ...TB_F1, ...TB_F0], 4: [...TB_F3, ...TB_F2, ...TB_F4, ...TB_F1, ...TB_F0] };
+const casaOk = (v) => (v == null || v === '' ? null : Number.isInteger(Number(v)) && Number(v) >= 0 && Number(v) < TB_CASAS.length ? Number(v) : null);
+function casasDaEquipe(pedidas, alcances) {
+  const n = alcances.length; const out = new Array(n).fill(null); const usadas = new Set();
+  for (let i = 0; i < n; i++) { const c = casaOk(pedidas[i]); if (c == null || usadas.has(c)) continue; out[i] = c; usadas.add(c); }
+  for (let i = 0; i < n; i++) { if (out[i] != null) continue; const a = Math.min(4, Math.max(1, Math.round(alcances[i] || 1))); const c = TB_PRIO[a].find((x) => !usadas.has(x)); out[i] = c; usadas.add(c); }
+  return out;
+}
+// FILEIRA PELA DISTÂNCIA (regra do dono, 17/11/2026: o Planejador punha atirador de 3 e 4 na 1ª fileira e ele apanhava
+// primeiro). Sem distância (corpo a corpo, a frontline/tanque) → 1ª fileira; distância 2 (soldado, assassino) → 2ª ou
+// 3ª; distância 3 → 4ª (a penúltima); distância 4 → 5ª (a última). Se a fileira lotar, vai para a vizinha.
+const FILAS_ALC = { 1: [0], 2: [1, 2], 3: [3], 4: [4] };
+const FILAS_FOLGA = { 1: [1], 2: [0, 3], 3: [2, 4], 4: [3] };
+const alcN = (a) => Math.min(4, Math.max(1, Math.round(a || 1)));
+const ORDEM_CASAS = [...TB_F0, ...TB_F1, ...TB_F2, ...TB_F3, ...TB_F4]; // o meio de cada fileira primeiro
+// As casas que cada um do time pode usar (as da fileira dele; com a fileira cheia de gente do mesmo alcance, a vizinha também).
+function casasPermitidas(team) {
+  const porAlc = {}; team.forEach((m) => { const a = alcN(m.alcance); porAlc[a] = (porAlc[a] || 0) + 1; });
+  return team.map((m) => {
+    const a = alcN(m.alcance);
+    const cabe = FILAS_ALC[a].reduce((s, r) => s + PVP_ROWS[r], 0);
+    const filas = porAlc[a] > cabe ? [...FILAS_ALC[a], ...FILAS_FOLGA[a]] : FILAS_ALC[a];
+    // A fileira dele primeiro; a vizinha só depois (a ordem do Set é a ordem de escolha).
+    return new Set(filas.flatMap((r) => ORDEM_CASAS.filter((c) => TB_CASAS[c].r === r)));
+  });
+}
+// Põe cada um numa casa da fileira dele (mantém quem já está certo; os outros vão para a melhor casa livre da fileira).
+function legalizarCasas(casas, team, perm) {
+  perm = perm || casasPermitidas(team);
+  const out = casas.slice(0, team.length); const usadas = new Set();
+  team.forEach((_, i) => { const c = out[i]; if (c != null && perm[i].has(c) && !usadas.has(c)) usadas.add(c); else out[i] = null; });
+  team.forEach((m, i) => {
+    if (out[i] != null) return;
+    let c = [...perm[i]].find((x) => !usadas.has(x));
+    if (c == null) { const a = alcN(m.alcance); c = ORDEM_CASAS.filter((x) => !usadas.has(x)).sort((x, y) => Math.abs(TB_CASAS[x].r - FILAS_ALC[a][0]) - Math.abs(TB_CASAS[y].r - FILAS_ALC[a][0]))[0]; }
+    out[i] = c; usadas.add(c);
+  });
+  return out;
+}
+const distCasas = (minha, dele) => { const a = TB_CASAS[minha], b = TB_CASAS[dele]; if (!a || !b) return 99; return Math.max(Math.abs(a.cx - (29 - b.cx)), Math.abs(a.cy - (25 - b.cy))); };
+const nomeCasa = (c) => { const k = TB_CASAS[c]; return k ? `${k.r + 1}ª fileira, ${k.col + 1}ª casa da esquerda` : '—'; };
+
+// QUEM ENFRENTA QUEM (estimativa: a luta de verdade é calculada pelo servidor do jogo). Todos nascem juntos e cada
+// um vai no adversário mais perto. Para cada um dos seus: a chance de vencer o 1×1 contra quem ele vai enfrentar
+// (duelo do jogo). Quem bate sem apanhar de volta (o alvo dele está ocupado com outro) ganha vantagem — mais ainda
+// quem atira de longe. O mesmo do lado deles. Resultado de 0 a 1 = chance estimada de vencer a batalha.
+// ---------- PAPÉIS (ideia do dono, 14/11/2026, "como no TFT") ----------
+// Regras do PokeIdle que pesam aqui (código do jogo):
+//  · o ALCANCE vem do SP.ATK: só é 🏹 quem tem SP.ATK acima do ATK e do HP (folga → 2, 3 ou 4 casas); o resto é 🗡️;
+//  · não existe cura, escudo, buff, atordoar nem provocar no PvP — todo golpe é dano. Por isso NÃO há "suporte" de verdade;
+//  · a Speed só encurta o intervalo dos golpes em até 7% (shared/cooldown-golpes.mjs): pesa pouco.
+// O papel junta os status base (aguenta = HP e defesas; bate = o maior entre ATK e SP.ATK) com o que a espécie FAZ nas
+// partidas de verdade (Tracker do jogo: dano e dano recebido por entrada, sobrevivência e abates, comparados com o meta).
+const PAPEIS = {
+  tanque: { ic: '🛡️', nome: 'Tanque', faz: 'aguenta muito e segura quem chega', onde: 'na 1ª fileira, no meio' },
+  soldado: { ic: '⚔️', nome: 'Soldado', faz: 'aguenta e bate bem', onde: 'na 1ª ou 2ª fileira' },
+  assassino: { ic: '🗡️', nome: 'Assassino', faz: 'bate muito, mas cai rápido', onde: 'na 2ª fileira, nas pontas' },
+  atirador: { ic: '🏹', nome: 'Atirador', faz: 'bate de longe, golpe atrás de golpe', onde: 'na 3ª ou 4ª fileira, atrás do tanque' },
+  mago: { ic: '🔮', nome: 'Mago', faz: 'o maior dano de longe, mas é frágil', onde: 'na 4ª ou 5ª fileira, bem protegido' },
+  resistente: { ic: '🧱', nome: 'Resistente de longe', faz: 'atira e aguenta (o mais perto de um "suporte": o jogo não tem cura)', onde: 'na 2ª ou 3ª fileira' },
+};
+const med = (l) => { const s = l.filter((x) => x > 0).sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : 0; };
+// Comparação JUSTA: dentro do mesmo grupo (corpo a corpo × corpo a corpo, de longe × de longe — quem fica atrás sempre
+// causa mais dano e sobrevive mais) e por PROPORÇÕES (recebido ÷ causado), que não dependem do nível de quem usa.
+const grupoDe = (alc) => (alc > 1 ? 'longe' : 'perto');
+function preparaTracker(tk, alcanceDe, chave) {
+  if (!tk || !tk.especies || !alcanceDe) return tk;
+  if (tk.med && tk.medDe === chave) return tk;
+  const g = { perto: [], longe: [] };
+  for (const [id, x] of Object.entries(tk.especies)) { const a = alcanceDe(Number(id)); if (a && x.partidas >= 5000 && x.dano > 0) g[grupoDe(a)].push(x); }
+  const resumo = (l) => ({ razao: med(l.map((x) => x.recebido / x.dano)), dano: med(l.map((x) => x.dano)), sobrev: med(l.map((x) => x.sobrev)), abates: med(l.map((x) => x.abates)), n: l.length });
+  tk.med = { perto: resumo(g.perto), longe: resumo(g.longe) };
+  tk.medDe = chave;
+  return tk;
+}
+function papelDe(m, tk) {
+  const s = m.stats || {};
+  const hp = s.hp || 50, def = ((s.def || 50) + (s.spd || 50)) / 2, atq = Math.max(s.atk || 0, s.spa || 0), spe = s.spe || 50;
+  const aguenta = (hp + def) / 2;
+  const foco = atq / Math.max(1, aguenta); // > 1 = mais bate que aguenta
+  const alc = m.alcance || 1;
+  // O que ele faz nas partidas de verdade (só com amostra boa).
+  const r = tk && tk.especies && tk.med ? tk.especies[m.speciesId] : null;
+  const gm = r && tk.med[grupoDe(alc)];
+  const real = r && gm && gm.n >= 5 && r.partidas >= 2000 && r.dano > 0
+    ? { razao: (r.recebido / r.dano) / (gm.razao || 1), dano: r.dano / (gm.dano || 1), sobrev: r.sobrev / (gm.sobrev || 0.4), abates: r.abates / (gm.abates || 1), wr: r.winrate, partidas: r.partidas, grupo: grupoDe(alc) }
+    : null;
+  let p;
+  if (alc <= 1) {
+    // Tanque: aguenta mais do que bate — nos status, ou nas partidas (apanha bem mais do que bate, para o grupo dele).
+    // (Apanhar muito e cair rápido é ser frágil, não tanque: o real só conta se ele também sobrevive.)
+    const tank = foco < 1 || (real && real.razao >= 1.6 && real.sobrev >= 0.8);
+    const assas = !tank && ((spe >= 100 && foco >= 1.25) || (real && real.abates >= 1.3 && real.sobrev < 0.85));
+    p = tank ? 'tanque' : assas ? 'assassino' : 'soldado';
+  } else if (alc === 2) {
+    p = (spe >= 95 && foco >= 1.2) ? 'assassino' : aguenta >= 85 && foco < 1.15 ? 'resistente' : 'soldado';
+  } else {
+    // Mago = o golpe grande (SP.ATK 120+, ou dano real bem acima dos outros de longe); atirador = bate de longe com menos força.
+    p = aguenta >= 90 && foco < 1.15 ? 'resistente' : (s.spa || 0) >= 120 || (real && real.dano >= 1.4) ? 'mago' : 'atirador';
+  }
+  // Por que (curto, em números).
+  const porque = [`aguenta ${Math.round(aguenta)} (HP ${hp}, defesas ${Math.round(def)}) × bate ${atq} (${(s.atk || 0) >= (s.spa || 0) ? 'ATK' : 'SP.ATK'})`, `Speed ${spe}`, alc > 1 ? `alcance ${alc} 🏹` : 'corpo a corpo 🗡️'];
+  if (real) porque.push(`nas partidas reais, comparado aos outros ${real.grupo === 'longe' ? 'de longe' : 'corpo a corpo'}: causa ${Math.round(real.dano * 100)}% do dano típico, apanha ${String(Math.round(real.razao * 10) / 10).replace('.', ',')}× o normal para o dano que causa, sobrevive ${Math.round(real.sobrev * 100)}% do típico (winrate ${Math.round(real.wr * 100)}% em ${fmt(real.partidas)} partidas)`);
+  // O lugar sai da distância (FILAS_ALC), não do papel.
+  const ONDE_ALC = { 1: 'na 1ª fileira (a frente)', 2: 'na 2ª ou 3ª fileira', 3: 'na 4ª fileira (a penúltima)', 4: 'na 5ª fileira (a última)' };
+  return { id: p, ...PAPEIS[p], onde: ONDE_ALC[alcN(alc)], porque, real: !!real };
+}
+// FORMAÇÃO POR PAPEL: a casa de partida de cada papel (a ordem de preferência, como o jogo faz por alcance).
+const PAPEL_CASAS = {
+  tanque: [2, 3, 1, 4, 9, 10], soldado: [1, 4, 0, 5, 9, 10, 8, 11], assassino: [7, 12, 6, 13, 14, 21, 8, 11],
+  resistente: [17, 18, 16, 19, 9, 10], atirador: [23, 24, 17, 18, 22, 25, 16, 19], mago: [27, 28, 23, 24, 26, 29, 22, 25],
+};
+function casasPorPapel(team, papeis) {
+  const ordem = ['tanque', 'soldado', 'assassino', 'resistente', 'atirador', 'mago'];
+  const usadas = new Set(), out = new Array(team.length).fill(null);
+  const perm = casasPermitidas(team);
+  // A casa do papel, mas sempre dentro da fileira da distância dele.
+  for (const p of ordem) team.forEach((m, i) => { if (papeis[i].id !== p || out[i] != null) return; const c = PAPEL_CASAS[p].find((x) => !usadas.has(x) && perm[i].has(x)); if (c == null) return; out[i] = c; usadas.add(c); });
+  return legalizarCasas(out, team, perm);
+}
+
+// A LUTA NO TEMPO (pedido do dono, 14/11/2026: o Planejador punha o Umbreon — o tank — na última fileira e o dano na
+// frente, sem dizer por quê). Simulação simples do tabuleiro com os números do próprio duelo do jogo:
+//  · todos nascem nas casas; cada um escolhe o inimigo vivo mais perto e anda até ficar no alcance dele
+//    (🗡️ corpo a corpo = 1 casa; 🏹 = 2 a 4 casas), uma casa a cada TB_PASSO_S;
+//  · no alcance, tira da vida do alvo 1/T por segundo — T = os segundos que o duelo do jogo diz que ele leva para
+//    derrubar AQUELE adversário (vida ÷ dano por segundo, com tipo, golpe, nível, IV…);
+//  · quem cai sai; quem ficou sem alvo procura o próximo. Acaba quando um lado cai inteiro (ou em 90 s).
+// Assim o tank na frente SEGURA quem chega (os inimigos batem nele) enquanto os atiradores batem sem apanhar — o que a
+// conta antiga (só "quem enfrenta quem") não via. A luta de verdade é do servidor; isto é estimativa.
+// Passo: 260 ms por casa (o padrão do replay do jogo, replay.mjs: ms ?? 260). Num passo da conta anda quantas couberem.
+const TB_PASSO_S = 0.26, TB_DT = 0.5, TB_MAX_S = 90;
+function simBatalha(mc, team, ec, enemy, T, detalhe) {
+  const nI = team.length, nJ = enemy.length;
+  const mk = (lado, i, casa, alc) => { const k = TB_CASAS[casa] || TB_CASAS[0]; const p = lado === 0 ? { x: k.cx, y: k.cy } : { x: 29 - k.cx, y: 25 - k.cy }; return { lado, i, x: p.x, y: p.y, alc: Math.max(1, Math.min(4, Math.round(alc || 1))), vida: 1, alvo: -1, anda: 0, morreu: null, entrou: null, dano: 0, apanhouDe: new Set(), bateuEm: new Set(), livre: 0 }; };
+  const A = team.map((m, i) => mk(0, i, mc[i], m.alcance)), B = enemy.map((e, j) => mk(1, j, ec[j], e.alcance));
+  const taxa = (u, alvo) => { const t = u.lado === 0 ? T[u.i] && T[u.i][alvo.i] && T[u.i][alvo.i][0] : T[alvo.i] && T[alvo.i][u.i] && T[alvo.i][u.i][1]; return t > 0 && t < 999 ? 1 / t : 1 / 60; };
+  const dist = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+  let tempo = 0;
+  for (; tempo < TB_MAX_S; tempo += TB_DT) {
+    const vivosA = A.filter((u) => u.vida > 0), vivosB = B.filter((u) => u.vida > 0);
+    if (!vivosA.length || !vivosB.length) break;
+    const golpes = [];
+    for (const u of [...vivosA, ...vivosB]) {
+      const inimigos = u.lado === 0 ? B : A;
+      let alvo = u.alvo >= 0 ? inimigos[u.alvo] : null;
+      if (!alvo || alvo.vida <= 0) {
+        let melhor = null;
+        for (const e of inimigos) if (e.vida > 0 && (!melhor || dist(u, e) < dist(u, melhor))) melhor = e;
+        alvo = melhor; u.alvo = alvo ? alvo.i : -1;
+      }
+      if (!alvo) continue;
+      if (dist(u, alvo) > u.alc) {
+        u.anda += TB_DT;
+        while (u.anda >= TB_PASSO_S && dist(u, alvo) > u.alc) { u.anda -= TB_PASSO_S; u.x += Math.sign(alvo.x - u.x); u.y += Math.sign(alvo.y - u.y); }
+        if (dist(u, alvo) > u.alc) continue;
+        u.anda = 0;
+      }
+      if (u.entrou == null) u.entrou = tempo;
+      golpes.push([u, alvo, taxa(u, alvo) * TB_DT]);
+    }
+    for (const [u, alvo, d] of golpes) {
+      const tirado = Math.min(alvo.vida, d);
+      alvo.vida -= d; u.dano += tirado; alvo.apanhouDe.add(u.i); u.bateuEm.add(alvo.i);
+      if (alvo.vida <= 0 && alvo.morreu == null) alvo.morreu = tempo;
+    }
+    // "Livre" = batendo sem ninguém batendo nele (o tank segura, o atirador bate de graça).
+    const batidos = new Set(golpes.filter(([u]) => u.lado === 1).map(([, a]) => a.i));
+    for (const [u] of golpes) if (u.lado === 0 && !batidos.has(u.i)) u.livre += TB_DT;
+  }
+  const restoA = A.reduce((s, u) => s + Math.max(0, u.vida), 0), restoB = B.reduce((s, u) => s + Math.max(0, u.vida), 0);
+  // 0 a 1: vence com mais gente viva = perto de 1; perde por pouco = perto de 0,5.
+  const v = restoA > 0 && restoB <= 0 ? 0.5 + 0.5 * (restoA / nI) : restoB > 0 && restoA <= 0 ? 0.5 - 0.5 * (restoB / nJ) : 0.5 + 0.5 * ((restoA / nI) - (restoB / nJ));
+  return detalhe ? { v, tempo, A, B } : v;
+}
+function avaliarPos(mc, team, ec, enemy, P, T) {
+  const nI = team.length, nJ = enemy.length;
+  if (!nI || !nJ) return 0;
+  // Com os tempos do duelo: a luta no tempo pesa 70% (a ordem de quem segura e quem bate) e o "quem enfrenta quem"
+  // pela chance do duelo, 30% (guarda a incerteza do 1×1).
+  if (T) return 0.7 * simBatalha(mc, team, ec, enemy, T) + 0.3 * avaliarParear(mc, team, ec, enemy, P);
+  return avaliarParear(mc, team, ec, enemy, P);
+}
+function avaliarParear(mc, team, ec, enemy, P) {
+  const nI = team.length, nJ = enemy.length;
+  if (!nI || !nJ) return 0;
+  const d = (i, j) => distCasas(mc[i], ec[j]);
+  const alvoMeu = team.map((_, i) => { let b = 0; for (let j = 1; j < nJ; j++) if (d(i, j) < d(i, b)) b = j; return b; });
+  const alvoDele = enemy.map((_, j) => { let b = 0; for (let i = 1; i < nI; i++) if (d(i, j) < d(b, j)) b = i; return b; });
+  const livre = (alc) => (alc > 1 ? 0.35 : 0.15);
+  let s = 0;
+  team.forEach((m, i) => { const j = alvoMeu[i]; let p = P[i][j]; if (alvoDele[j] !== i) p += (1 - p) * livre(m.alcance); s += p; });
+  enemy.forEach((e, j) => { const i = alvoDele[j]; let q = 1 - P[i][j]; if (alvoMeu[i] !== j) q += (1 - q) * livre(e.alcance); s += 1 - q; });
+  return s / (nI + nJ);
+}
+// MELHOR POSIÇÃO: procura as casas que dão a maior chance média contra os times escolhidos (pesados por quantos do
+// top usam cada um). Começa da posição do jogo, da padrão e de 14 pontos sorteados (sempre os mesmos) e vai trocando
+// um pokémon de casa (ou dois de lugar) enquanto melhora.
+async function otimizarPos(team, alvos, inicial, extras) {
+  const n = team.length;
+  const pesoT = alvos.reduce((s, x) => s + x.w, 0) || 1;
+  const val = (mc) => alvos.reduce((s, x) => s + x.w * avaliarPos(mc, team, x.ec, x.enemy, x.P, x.T), 0) / pesoT;
+  let seed = 12345; const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  const sorteio = () => { const l = [...TB_CASAS.keys()]; for (let i = l.length - 1; i > 0; i--) { const k = Math.floor(rnd() * (i + 1)); [l[i], l[k]] = [l[k], l[i]]; } return l.slice(0, n); };
+  // Com a luta no tempo cada avaliação pesa mais: menos pontos de partida e menos voltas (continua rápido).
+  const comTempo = alvos.some((x) => x.T);
+  // Só casas da fileira de cada um (FILAS_ALC): a busca nunca põe quem atira de longe na frente.
+  const perm = casasPermitidas(team);
+  const leg = (c) => legalizarCasas(c, team, perm);
+  const inicios = [inicial, casasDaEquipe([], team.map((m) => m.alcance)), ...(extras || [])];
+  for (let r = 0; r < (comTempo ? 4 : 14); r++) inicios.push(sorteio());
+  let best = leg(inicial), bestV = val(best), contas = 0;
+  for (const ini0 of inicios) {
+    const ini = leg(ini0);
+    let cur = ini.slice(), v = val(cur), melhorou = true, voltas = 0;
+    while (melhorou && voltas++ < (comTempo ? 8 : 30)) {
+      melhorou = false;
+      for (let i = 0; i < n; i++) for (const c of perm[i]) {
+        if (cur[i] === c) continue;
+        const k = cur.indexOf(c);
+        if (k >= 0 && !perm[k].has(cur[i])) continue; // a troca também tem que deixar o outro na fileira dele
+        const t = cur.slice(); if (k >= 0) t[k] = t[i]; t[i] = c;
+        const vv = val(t); if (vv > v + 1e-9) { cur = t; v = vv; melhorou = true; }
+        if (comTempo && ++contas % 60 === 0) await new Promise((r) => setTimeout(r, 0)); // a tela continua respondendo
+      }
+    }
+    if (v > bestV + 1e-9) { best = cur; bestV = v; }
+  }
+  return { casas: best, v: bestV };
+}
+// Desenho: o adversário em cima (girado: a frente dele perto do meio), você embaixo. `casas[i]` = casa do pokémon i.
+function boardEl(sides) {
+  const wrap = el('div', 'pp-board two');
+  for (const sd of sides) {
+    const half = el('div', `pp-half ${sd.cls}`);
+    const order = sd.flip ? [4, 3, 2, 1, 0] : [0, 1, 2, 3, 4];
+    for (const r of order) {
+      const row = el('div', 'pp-row');
+      const cols = [...Array(PVP_ROWS[r]).keys()];
+      if (sd.flip) cols.reverse();
+      for (const col of cols) {
+        const casa = TB_CASAS.find((k) => k.r === r && k.col === col).casa;
+        const i = sd.casas.findIndex((c) => c === casa);
+        const cell = el('div', `pp-cell${i >= 0 ? ' on' : ''}`);
+        if (i >= 0) { const m = sd.team[i]; const pp = m.papel; cell.append(el('b', null, shortName(m.nome)), el('span', null, `${pp ? `${pp.ic} ` : ''}${alcIcon(m.alcance)}`)); cell.title = `${m.nome} · Nv ${fmt(m.level)} · ${nomeCasa(casa)}${pp ? `\n${pp.ic} ${pp.nome}: ${pp.faz}` : ''}`; }
+        row.append(cell);
+      }
+      half.append(row);
+    }
+    wrap.append(half);
+    if (sd.flip) wrap.append(el('div', 'pp-ball', '◓'));
+  }
+  return wrap;
+}
+
+function pvpMemberCard(c, s, extra) {
+  const card = el('div', 'pvp-mem');
+  const top = el('div', 'pm-top');
+  top.append(el('b', null, c.nome), el('span', 'pm-lv', c.level ? `Nv ${fmt(c.level)}` : ''), el('span', 'pm-alc', alcIcon(c.alcance)));
+  const tags = el('div', 'pm-tags');
+  for (const t of c.tipos || []) tags.append(tipoChip(t));
+  if (c.el) tags.append(zChip(c.el));
+  card.append(top, tags);
+  if (s) {
+    const why = el('div', 'pm-why');
+    if (s.forte.length) why.append(el('span', 'ok', `Forte contra: ${s.forte.slice(0, 4).map(([n, x]) => `${n} (${x}×)`).join(', ')}`));
+    if (s.fraco.length) why.append(el('span', 'bad', `Cuidado com: ${s.fraco.slice(0, 3).map(([n, x]) => `${n} (${x}×)`).join(', ')}`));
+    if (s.lvl < 0.5) why.append(el('span', 'warn', 'Nível bem abaixo do topo: suba antes de contar com ele.'));
+    card.append(why);
+  }
+  if (extra) card.append(extra);
+  return card;
+}
+
+// Preço no Market (lido pelo app na atualização do meta): "a partir de", em gemas e coins.
+function priceRow(meta, nome) {
+  const rows = (meta.precos || {})[nome] || [];
+  const r = rows.find((x) => String(x.nome).toLowerCase() === String(nome).toLowerCase()) || null;
+  const box = el('div', 'price');
+  if (!r) { box.append(el('span', 'sub', rows.length ? 'sem oferta dessa forma agora' : 'sem oferta lida no Market')); return { box, r: null }; }
+  if (r.minOrb) { const b = el('b', 'orb'); b.append(el('i', 'cur orb'), fmt(r.minOrb)); box.append(b); }
+  if (r.minGold) { const b = el('b'); b.append(el('i', 'cur gold'), fmt(r.minGold)); box.append(b); }
+  box.append(el('span', 'sub', `${r.anuncios} oferta${r.anuncios === 1 ? '' : 's'}${r.temTmElemental ? ' · tem com Z-Move' : ''}`));
+  return { box, r };
+}
+function watchBtn(nome) {
+  const on = (pvpData.watch || []).includes(nome);
+  const b = button(on ? '🔔 Avisando' : '🔔 Avisar quando baratear', `mini${on ? ' on' : ''}`, async () => {
+    const list = new Set(pvpData.watch || []);
+    if (on) list.delete(nome); else list.add(nome);
+    pvpData.watch = await call('poke:pvp:watch', [...list]);
+    toast(on ? `Sem aviso para ${nome}.` : `O app avisa quando ${nome} aparecer bem mais barato no Market (confere a cada 30 min).`);
+    renderPvp(true);
+  });
+  b.title = 'Só avisa. A compra é sempre sua, no Market do jogo.';
+  return b;
+}
+
+// Simulação: o seu time contra o time de um jogador do top, no duelo 1×1 do jogo (cada um contra
+// cada um). Nota do time = 60% "para cada adversário, o seu melhor contra ele" + 40% a média geral.
+async function simTeam(team, enemyTime) {
+  const key = `${pvpAcc}|${team.map((m) => `${m.speciesId}:${m.level}`).join(',')}|${enemyTime.map((k) => `${k.speciesId}:${k.level}`).join(',')}`;
+  if (pvpSimCache.has(key)) return pvpSimCache.get(key);
+  const res = await call('poke:pvp:duel', pvpAcc, team.map((m) => ({ ...m.pk, speciesId: m.speciesId })), enemyTime);
+  if (!res || !res.m) return null;
+  const m = res.m.map((row) => row.map((x) => (x == null ? 0.5 : x)));
+  const cols = enemyTime.map((_, j) => Math.max(...m.map((row) => row[j])));
+  const all = m.flat();
+  const est = 0.6 * (cols.reduce((a, b) => a + b, 0) / cols.length) + 0.4 * (all.reduce((a, b) => a + b, 0) / all.length);
+  // Tempos do duelo (segundos para derrubar / ser derrubado): só nas versões do núcleo que já mandam.
+  const t = Array.isArray(res.t) && res.t.length === m.length ? res.t.map((row) => row.map((x) => (Array.isArray(x) ? x : [30, 30]))) : null;
+  const out = { m, t, est };
+  pvpSimCache.set(key, out);
+  return out;
+}
+
+async function renderPvp(keepScroll) {
+  const root = $('#page-pvp');
+  const scroll = keepScroll ? root.scrollTop : 0;
+  const accs = (S.poke && S.poke.accounts || []).filter((a) => a.isPoke);
+  if (!accs.length) { root.replaceChildren(); root.append(emptyBox('PvP', 'Adicione uma conta do PokeIdle para ver o meta e montar o seu time.')); return; }
+  if (!pvpAcc || !accs.some((a) => a.id === pvpAcc)) pvpAcc = S.poke.mainId || accs[0].id;
+  pvpData = await call('poke:pvp:get', pvpAcc);
+  if (page !== 'pvp') return;
+  const { meta, live, running, prog } = pvpData;
+  if (meta && live && live.info) meta.info = { ...(meta.info || {}), ...live.info };
+  const tab = (live && live.tabelaTipos) || (meta && meta.tabelaTipos) || {};
+  root.replaceChildren();
+
+  // ---- cabeçalho ----
+  const head = el('header', 'page-head');
+  const t = el('div');
+  t.append(el('h1', null, 'PvP'), el('p', 'sub', 'Meta do top 50 do Ranqueado, lido do próprio jogo e atualizado sozinho todo dia. Os cálculos usam o duelo 1×1 do jogo.'));
+  const act = el('div', 'actions'); act.style.margin = '0';
+  const sel = el('select');
+  for (const a of accs) { const i = a.info || {}; const o = el('option', null, `${a.id === S.poke.mainId ? '★ ' : ''}${i.logged && i.nick ? i.nick : a.name}`); o.value = a.id; sel.append(o); }
+  sel.value = pvpAcc;
+  sel.title = 'Conta cujos pokémon entram nas sugestões, no planejador e no histórico';
+  sel.onchange = () => { pvpAcc = sel.value; pvpPlan = null; try { localStorage.setItem('pvpAcc', pvpAcc); } catch {} renderPvp(); };
+  const st = el('span', 'sub pvp-st', running ? `Lendo o top 50… ${prog ? `${prog.feitos}/${prog.total || 50}` : '(e calculando)'}` : meta ? `Meta ${ago2(meta.at)}` : 'Meta ainda não lido');
+  const rf = button('↻ Atualizar meta', null, async () => { const r = await call('poke:pvp:refresh'); if (r.error) toast(`⚠ ${r.error}`); else toast('Lendo o top 50 pela conta principal (uns 6 minutos, com os cálculos). O jogo segue normal.'); setTimeout(() => page === 'pvp' && renderPvp(true), 1500); });
+  act.append(st, sel, rf);
+  head.append(t, act);
+  root.append(head);
+
+  const tabs = el('div', 'pvp-tabs');
+  for (const [k, l] of [['meta', 'Meta'], ['tier', '🏆 Tier list'], ['time', 'Meu time'], ['plan', 'Planejador'], ['jogos', '🎬 Minhas partidas'], ['hist', 'Histórico']]) {
+    tabs.append(button(l, pvpTab === k ? 'on' : '', () => { if (k === 'plan') pvpPlan = null; pvpTab = k; try { localStorage.setItem('pvpTab', k); } catch {} renderPvp(); }));
+  }
+  root.append(tabs);
+
+  if (running) setTimeout(() => page === 'pvp' && renderPvp(true), 8000);
+  if (pvpTab === 'tier') { renderTierList(root, 'pvp'); root.scrollTop = scroll; return; }
+  if (pvpTab === 'hist') { renderPvpHist(root); root.scrollTop = scroll; return; }
+  if (pvpTab === 'jogos') { renderPvpPartidas(root, meta); root.scrollTop = scroll; return; }
+  if (!meta) {
+    root.append(emptyBox(running ? 'Lendo o top 50…' : 'O meta ainda não foi lido', running ? 'Uma consulta a cada poucos segundos pela conta principal. Em uns 6 minutos aparece tudo aqui.' : 'Ele é lido sozinho 3 minutos depois de abrir o app (pela conta principal) e depois uma vez por dia. Ou clique em "Atualizar meta".'));
+    return;
+  }
+  if (!meta.arqs) { root.append(emptyBox('Meta de uma versão anterior', 'Clique em "Atualizar meta" para ler de novo com arquétipos, tier list e preços.')); }
+
+  const entries = pvpMetaEntries(meta);
+  const teams = meta.linhas.filter((l) => meta.perfis[l.nick]);
+  const levels = entries.map((e) => e.level).sort((a, b) => a - b);
+  const refLevel = levels[Math.floor(levels.length / 2)] || 1;
+  pvpTrainerLv = live && live.nivel ? live.nivel : 0;
+  const mineAll = pvpMine(live, meta.info);
+  const mine = mineAll.filter((m) => m.usavel);
+  if (!mine.length) { pvpRetry++; if (pvpRetry <= 10) setTimeout(() => page === 'pvp' && renderPvp(true), 6000); } else pvpRetry = 0;
+  const ctx2 = { meta, live, tab, entries, teams, refLevel, mine, mineAll, arqs: meta.arqs || [] };
+
+  if (pvpTab === 'meta') renderPvpMeta(root, ctx2);
+  else if (pvpTab === 'time') renderPvpTime(root, ctx2);
+  else renderPvpPlan(root, ctx2);
+  root.scrollTop = scroll;
+}
+
+// ---------- 🏆 Tier list do Idleterino (PvP na aba PvP, PvE na aba PvE) ----------
+// PvP: os nossos dados (duelo do jogo contra o top 50, winrate real no Tracker e uso no top 50) + as listas da staff;
+// e duas leituras do meta atual: os MAIS USADOS do top 50 e os COUNTERS deles (tabela de tipos do jogo + força).
+// PvE (farm): ataque/SP-ataque e velocidade pesam mais (quem mata rápido), os tipos contra as hunts depois; cada
+// pokémon mostra a hunt onde se pega e fica com 🔒 enquanto a conta escolhida não chega no nível dela.
+let tierRes = null, tierRodando = false;
+let tierSemLend = (() => { try { return localStorage.getItem('tierSemLend') === '1'; } catch { return false; } })();
+let tierSub = (() => { try { return localStorage.getItem('tierSub') || 'tier'; } catch { return 'tier'; } })();
+let tierNivel = null, tierNivelPedido = null; // { acc, L } da conta escolhida no PvE
+const TIER_CORES = { S: '#ff6b6b', A: '#ff9f43', B: '#ffd34d', C: '#4488c5', D: '#8a8f9e' };
+function renderTierList(root, modo0) {
+  const modo = modo0 === 'pve' ? 'pve' : 'pvp';
+  const redesenhar = () => { if (page === 'pvp') renderPvp(true); else if (page === 'pve' && typeof renderPve === 'function') renderPve(); };
+  if (!tierRes && !tierRodando) { tierRodando = true; call('poke:tier').then((r) => { tierRodando = false; tierRes = r; redesenhar(); }).catch(() => { tierRodando = false; }); }
+  // PvE: o nível da conta escolhida lá em cima (para o cadeado).
+  const accPve = typeof pveAcc !== 'undefined' ? pveAcc : null;
+  if (modo === 'pve' && accPve && (!tierNivel || tierNivel.acc !== accPve) && tierNivelPedido !== accPve) {
+    tierNivelPedido = accPve;
+    call('poke:pve', accPve, 'nivel').then((r) => { tierNivelPedido = null; if (r && r.L) { tierNivel = { acc: accPve, L: r.L }; redesenhar(); } }).catch(() => { tierNivelPedido = null; });
+  }
+  const L = modo === 'pve' && tierNivel && tierNivel.acc === accPve ? tierNivel.L : 0;
+  const sub = modo === 'pvp' ? tierSub : 'tier';
+  const c = el('div', 'card');
+  c.append(el('div', 'ext-sec', modo === 'pvp' ? '🏆 Tier list do PvP' : '🏆 Tier list do PvE (farm)'));
+  const lead = modo === 'pve'
+    ? 'Para farmar o que importa é matar rápido: o ATAQUE ou o SP-ATAQUE (o maior dos dois) e a VELOCIDADE pesam mais. Depois vêm os tipos (em quantas hunts a espécie tira ×5,5 e ×2,5). Pokémon de perfil tanque (HP e defesas altos, ataque baixo e lento) cai na nota: aguenta, mas mata devagar. Ao lado de cada um, a hunt onde se pega (a base ou uma pré-evolução) e um 🔒 enquanto a sua conta não chega no nível dela.'
+    : sub === 'usados' ? 'Os pokémon que mais aparecem nos times do top 50 do Ranqueado agora (o meta lido do jogo), com o winrate de cada espécie no Tracker oficial.'
+    : sub === 'counters' ? 'Quem bate SUPER EFETIVO (×2 ou mais, pela tabela de tipos do jogo) nos pokémon mais usados do top 50 e apanha pouco deles, com a força no duelo do jogo contra o top quando a gente tem. Bom para montar um time que vira o meta.'
+    : 'A nossa tier list de PvP: o duelo do jogo contra os times do top 50, o winrate real de cada espécie no Tracker oficial, quantos times do top usam e as listas públicas da staff como referência. Cada espécie ganha uma nota de 0 a 100 e os tiers saem dela: S (os 10% melhores), A, B, C e D.';
+  c.append(el('div', 'sub up-lead', lead));
+  const barra = el('div', 'actions');
+  if (modo === 'pvp') {
+    const subs = el('div', 'pvp-tabs');
+    for (const [k, l] of [['tier', '🏆 Tier list'], ['usados', '🔥 Mais usados no meta'], ['counters', '🛡️ Counters do meta']]) subs.append(button(l, sub === k ? 'on' : '', () => { tierSub = k; try { localStorage.setItem('tierSub', k); } catch {} redesenhar(); }));
+    barra.append(subs);
+  }
+  const lb = el('label', 'tr-chk'); const ck = el('input'); ck.type = 'checkbox'; ck.checked = tierSemLend;
+  ck.onchange = () => { tierSemLend = ck.checked; try { localStorage.setItem('tierSemLend', ck.checked ? '1' : '0'); } catch {} redesenhar(); };
+  lb.append(ck, el('span', null, 'esconder lendários e míticos'));
+  barra.append(lb, button(tierRodando ? 'Calculando…' : '↻ Recalcular', 'mini', async () => { tierRodando = true; tierNivel = null; redesenhar(); tierRes = await call('poke:tier', true).catch(() => tierRes); tierRodando = false; redesenhar(); }));
+  c.append(barra);
+  root.append(c);
+  const r = tierRes;
+  if (!r) { root.append(emptyBox('Montando a tier list…', 'A conta principal junta os dados do jogo, do top 50 e do Tracker (uns segundos).')); return; }
+  if (r.erro) { root.append(emptyBox('Tier list', r.erro)); return; }
+  const semLend = (l) => (tierSemLend ? l.filter((x) => !x.lend) : l);
+  const f = r.fontes || {};
+  if (modo === 'pvp' && !f.metaEm) root.append(el('div', 'tip warn', 'O meta do top 50 ainda não foi lido: clique em "Atualizar meta" no topo. Sem ele a tier usa só o Tracker e a staff, e "Mais usados" e "Counters" ficam vazios.'));
+  const tipos = (x) => { const tg = el('span', 'pm-tags'); for (const tt of x.tipos || []) tg.append(tipoChip(tt)); return tg; };
+  const emLinhas = (lista, item) => {
+    for (const t of ['S', 'A', 'B', 'C', 'D']) {
+      const doTier = lista.filter((x) => x.tier === t);
+      if (!doTier.length) continue;
+      const linha = el('div', 'card tier-linha');
+      const rot = el('div', 'tier-rot', t); rot.style.background = TIER_CORES[t];
+      const itens = el('div', 'tier-itens');
+      for (const x of doTier) itens.append(item(x));
+      linha.append(rot, itens);
+      root.append(linha);
+    }
+  };
+  if (modo === 'pve') {
+    const lista = semLend(r.pve || []);
+    if (L) {
+      const livres = lista.filter((x) => x.hunt && x.hunt.nivel <= L).length;
+      root.append(el('div', 'tip ok', `Sua conta está no Nv ${fmt(L)}: ${livres} de ${lista.length} já dá para pegar (os outros estão com 🔒 até você chegar no nível da hunt deles).`));
+    } else root.append(el('div', 'tip', 'Lendo o nível da conta escolhida lá em cima… (a conta precisa estar aberta e logada no app)'));
+    emLinhas(lista, (x) => {
+      const trancado = !!L && (!x.hunt || x.hunt.nivel > L);
+      const d = el('div', `tier-item${trancado ? ' trancado' : ''}`);
+      d.title = `${x.nome} · nota ${Math.round(x.nota * 100)}\n${(x.motivos || []).join('\n')}${x.hunt ? `\nOnde pegar: hunt ${x.hunt.nome} (Nv ${fmt(x.hunt.nivel)})${x.hunt.de ? `, como ${x.hunt.de}` : ''}` : '\nNão aparece nas hunts do jogo (evento, troca ou Market)'}`;
+      d.append(el('b', null, `${trancado ? '🔒 ' : ''}${x.nome}${x.lend ? ' 👑' : ''}`), tipos(x));
+      d.append(el('span', 'tier-hunt', x.hunt ? `🎯 Hunt Nv ${fmt(x.hunt.nivel)} · ${x.hunt.nome}${x.hunt.de ? ` (como ${x.hunt.de})` : ''}` : '🎯 não aparece em hunt'));
+      const s = x.st;
+      d.append(el('span', 'tier-st', s ? `ATK ${s.atk} · SP.ATK ${s.spa} · VEL ${s.spe}${x.perfil === 'tanque' ? ' · 🛡️ tanque' : x.perfil === 'rapido' ? ' · ⚡ rápido' : ''}` : (x.motivos || [])[0] || ''));
+      d.append(el('span', 'sub', `nota ${Math.round(x.nota * 100)}`));
+      return d;
+    });
+    root.append(el('p', 'small', `Fontes: os status base do jogo (ATK, SP.ATK, VEL, HP e defesas) · as ${f.hunts || 0} hunts do jogo (sem a Outland), com os tipos de cada espécie · listas de hunt/megas da staff como referência. Passe o mouse num pokémon para ver os motivos. Calculado ${new Date(r.em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.`));
+    return;
+  }
+  if (sub === 'usados') {
+    const lista = semLend(r.maisUsados || []);
+    if (!lista.length) { root.append(emptyBox('Mais usados no meta', 'Ainda sem o meta do top 50. Clique em "Atualizar meta".')); return; }
+    const box = el('div', 'card tier-linha'); const itens = el('div', 'tier-itens');
+    lista.forEach((x, i) => {
+      const d = el('div', 'tier-item');
+      d.append(el('span', 'tier-rank', `#${i + 1}`), el('b', null, `${x.nome}${x.lend ? ' 👑' : ''}`), tipos(x));
+      d.append(el('span', 'tier-hunt', `🔥 em ${x.n} de ${r.nTimes || 50} times do top${x.pct != null ? ` (${x.pct}%)` : ''}`));
+      d.append(el('span', 'sub', [x.wr != null ? `winrate ${x.wr}% em ${fmt(x.partidas)} partidas` : null, x.win != null ? `vence ${x.win}% dos duelos contra o top` : null].filter(Boolean).join(' · ') || 'sem partidas no Tracker'));
+      itens.append(d);
+    });
+    box.append(itens); root.append(box);
+  } else if (sub === 'counters') {
+    const lista = semLend(r.counters || []);
+    if (!lista.length) { root.append(emptyBox('Counters do meta', 'Ainda sem o meta do top 50. Clique em "Atualizar meta".')); return; }
+    emLinhas(lista, (x) => {
+      const d = el('div', 'tier-item');
+      d.title = `${x.nome} · nota ${Math.round(x.nota * 100)}\nBate super efetivo em: ${x.bate.join(', ')}\nApanha super efetivo de ${x.risco}% do uso do top${x.win != null ? `\nVence ${x.win}% dos duelos contra o top 50` : ''}`;
+      d.append(el('b', null, `${x.nome}${x.lend ? ' 👑' : ''}`), tipos(x));
+      d.append(el('span', 'tier-hunt', `🛡️ bate forte em ${x.vant}% do meta`));
+      d.append(el('span', 'sub', `${x.bate.slice(0, 3).map(shortName).join(', ')}${x.bate.length > 3 ? '…' : ''} · apanha forte de ${x.risco}%${x.win != null ? ` · vence ${x.win}% dos duelos` : ''}`));
+      return d;
+    });
+  } else {
+    emLinhas(semLend(r.pvp || []), (x) => {
+      const d = el('div', 'tier-item');
+      d.title = `${x.nome} · nota ${Math.round(x.nota * 100)}\n${(x.motivos || []).join('\n')}`;
+      d.append(el('b', null, `${x.nome}${x.lend ? ' 👑' : ''}`), tipos(x));
+      d.append(el('span', 'sub', `nota ${Math.round(x.nota * 100)} · ${(x.motivos || [])[0] || ''}`));
+      return d;
+    });
+  }
+  root.append(el('p', 'small', `Fontes: duelo contra o top 50 ${f.metaEm ? `(meta de ${new Date(f.metaEm).toLocaleDateString('pt-BR')})` : '(meta não lido)'} · Tracker ${f.trackerEm ? `(${f.temporada ? `temporada ${f.temporada}, ` : ''}lido ${new Date(f.trackerEm).toLocaleDateString('pt-BR')})` : '(não lido)'} · uso no top 50 · tabela de tipos do jogo · listas da staff: ${(f.staff || []).filter((s) => s.categoria === 'pvp').map((s) => `"${s.titulo}"${s.autor ? ` de ${s.autor}` : ''}`).join(', ') || 'nenhuma no momento'}. Passe o mouse num pokémon para ver os motivos. Calculado ${new Date(r.em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.`));
+}
+
+const arqName = (a, meta) => a.core.slice(0, 3).map((id) => shortName((meta.info[id] || {}).nome || `#${id}`)).join(' + ');
+const arqTeam = (a, meta) => ((meta.perfis[a.rep] || {}).time || []).map((k) => { const inf = meta.info[k.speciesId] || {}; return { ...k, nome: k.nome || inf.nome, tipos: inf.tipos || [], alcance: inf.alcance || 1, stats: inf.stats, el: k.el || k.tmElemental, atk: [...new Set([...(inf.tipos || []), k.el || k.tmElemental].filter(Boolean))] }; });
+
+// ================= 🎬 MINHAS PARTIDAS (o replay que o jogo manda em cada partida ranqueada, resumido pelo núcleo) =================
+const segsP = (ms) => (ms == null ? '—' : `${String(Math.round(ms / 100) / 10).replace('.', ',')} s`);
+const curtoN = (n) => { const v = Number(n) || 0; return v >= 1e6 ? `${String(Math.round(v / 1e5) / 10).replace('.', ',')} mi` : v >= 1e3 ? `${String(Math.round(v / 100) / 10).replace('.', ',')} mil` : String(Math.round(v)); };
+function infoPorNome(meta) {
+  const mp = new Map();
+  for (const [id, x] of Object.entries((meta && meta.info) || {})) if (x && x.nome) mp.set(String(x.nome).toLowerCase(), { ...x, speciesId: Number(id) });
+  return mp;
+}
+// Um pokémon da partida com o que o app sabe da espécie (alcance, status, papel).
+function pkDaPartida(pk, infos) {
+  const inf = infos.get(String(pk.nome || '').toLowerCase()) || {};
+  const m = { nome: pk.nome, level: pk.nv, alcance: inf.alcance || 1, stats: inf.stats, speciesId: inf.speciesId };
+  m.papel = inf.stats ? papelDe(m, pvpTracker) : null;
+  return m;
+}
+let pvpPartidaAberta = null;
+function porQuePartida(p, meus, deles) {
+  const out = [];
+  const totE = p.eu.pks.reduce((s, x) => s + x.dano, 0), totD = p.ele.pks.reduce((s, x) => s + x.dano, 0);
+  out.push(`Dano total: você ${curtoN(totE)} × ${curtoN(totD)} dele${totE && totD ? ` (${totE >= totD ? `${String(Math.round((totE / totD) * 10) / 10).replace('.', ',')}× o dele` : `${Math.round((totE / totD) * 100)}% do dele`})` : ''}.`);
+  const caidos = p.eu.pks.map((x, i) => ({ x, i })).filter((o) => o.x.caiu != null).sort((a, b) => a.x.caiu - b.x.caiu);
+  if (caidos[0]) { const o = caidos[0]; const pp = meus[o.i].papel; out.push(`O primeiro seu a cair foi ${shortName(o.x.nome)}${pp ? ` (${pp.ic} ${pp.nome})` : ''} aos ${segsP(o.x.caiu)}${o.x.porQuem ? `, derrubado por ${shortName(o.x.porQuem)}` : ''}.${pp && (pp.id === 'mago' || pp.id === 'atirador') ? ' Atirador/mago caindo primeiro = estava exposto: ponha um tanque ou soldado na frente dele.' : ''}`); }
+  const mvpD = p.ele.pks.map((x, i) => ({ x, i })).sort((a, b) => b.x.dano - a.x.dano)[0];
+  if (mvpD && totD) out.push(`O que mais bateu do lado dele: ${shortName(mvpD.x.nome)} (${Math.round((mvpD.x.dano / totD) * 100)}% do dano dele${mvpD.x.maior ? `, o maior golpe foi ${mvpD.x.maior.golpe || 'golpe'} de ${curtoN(mvpD.x.maior.dano)}` : ''}). É o primeiro a ser segurado ou derrubado.`);
+  const mvpE = p.eu.pks.map((x, i) => ({ x, i })).sort((a, b) => b.x.dano - a.x.dano)[0];
+  if (mvpE && totE) out.push(`Quem mais bateu do seu lado: ${shortName(mvpE.x.nome)} (${Math.round((mvpE.x.dano / totE) * 100)}% do seu dano).`);
+  const sup = p.eu.pks.reduce((s, x) => s + (x.superEf || 0), 0);
+  if (sup >= 3) out.push(`Você levou ${sup} golpes super efetivos: o time dele tem vantagem de tipo sobre o seu.`);
+  // Fora do lugar (papel × fileira).
+  p.eu.pks.forEach((x, i) => {
+    const pp = meus[i].papel, f = x.casa != null && TB_CASAS[x.casa] ? TB_CASAS[x.casa].r : null;
+    if (!pp || f == null) return;
+    if (pp.id === 'tanque' && f >= 2) out.push(`⚠ ${shortName(x.nome)} é Tanque e estava na ${f + 1}ª fileira: não segurou ninguém no começo.`);
+    if ((pp.id === 'mago' || pp.id === 'atirador') && f === 0) out.push(`⚠ ${shortName(x.nome)} é ${pp.nome} e estava na 1ª fileira: apanha primeiro.`);
+  });
+  const vivosE = p.eu.pks.filter((x) => x.caiu == null).length, vivosD = p.ele.pks.filter((x) => x.caiu == null).length;
+  if (!p.venci && vivosD <= 1 && totE >= totD * 0.85) out.push('Foi por pouco: sobrou só 1 dele. Uma troca de casa pode virar essa.');
+  if (p.venci && vivosE <= 1) out.push('Ganhou no limite (sobrou 1 seu).');
+  return out;
+}
+function renderPvpPartidas(root, meta) {
+  const lista = (pvpData.partidas || []).slice().reverse();
+  const infos = infoPorNome(meta);
+  if (!pvpTracker && !pvpTrackerPedido) { pvpTrackerPedido = true; call('poke:pvp:tracker', 'todas').then((tk) => { if (tk) { pvpTracker = tk; if (page === 'pvp') renderPvp(true); } }).catch(() => {}); }
+  if (pvpTracker && meta) preparaTracker(pvpTracker, (id) => (meta.info && meta.info[id] ? meta.info[id].alcance : null), meta.at || 1);
+  if (!lista.length) {
+    root.append(emptyBox('Nenhuma partida guardada ainda', 'A partir desta versão o app guarda cada partida ranqueada desta conta — com a tela de batalha completa, minimizada ou desligada. Jogue uma partida e volte aqui: aparece o tabuleiro de verdade dos dois lados, quem bateu em quem, quem caiu primeiro e por quê.'));
+    return;
+  }
+  // ---- resumo das últimas
+  const ult = lista.slice(0, 30);
+  const v = ult.filter((p) => p.venci).length;
+  const res = el('div', 'card');
+  res.append(el('div', 'ext-sec', `Últimas ${ult.length} partidas`));
+  const row = el('div', 'pvp-me-row six');
+  const stat = (val, l) => { const d = el('div', 'fstat'); d.append(el('b', null, val), el('span', null, l)); return d; };
+  const somaPr = ult.reduce((s, p) => s + (p.delta || 0), 0);
+  let seq = 0; for (const p of ult) { if (p.venci === ult[0].venci) seq++; else break; }
+  const durM = ult.filter((p) => p.dur).reduce((s, p, _, a) => s + p.dur / a.length, 0);
+  row.append(stat(`${v}V · ${ult.length - v}D`, 'resultado'), stat(pct(v / ult.length), 'winrate'), stat(`${somaPr >= 0 ? '+' : ''}${somaPr}`, 'PR'), stat(`${seq} ${ult[0].venci ? 'vitória(s)' : 'derrota(s)'}`, 'sequência agora'), stat(segsP(durM), 'duração média'), stat(String(lista.length), 'guardadas'));
+  res.append(row);
+  // Seus pokémon: rendimento.
+  const porPk = new Map();
+  for (const p of ult) {
+    const tot = p.eu.pks.reduce((s, x) => s + x.dano, 0) || 1;
+    const primeiro = p.eu.pks.filter((x) => x.caiu != null).sort((a, b) => a.caiu - b.caiu)[0];
+    for (const x of p.eu.pks) {
+      const a = porPk.get(x.nome) || { n: 0, v: 0, fatia: 0, vivo: 0, primeiro: 0, abates: 0 };
+      a.n++; if (p.venci) a.v++; a.fatia += x.dano / tot; if (x.caiu == null) a.vivo++; if (primeiro === x) a.primeiro++; a.abates += x.abates || 0;
+      porPk.set(x.nome, a);
+    }
+  }
+  const tb = el('div', 'pp-matrix');
+  const hd = el('div', 'pm-row hd'); hd.append(...['Seu pokémon', 'Partidas', 'Vitórias', 'Do dano do time', 'Termina de pé', 'Cai primeiro', 'Abates/partida'].map((t) => el('span', null, t)));
+  tb.append(hd);
+  for (const [nome, a] of [...porPk.entries()].sort((x, y) => y[1].n - x[1].n)) {
+    const m = pkDaPartida({ nome }, infos);
+    const r = el('div', 'pm-row');
+    r.append(el('span', null, `${m.papel ? `${m.papel.ic} ` : ''}${shortName(nome)}`), el('span', null, String(a.n)), el('span', a.v / a.n >= 0.55 ? 'ok' : a.v / a.n >= 0.45 ? 'meh' : 'bad', pct(a.v / a.n)),
+      el('span', null, pct(a.fatia / a.n)), el('span', null, pct(a.vivo / a.n)), el('span', a.primeiro / a.n >= 0.4 ? 'bad' : null, pct(a.primeiro / a.n)), el('span', null, String(Math.round((a.abates / a.n) * 10) / 10).replace('.', ',')));
+    tb.append(r);
+  }
+  res.append(el('div', 'ext-sec', 'Como cada um seu rende'), tb);
+  // Quem mais te derruba (nas derrotas).
+  const algoz = new Map();
+  for (const p of ult) for (const x of p.eu.pks) if (x.porQuem) algoz.set(x.porQuem, (algoz.get(x.porQuem) || 0) + 1);
+  const topA = [...algoz.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
+  if (topA.length) res.append(el('div', 'ext-sec', 'Quem mais derruba os seus'), el('div', 'tip', topA.map(([n, k]) => `${shortName(n)} (${k}×)`).join(' · ')));
+  root.append(res);
+  // ---- cada partida
+  const card = el('div', 'card');
+  card.append(el('div', 'ext-sec', 'Partidas (clique para ver o tabuleiro e o porquê)'));
+  for (const p of lista.slice(0, 40)) {
+    const k = p.id != null ? `id${p.id}` : `${p.em}`;
+    const d = el('details', `pvp-partida ${p.venci ? 'v' : 'd'}`);
+    if (pvpPartidaAberta === k) d.open = true;
+    d.ontoggle = () => { if (d.open) pvpPartidaAberta = k; };
+    const quando = ago2(p.em);
+    d.append(el('summary', null, `${p.venci ? '✅ Vitória' : '❌ Derrota'} ${p.delta >= 0 ? '+' : ''}${p.delta} PR · contra ${p.oponente.nick || '—'}${p.oponente.pontos ? ` (${fmt(p.oponente.pontos)} PR)` : ''} · ${segsP(p.dur)} · ${quando}${p.promoveu ? ' · 🎉 subiu de tier' : p.rebaixou ? ' · ⬇ caiu de tier' : ''}`));
+    const corpo = el('div', 'pvp-partida-corpo');
+    d.append(corpo);
+    // Monta só quando abre (leve).
+    const montar = () => {
+      if (corpo.childElementCount) return;
+      const meus = p.eu.pks.map((x) => pkDaPartida(x, infos)), deles = p.ele.pks.map((x) => pkDaPartida(x, infos));
+      const cm = p.eu.pks.map((x) => x.casa), cd = p.ele.pks.map((x) => x.casa);
+      if (cm.every((c) => c != null) && cd.every((c) => c != null)) {
+        corpo.append(el('div', 'pp-front', `As casas de verdade: ${p.ele.nick || 'ele'} em cima, você embaixo`), boardEl([{ team: deles, casas: cd, cls: 'enemy', flip: true }, { team: meus, casas: cm, cls: 'mine', flip: false }]));
+      }
+      const totE = p.eu.pks.reduce((s, x) => s + x.dano, 0) || 1, totD = p.ele.pks.reduce((s, x) => s + x.dano, 0) || 1;
+      const tabela = (titulo, pks, ms, tot) => {
+        const t = el('div', 'pp-matrix');
+        t.append(el('div', 'ext-sec', titulo));
+        const h = el('div', 'pm-row hd'); h.append(...['Pokémon', 'Papel', 'Dano', 'Recebido', 'Abates', 'Caiu', 'Maior golpe'].map((x) => el('span', null, x))); t.append(h);
+        pks.forEach((x, i) => {
+          const r = el('div', 'pm-row');
+          r.append(el('span', null, `${x.sh ? '✨ ' : ''}${shortName(x.nome)} · Nv ${fmt(x.nv)}${x.casa != null && TB_CASAS[x.casa] ? ` · ${TB_CASAS[x.casa].r + 1}ª fil.` : ''}`),
+            el('span', null, ms[i].papel ? `${ms[i].papel.ic} ${ms[i].papel.nome}` : '—'), el('span', null, `${curtoN(x.dano)} (${Math.round((x.dano / tot) * 100)}%)`), el('span', null, curtoN(x.recebido)), el('span', null, String(x.abates || 0)),
+            el('span', x.caiu != null ? 'bad' : 'ok', x.caiu != null ? `aos ${segsP(x.caiu)}${x.porQuem ? ` (${shortName(x.porQuem)})` : ''}` : 'de pé'),
+            el('span', null, x.maior ? `${x.maior.golpe || '—'} ${curtoN(x.maior.dano)}${x.maior.ef >= 2 ? ' ⚡super' : ''}` : '—'));
+          t.append(r);
+        });
+        return t;
+      };
+      corpo.append(tabela(`Você${p.eu.nick ? ` (${p.eu.nick})` : ''}`, p.eu.pks, meus, totE), tabela(`${p.ele.nick || 'Adversário'}`, p.ele.pks, deles, totD));
+      corpo.append(el('div', 'ext-sec', p.venci ? 'Por que você ganhou' : 'Por que você perdeu'));
+      for (const t of porQuePartida(p, meus, deles)) corpo.append(el('div', `tip ${t.startsWith('⚠') ? 'warn' : ''}`, t));
+    };
+    d.addEventListener('toggle', () => { if (d.open) montar(); });
+    if (d.open) montar();
+    card.append(d);
+  }
+  card.append(el('span', 'sub', 'O app resume o replay que o jogo manda em cada partida ranqueada (funciona com a tela de batalha completa, minimizada ou desligada). Guarda as últimas 100 desta conta, só neste PC.'));
+  root.append(card);
+}
+
+// ================= META REAL (Tracker do jogo, filtrado pelo seu elo) =================
+const FAIXAS_UI = [['todas', 'Todos'], ['baixo', 'Low elo'], ['alto', 'High elo'], ['bronze', 'Bronze'], ['prata', 'Prata'], ['ouro', 'Ouro'], ['platina', 'Platina'], ['diamante', 'Diamante'], ['mestre', 'Mestre+']];
+const faixaDoTier = (tier) => { const t = String(tier || '').toLowerCase(); if (!t) return null; if (/mestre|master|grao|grand|challenger/.test(t)) return 'mestre'; return ['bronze', 'prata', 'ouro', 'platina', 'diamante'].find((x) => t.includes(x)) || null; };
+let pvpFaixa = (() => { try { return localStorage.getItem('pvpFaixa') || ''; } catch { return ''; } })();
+const pvpTrackerPorFaixa = new Map();
+function metaRealEl(c) {
+  const { meta, live, mineAll } = c;
+  const meuTier = live && live.euPvp ? faixaDoTier(live.euPvp.tierId) : null;
+  const faixa = pvpFaixa || meuTier || 'todas';
+  const card = el('div', 'card');
+  const h = el('div', 'pvp-sh');
+  h.append(el('div', 'ext-sec', '📊 Meta real das partidas (Tracker do jogo)'));
+  const sel = el('select');
+  for (const [k, l] of FAIXAS_UI) { const o = el('option', null, `${l}${k === meuTier ? ' (o seu)' : ''}`); o.value = k; sel.append(o); }
+  sel.value = faixa;
+  sel.onchange = () => { pvpFaixa = sel.value; try { localStorage.setItem('pvpFaixa', pvpFaixa); } catch {} renderPvp(true); };
+  const dir = el('div', 'actions'); dir.style.margin = '0'; dir.append(el('span', 'sub', 'Rank:'), sel);
+  h.append(dir);
+  card.append(h);
+  const tk = pvpTrackerPorFaixa.get(faixa);
+  if (!tk) {
+    card.append(el('div', 'sub', 'Lendo o meta real…'));
+    if (!pvpTrackerPorFaixa.has(`pedido:${faixa}`)) { pvpTrackerPorFaixa.set(`pedido:${faixa}`, 1); call('poke:pvp:tracker', faixa).then((r) => { if (r) { pvpTrackerPorFaixa.set(faixa, r); if (page === 'pvp' && pvpTab === 'meta') renderPvp(true); } else card.append(el('div', 'sub', 'Não deu para ler o Tracker agora.')); }).catch(() => {}); }
+    return card;
+  }
+  preparaTracker(tk, (id) => (meta.info && meta.info[id] ? meta.info[id].alcance : null), meta.at || 1);
+  const tenho = new Set((mineAll || []).map((m) => m.speciesId));
+  const lista = Object.entries(tk.especies).map(([id, x]) => ({ id: Number(id), ...x })).filter((x) => x.partidas > 0);
+  const totUso = lista.reduce((s, x) => s + x.partidas, 0) || 1;
+  const linha = (x, extra) => {
+    const inf = meta.info && meta.info[x.id];
+    const pp = inf && inf.stats ? papelDe({ speciesId: x.id, alcance: inf.alcance || 1, stats: inf.stats, nome: x.nome }, tk) : null;
+    const r = el('div', `tip ${x.winrate >= 0.52 ? 'ok' : x.winrate < 0.48 ? 'bad' : ''}`);
+    r.textContent = `${pp ? `${pp.ic} ` : ''}${x.nome}${tenho.has(x.id) ? ' · ✔ você tem' : ''} — winrate ${pct(x.winrate)} · em ${String(Math.round((x.partidas / totUso) * 1000) / 10).replace('.', ',')}% dos times · sobrevive ${pct(x.sobrev)}${extra || ''}`;
+    return r;
+  };
+  const cols = el('div', 'pvp-meta-real');
+  const a = el('div'); a.append(el('div', 'ext-sec', 'Mais usados'));
+  for (const x of lista.slice().sort((p, q) => q.partidas - p.partidas).slice(0, 12)) a.append(linha(x));
+  const minimo = Math.max(2000, Math.round(totUso * 0.0005));
+  const b = el('div'); b.append(el('div', 'ext-sec', `Maior winrate (com ${fmt(minimo)}+ partidas)`));
+  for (const x of lista.filter((x) => x.partidas >= minimo).sort((p, q) => q.winrate - p.winrate).slice(0, 12)) b.append(linha(x));
+  cols.append(a, b);
+  card.append(cols, el('span', 'sub', `Temporada ${tk.temporada || '—'} · ${fmt(tk.amostra || 0)} partidas${faixa !== 'todas' ? ` só de treinadores ${FAIXAS_UI.find((f) => f[0] === faixa)[1]}` : ''} · lido ${ago2(tk.em)} (relê a cada 6 h). Verde = vence mais do que perde.`));
+  return card;
+}
+
+// ================= META =================
+function renderPvpMeta(root, c) {
+  const { meta, entries, teams, mine, arqs } = c;
+  root.append(metaRealEl(c));
+  const hist = pvpData.hist || [];
+  const old = hist.length > 1 ? hist[Math.max(0, hist.length - 8)] : null; // ~7 leituras atrás
+  if (arqs.length) {
+    const card = el('div', 'card');
+    card.append(el('div', 'ext-sec', `Tier list dos arquétipos (times do top que dividem 3+ pokémon) · ${teams.length} times`));
+    for (const tier of ['S', 'A', 'B', 'C', 'U']) {
+      const list = arqs.filter((a) => a.tier === tier);
+      if (!list.length) continue;
+      const row = el('div', 'tier-row');
+      const lab = el('div', 'tier-lab', tier === 'U' ? 'Únicos' : tier); lab.style.background = TIER_COR[tier];
+      const items = el('div', 'tier-items');
+      for (const a of list.slice(0, tier === 'U' ? 8 : 12)) {
+        const it = el('button', 'arq');
+        const was = old && old.arqs ? old.arqs[a.key] : null;
+        const tr = was == null ? (old ? 'novo' : '') : a.n > was ? `▲${a.n - was}` : a.n < was ? `▼${was - a.n}` : '=';
+        it.append(el('b', null, arqName(a, meta)), el('span', null, `${a.n} no top · PR ${fmt(a.pr)} · ${pct(a.wr)} vit. · melhor #${a.best}`));
+        if (tr) it.append(el('i', `tr ${tr.startsWith('▲') || tr === 'novo' ? 'up' : tr.startsWith('▼') ? 'down' : ''}`, tr));
+        it.title = `Usado por: ${a.nicks.slice(0, 8).join(', ')}${a.nicks.length > 8 ? '…' : ''}\nClique para planejar contra ele.`;
+        it.onclick = () => { pvpArqSel = a.id; pvpTab = 'plan'; renderPvp(); };
+        items.append(it);
+      }
+      row.append(lab, items);
+      card.append(row);
+    }
+    card.append(el('div', 'mempty', 'Tier: quantos usam, o PR médio e a taxa de vitórias de quem usa. ▲▼ = mudança nos últimos ~7 dias. Clique num arquétipo para planejar contra ele.'));
+    root.append(card);
+  }
+  const bySp = new Map();
+  for (const e of entries) {
+    const cur = bySp.get(e.speciesId) || { e, n: 0, lv: 0, aoe: 0, z: {} };
+    cur.n++; cur.lv += e.level; if (e.aoe) cur.aoe++; const z = e.el || e.tmElemental; if (z) cur.z[z] = (cur.z[z] || 0) + 1;
+    bySp.set(e.speciesId, cur);
+  }
+  const usados = [...bySp.values()].sort((a, b) => b.n - a.n);
+  const grid = el('div', 'pvp-grid');
+  const cardUsed = el('div', 'card');
+  cardUsed.append(el('div', 'ext-sec', 'Pokémon mais usados'));
+  for (const u of usados.slice(0, 14)) {
+    const row = el('div', 'pu-row');
+    const n = el('div', 'pu-n'); n.append(el('b', null, u.e.nome), el('span', 'sub', `${alcIcon(u.e.alcance)} · Nv médio ${fmt(Math.round(u.lv / u.n))}`));
+    const tg = el('div', 'pm-tags'); for (const tt of u.e.tipos) tg.append(tipoChip(tt));
+    const zs = Object.entries(u.z).sort((a, b) => b[1] - a[1])[0]; if (zs) tg.append(zChip(zs[0]));
+    const was = old && old.uso ? old.uso[u.e.speciesId] || 0 : null;
+    const tr = was == null ? '' : u.n > was ? ` ▲${u.n - was}` : u.n < was ? ` ▼${was - u.n}` : '';
+    const bar = el('div', 'pu-bar'); const f = el('i'); f.style.width = pct(u.n / Math.max(1, teams.length)); bar.append(f);
+    const owned = mine.find((m) => m.speciesId === u.e.speciesId);
+    row.append(n, tg, el('span', `pu-c${tr.includes('▲') ? ' up' : tr.includes('▼') ? ' down' : ''}`, `${u.n} de ${teams.length}${tr}`), bar, el('span', `pu-own${owned ? ' on' : ''}`, owned ? `você tem · Nv ${fmt(owned.level)}` : 'você não tem'));
+    cardUsed.append(row);
+  }
+  const cardTypes = el('div', 'card');
+  cardTypes.append(el('div', 'ext-sec', 'Tipos do meta'));
+  const cnt = (f) => { const m = {}; for (const e of entries) for (const x of f(e)) m[x] = (m[x] || 0) + e.w; return Object.entries(m).sort((a, b) => b[1] - a[1]); };
+  const bars = (title, list) => { const box = el('div', 'pt-box'); box.append(el('b', null, title)); const max = list[0] ? list[0][1] : 1; for (const [tt, v] of list.slice(0, 7)) { const r = el('div', 'pt-row'); const b = el('div', 'pt-bar'); const f = el('i'); f.style.width = `${Math.round((v / max) * 100)}%`; f.style.background = TIPO_COR[tt] || '#777'; b.append(f); r.append(tipoChip(tt), b); box.append(r); } return box; };
+  cardTypes.append(bars('Tipos dos pokémon (para ter quem bata forte)', cnt((e) => e.tipos)), bars('Tipos de ataque com Z-Move (para aguentar)', cnt((e) => e.atk)));
+  const counter = Object.keys(TIPO_PT).map((tt) => [tt, entries.reduce((s, e) => s + (pvpEff(c.tab, tt, e.tipos[0], e.tipos[1]) >= 2 ? e.w : 0), 0)]).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const cbox = el('div', 'pt-box'); cbox.append(el('b', null, 'Ataques que mais punem o meta'));
+  const crow = el('div', 'pm-tags'); for (const [tt] of counter) crow.append(tipoChip(tt)); cbox.append(crow);
+  cardTypes.append(cbox);
+  grid.append(cardUsed, cardTypes);
+  root.append(grid);
+  const tc = el('div', 'card');
+  tc.append(el('div', 'ext-sec', 'Top 50 do Ranqueado'));
+  const tl = el('div', 'pvp-top');
+  for (const l of meta.linhas) {
+    const p = meta.perfis[l.nick];
+    const r = el('div', 'pt-line');
+    const a = meta.porNick && arqs.find((x) => x.id === meta.porNick[l.nick]);
+    const tg = el('span', 'tierchip', a ? (a.tier === 'U' ? '—' : a.tier) : ''); if (a) tg.style.background = TIER_COR[a.tier];
+    r.append(el('span', 'pos', `#${l.pos}`), el('b', 'nk', l.nick), el('span', 'pr', `${fmt(l.pr)} PR`), el('span', 'wl', `${fmt(l.v)}V / ${fmt(l.d)}D · ${pct(l.v / Math.max(1, l.v + l.d))}`));
+    const tags = el('div', 'pm-tags'); if (a) tags.append(tg);
+    for (const k of (p ? p.time : [])) { const s2 = el('span', 'pn-p', `${shortName(k.nome)} ${fmt(k.level)}`); s2.title = `${k.nome} · Nv ${fmt(k.level)}${(k.el || k.tmElemental) ? ` · Z-Move ${k.el || k.tmElemental}` : ''}`; tags.append(s2); }
+    r.append(tags);
+    tl.append(r);
+  }
+  tc.append(tl);
+  root.append(tc);
+}
+
+// ================= MEU TIME =================
+function renderPvpTime(root, c) {
+  const { meta, entries, tab, refLevel, mine, arqs } = c;
+  const sug = pvpSuggest(mine, entries, tab, refLevel);
+  if (!pvpPlan) { try { pvpPlan = JSON.parse(localStorage.getItem(`pvpPlan:${pvpAcc}`) || 'null'); } catch {} }
+  const team = (pvpPlan && pvpPlan.length ? pvpPlan.map((id) => mine.find((m) => m.id === id)).filter(Boolean) : sug.map((x) => x.c));
+  const temPreco = (x) => !!priceRow(meta, x.nome).r;
+  const candAll = (meta.candidatos || []).filter((x) => !pvpSemLend || !x.lend);
+  const cand = pvpSoVenda && candAll.some(temPreco) ? candAll.filter(temPreco) : candAll;
+  const top = arqs.filter((a) => a.tier !== 'U').slice(0, 8);
+
+  const vs = el('div', 'card');
+  const vh = el('div', 'pvp-sh'); vh.append(el('div', 'ext-sec', `Seu time contra os arquétipos do topo (${team.length}/5)`), el('span', 'sub', team.length ? team.map((m) => shortName(m.nome)).join(' · ') : 'monte no Planejador ou use o sugerido'));
+  vs.append(vh);
+  if (!top.length) vs.append(el('div', 'mempty', 'Atualize o meta para ter os arquétipos.'));
+  for (const a of top) {
+    const r = el('div', 'vs-row');
+    const lab = el('span', 'tierchip', a.tier); lab.style.background = TIER_COR[a.tier];
+    const nm = el('div', 'pu-n'); nm.append(el('b', null, arqName(a, meta)), el('span', 'sub', `${a.n} no top · PR ${fmt(a.pr)}`));
+    const res = el('span', 'vs-res', team.length ? 'simulando…' : '—');
+    const bar = el('div', 'pu-bar');
+    const enemy = arqTeam(a, meta);
+    let w = 0;
+    for (const e of enemy) { const mb = Math.max(0, ...team.map((m) => pvpBest(tab, m.atk, e.tipos))); const th = Math.max(0, ...team.map((m) => pvpBest(tab, e.atk, m.tipos))); if (mb > th) w++; }
+    r.append(lab, nm, res, bar, el('span', 'sub', team.length ? `${w}/${enemy.length} com vantagem de tipo` : ''), button('Planejar contra', 'mini', () => { pvpArqSel = a.id; pvpTab = 'plan'; renderPvp(); }));
+    vs.append(r);
+    if (team.length && enemy.length) simTeam(team, enemy).then((sres) => {
+      if (!sres) { res.textContent = 'sem simulação'; return; }
+      res.textContent = `${pct(sres.est)} de força`; res.className = `vs-res ${sres.est >= 0.55 ? 'ok' : sres.est >= 0.45 ? 'meh' : 'bad'}`;
+      const f = el('i'); f.style.width = pct(sres.est); f.style.background = sres.est >= 0.55 ? 'var(--ok)' : sres.est >= 0.45 ? '#ffcf66' : '#ff8a8a'; bar.replaceChildren(f);
+    });
+  }
+  vs.append(el('div', 'mempty', 'Força = duelos 1×1 do jogo (status no nível, IV, qualidade, potência, refino, golpe, tipos e Z-Move) de cada um seu contra cada um do time mais bem colocado do arquétipo. É estimativa: na luta real também contam posição e alcance.'));
+  root.append(vs);
+
+  const sc = el('div', 'card');
+  const sh = el('div', 'pvp-sh'); sh.append(el('div', 'ext-sec', 'Com o que você tem'));
+  if (sug.length) sh.append(button('Usar no planejador', 'mini', () => { pvpPlan = sug.map((x) => x.c.id); try { localStorage.setItem(`pvpPlan:${pvpAcc}`, JSON.stringify(pvpPlan)); } catch {} pvpTab = 'plan'; renderPvp(); }));
+  sc.append(sh);
+  if (!mine.length) sc.append(el('div', 'mempty', 'Não consegui ler os pokémon desta conta ainda. Abra a conta no PokeIdle e volte aqui.'));
+  else { const row = el('div', 'pvp-team'); for (const x of sug) row.append(pvpMemberCard(x.c, x.s)); sc.append(row); if (mine.length < 5) sc.append(el('div', 'mempty', `Esta conta tem só ${mine.length} espécie${mine.length === 1 ? '' : 's'}: o time completo tem 5.`)); }
+  root.append(sc);
+
+  if (team.length && cand.length) {
+    const scored = team.map((m) => ({ m, s: pvpScore(m, entries, tab, refLevel).score })).sort((a, b) => a.s - b.s);
+    const fraco = scored[0].m;
+    const opts = cand.filter((x) => !team.some((m) => m.speciesId === x.speciesId)).slice(0, 4);
+    const uc = el('div', 'card');
+    uc.append(el('div', 'ext-sec', 'Upgrade: o que mais melhora o seu time'));
+    uc.append(el('div', 'sub up-lead', `O mais fraco contra o meta hoje: ${fraco.nome} (Nv ${fmt(fraco.level)}). Troque por um destes (contas no nível do top, ~Nv ${fmt(meta.ref ? meta.ref.level : refLevel)}).`));
+    const row = el('div', 'cand-list');
+    for (const x of opts) row.append(candRow(meta, x, top));
+    uc.append(row);
+    root.append(uc);
+  }
+
+  if (cand.length) {
+    const pick = [];
+    const covered = (list) => top.reduce((s, a) => s + Math.max(0, ...list.map((x) => (x.porArq || {})[a.id] ?? x.win)), 0) / Math.max(1, top.length);
+    while (pick.length < 5) {
+      let best = null, bv = -1;
+      for (const x of cand.slice(0, 40)) { if (pick.includes(x)) continue; const types = new Set(pick.flatMap((p) => p.tipos)); const v = covered([...pick, x]) + x.win * 0.3 - (x.tipos.some((tt) => types.has(tt)) ? 0.03 : 0); if (v > bv) { bv = v; best = x; } }
+      if (!best) break; pick.push(best);
+    }
+    const wins = top.filter((a) => Math.max(...pick.map((x) => (x.porArq || {})[a.id] ?? x.win)) >= 0.5).length;
+    const ac = el('div', 'card');
+    const ah = el('div', 'pvp-sh'); ah.append(el('div', 'ext-sec', 'Time anti-meta (sem limite de pokémon)'));
+    const lg = el('label', 'chk'); const cb = el('input'); cb.type = 'checkbox'; cb.checked = pvpSemLend; cb.onchange = () => { pvpSemLend = cb.checked; renderPvp(true); }; lg.append(cb, ' sem lendários');
+    const lv = el('label', 'chk'); const cv = el('input'); cv.type = 'checkbox'; cv.checked = pvpSoVenda; cv.onchange = () => { pvpSoVenda = cv.checked; try { localStorage.setItem('pvpSoVenda', pvpSoVenda ? '1' : '0'); } catch {} renderPvp(true); }; lv.append(cv, ' só o que está à venda');
+    const opts2 = el('div', 'actions'); opts2.style.margin = '0'; opts2.append(lv, lg);
+    ah.append(opts2);
+    ac.append(ah, el('div', 'sub up-lead', `No nível/potência típicos do top (Nv ~${fmt(meta.ref ? meta.ref.level : refLevel)}, potência ${meta.ref ? meta.ref.potencia : 2}), este time tem duelo favorável contra ${wins} dos ${top.length} arquétipos do topo. É o caminho para montar do zero ou comprar no Market.`));
+    const row = el('div', 'cand-list');
+    for (const x of pick) row.append(candRow(meta, x, top));
+    ac.append(row);
+    root.append(ac);
+  }
+
+  // Orçamento: a pessoa diz quanto quer gastar e o app procura NA HORA as ofertas reais dos pokémon
+  // bons no PvP, avaliando cada pokémon à venda no duelo do jogo contra o top.
+  const bk = el('div', 'card');
+  bk.append(el('div', 'ext-sec', 'Comprar no Market com o seu orçamento'));
+  bk.append(el('div', 'sub up-lead', `No PvP não há trava de nível (acima do teto da arena o nível só é comprimido). Diga quanto quer gastar. O app procura agora as ofertas mais baratas dos pokémon mais fortes contra o meta e avalia cada pokémon à venda (nível, IV, shiny, Z-Move; AoE não conta no PvP) no duelo do jogo contra o top. Os preços mudam o tempo todo: a busca é sempre na hora.`));
+  const form = el('div', 'budget');
+  const inp = el('input'); inp.type = 'number'; inp.min = '0'; inp.step = '100'; inp.placeholder = 'Quanto quer gastar?'; inp.value = pvpBudget;
+  inp.oninput = () => { pvpBudget = inp.value; };
+  const msel = el('select'); for (const [v, l] of [['orb', 'em gemas 💎'], ['gold', 'em coins']]) { const o = el('option', null, l); o.value = v; msel.append(o); } msel.value = pvpMoeda;
+  msel.onchange = () => { pvpMoeda = msel.value; };
+  const go = button(pvpBuscaMk && pvpBuscaMk.carregando ? 'Procurando…' : 'Procurar no Market agora', 'primary', async () => {
+    const valor = Number(pvpBudget);
+    if (!(valor > 0)) return toast('Digite quanto quer gastar.');
+    pvpBuscaMk = { carregando: true, valor, moeda: pvpMoeda };
+    renderPvp(true);
+    const r = await call('poke:pvp:mercado', pvpMoeda);
+    pvpBuscaMk = { carregando: false, valor, moeda: pvpMoeda, lista: (r && r.lista) || [], em: r && r.em, erro: r && r.erro };
+    if (page === 'pvp') renderPvp(true);
+  });
+  go.disabled = !!(pvpBuscaMk && pvpBuscaMk.carregando);
+  form.append(inp, msel, go);
+  bk.append(form);
+  if (pvpBuscaMk && pvpBuscaMk.carregando) bk.append(el('div', 'mempty', 'Consultando o Market pela conta principal (uma espécie a cada 2,5 s, uns 40 segundos). O jogo segue normal.'));
+  else if (pvpBuscaMk) {
+    const { valor, moeda, lista, erro } = pvpBuscaMk;
+    if (erro) bk.append(el('div', 'tip warn', erro));
+    const nm = moeda === 'gold' ? 'coins' : 'gemas';
+    const noValor = (lista || []).filter((o) => o.moeda === moeda && o.preco > 0 && o.preco <= valor && !o.retido);
+    // Só entra na sugestão quem vence pelo menos alguns duelos contra o top (pokémon fraco não é compra de PvP).
+    const usa = () => true; // PvP: sem trava de nível
+    const cabe = noValor.filter((o) => o.win >= 0.03 && usa(o));
+    // Sugestão: os mais fortes que cabem juntos no valor, um de cada espécie, até 5.
+    const ord = [...cabe].sort((x, y) => y.win - x.win || x.preco - y.preco);
+    const pick = []; let gasto = 0;
+    for (const o of ord) { if (pick.length >= 5) break; if (pick.some((p2) => p2.speciesId === o.speciesId)) continue; if (gasto + o.preco > valor) continue; pick.push(o); gasto += o.preco; }
+    const fmtP = (o) => { const b = el('b', moeda === 'orb' ? 'orb' : ''); b.append(el('i', `cur ${moeda === 'orb' ? 'orb' : 'gold'}`), fmt(o.preco)); return b; };
+    const linha = (o) => {
+      const r = el('div', 'cand');
+      const l = el('div', 'pu-n'); l.append(el('b', null, `${o.nome} · Nv ${fmt(o.level)}${o.shiny ? ' ✨' : ''}`), el('span', 'sub', `vence ${pct(o.win)} dos duelos contra o top · vendedor ${o.vendedor || '—'}`));
+      const tg = el('div', 'pm-tags'); for (const tt of o.tipos || []) tg.append(tipoChip(tt)); if (o.el) tg.append(zChip(o.el)); if (o.potencia) tg.append(el('span', 'pn-p', `P${o.potencia}`));
+      const pr = el('div', 'price'); pr.append(fmtP(o), el('span', 'sub', o.qtd > 1 ? `${o.qtd} un.` : 'no Market agora'));
+      r.append(l, tg, pr, watchBtn(o.nome));
+      return r;
+    };
+    if (!lista || !lista.length) bk.append(el('div', 'mempty', `Nenhuma oferta em ${nm} encontrada para os pokémon fortes contra o meta agora.`));
+    else {
+      bk.append(el('div', 'sub up-lead', pick.length
+        ? `Com ${fmt(valor)} ${nm}, a melhor compra agora (${new Date(pvpBuscaMk.em || Date.now()).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}): ${pick.length} pokémon por ${fmt(gasto)} ${nm}, sobram ${fmt(valor - gasto)}.`
+        : (() => { const m2 = [...noValor].filter(usa).sort((x, y) => y.win - x.win || y.level - x.level)[0]; return `Com ${fmt(valor)} ${nm}, nada à venda agora vence duelos contra o top: os pokémon do top 50 são Nv ~${fmt(meta.ref ? meta.ref.level : refLevel)}${meta.ref && meta.ref.shiny ? ' e shiny' : ''}.${m2 ? ` O mais forte que cabe no valor é ${m2.nome} Nv ${fmt(m2.level)} (${fmt(m2.preco)} ${nm}): ajuda a subir de tier, mas não chega no topo.` : ''} Abaixo, as ofertas mais fortes à venda.`; })()));
+      const l1 = el('div', 'cand-list'); for (const o of pick) l1.append(linha(o)); bk.append(l1);
+      const resto = [...(lista || [])].filter((o) => o.moeda === moeda && !pick.includes(o)).sort((x, y) => y.win - x.win).slice(0, 8);
+      if (resto.length) { bk.append(el('div', 'ext-sec mk-sub', 'Outras ofertas fortes (algumas acima do seu valor)')); const l2 = el('div', 'cand-list'); for (const o of resto) l2.append(linha(o)); bk.append(l2); }
+      bk.append(el('div', 'mempty', 'No Market do jogo, procure pelo nome e confira o nível e o vendedor antes de comprar. A compra é sempre sua.'));
+    }
+  }
+  root.append(bk);
+
+  if (top.length && cand.length) {
+    const cc = el('div', 'card');
+    cc.append(el('div', 'ext-sec', 'Contra cada arquétipo: quem mais vence'));
+    for (const a of top) {
+      const vistos = new Set();
+      const best = [...cand].filter((x) => x.porArq && x.porArq[a.id] != null).sort((x, y) => y.porArq[a.id] - x.porArq[a.id]).filter((x) => !vistos.has(x.nome) && vistos.add(x.nome)).slice(0, 4);
+      const r = el('div', 'pn-row');
+      const lab = el('div', 'pu-n'); lab.append(el('b', null, arqName(a, meta)), el('span', 'sub', `tier ${a.tier}`));
+      const tg = el('div', 'pm-tags');
+      for (const x of best) { const own = mine.some((m) => m.speciesId === x.speciesId); const s2 = el('span', `pn-p${own ? ' ok' : ''}`, `${shortName(x.nome)} ${pct(x.porArq[a.id])}`); s2.title = own ? 'Você tem' : 'Você não tem'; tg.append(s2); }
+      r.append(lab, tg);
+      cc.append(r);
+    }
+    cc.append(el('div', 'mempty', 'Porcentagem: duelos 1×1 vencidos contra os pokémon dos times desse arquétipo, no nível típico do top. Verde = você já tem.'));
+    root.append(cc);
+  }
+}
+function candRow(meta, x, top) {
+  const r = el('div', 'cand');
+  const left = el('div', 'pu-n');
+  left.append(el('b', null, `${x.nome}${x.lend ? ' · lendário' : ''}`), el('span', 'sub', `vence ${pct(x.win)} dos duelos contra o top · ${top.filter((a) => ((x.porArq || {})[a.id] ?? 0) >= 0.5).length}/${top.length} arquétipos`));
+  const tg = el('div', 'pm-tags'); for (const tt of x.tipos) tg.append(tipoChip(tt)); if (x.z) tg.append(zChip(x.z));
+  const { box } = priceRow(meta, x.nome);
+  r.append(left, tg, box, watchBtn(x.nome));
+  return r;
+}
+
+// ================= PLANEJADOR =================
+// Abre com o time ATIVO do PvP do jogo (os 5 e as casas de "Sua equipe de PvP"). Clicar num do seu time tira ele;
+// clicar num da lista põe. Para cada time do top (arquétipos), o duelo 1×1 do jogo de cada um contra cada um e o
+// tabuleiro real dão a chance estimada de vencer; a posição sugerida é a que dá a maior chance média contra o top.
+// POR QUE ESSA POSIÇÃO (feedback do dono): a luta simulada contra o time escolhido, pokémon a pokémon — quando entra na
+// luta, em quem bate, de quem apanha, quanto do dano faz e quando cai — e o papel de cada um (segura a frente / bate sem
+// apanhar). E o teste do TANK: o seu pokémon que mais aguenta (corpo a corpo) colocado na frente — se a sugestão o deixou
+// atrás, mostra quanto daria na frente e por quê.
+const segs = (s) => `${String(Math.round(s * 10) / 10).replace('.', ',')} s`;
+function porQueEssaPosicao(casas, team, sel, media, papeis, casasPapel) {
+  const out = [el('div', 'ext-sec', 'Por que essa posição? (luta simulada contra este time)')];
+  const r = simBatalha(casas, team, sel.ec, sel.enemy, sel.T, true);
+  const danoTot = r.A.reduce((s, u) => s + u.dano, 0) || 1;
+  const vivos = r.A.filter((u) => u.vida > 0).length, vivosE = r.B.filter((u) => u.vida > 0).length;
+  out.push(el('div', `tip ${vivos && !vivosE ? 'ok' : vivosE && !vivos ? 'bad' : 'meh'}`, vivos && !vivosE ? `Na simulação você vence em ~${segs(r.tempo)}, com ${vivos} de pé.`
+    : vivosE && !vivos ? `Na simulação você perde em ~${segs(r.tempo)} (sobram ${vivosE} deles).` : `Luta equilibrada: depois de ${segs(r.tempo)} os dois lados ainda têm gente de pé.`));
+  const nomesE = (set) => [...set].map((j) => shortName(sel.enemy[j].nome)).join(', ');
+  // O "tank": quem mais demora para cair, na média contra os 5 deles (pelo duelo do jogo).
+  const aguenta = team.map((_, i) => { const l = (sel.T[i] || []).map((x) => (x ? x[1] : 0)).filter((x) => x > 0 && x < 999); return l.length ? l.reduce((s, x) => s + x, 0) / l.length : 0; });
+  // O tanque: o de papel Tanque (status + partidas reais); sem nenhum, o que mais demora para cair contra eles.
+  const iPapelTank = papeis ? papeis.findIndex((p) => p.id === 'tanque') : -1;
+  const iTank = iPapelTank >= 0 ? iPapelTank : aguenta.indexOf(Math.max(...aguenta));
+  r.A.forEach((u, i) => {
+    const m = team[i];
+    const linhaCasa = TB_CASAS[casas[i]] ? TB_CASAS[casas[i]].r + 1 : '?';
+    const ativo = u.entrou != null ? (u.morreu != null ? u.morreu : r.tempo) - u.entrou : 0;
+    const papel = u.apanhouDe.size >= 2 ? '🛡️ segura a frente' : ativo > 0 && u.livre >= ativo * 0.6 ? '🏹 bate sem apanhar' : u.entrou == null ? '💤 não chegou a lutar' : '⚔️ troca golpes';
+    const partes = [
+      u.entrou != null ? `entra aos ${segs(u.entrou)}` : 'não chega em ninguém',
+      u.bateuEm.size ? `bate em ${nomesE(u.bateuEm)}` : null,
+      u.apanhouDe.size ? `apanha de ${nomesE(u.apanhouDe)}` : 'ninguém bate nele',
+      `${Math.round((u.dano / danoTot) * 100)}% do dano do time`,
+      u.morreu != null ? `cai aos ${segs(u.morreu)}` : 'termina de pé',
+    ].filter(Boolean);
+    const pp = papeis ? papeis[i] : null;
+    out.push(el('div', `tip ${u.morreu != null ? 'meh' : 'ok'}`, `${pp ? `${pp.ic} ${shortName(m.nome)} é ${pp.nome}` : shortName(m.nome)} ${alcIcon(m.alcance)} (${linhaCasa}ª fileira) · na luta: ${papel}: ${partes.join(' · ')}.`));
+  });
+  // FORA DO LUGAR: cada papel tem a sua fileira (o tanque na frente, mago e atirador atrás).
+  if (papeis) {
+    const foraDoLugar = [];
+    team.forEach((m, i) => {
+      const r0 = TB_CASAS[casas[i]] ? TB_CASAS[casas[i]].r : 0, p = papeis[i];
+      const a = alcN(m.alcance);
+      if (FILAS_ALC[a].includes(r0)) return;
+      if (a > 1 && r0 < FILAS_ALC[a][0]) foraDoLugar.push(`${p.ic} ${shortName(m.nome)} tem distância ${a} e está na ${r0 + 1}ª fileira: é o primeiro a apanhar (lugar dele: ${p.onde}).`);
+      else if (a === 1) foraDoLugar.push(`${p.ic} ${shortName(m.nome)} não tem distância e está na ${r0 + 1}ª fileira: ninguém chega nele no começo, então ele não segura a frente (lugar dele: ${p.onde}).`);
+      else foraDoLugar.push(`${p.ic} ${shortName(m.nome)} tem distância ${a} e está na ${r0 + 1}ª fileira, atrás demais (lugar dele: ${p.onde}).`);
+    });
+    for (const t of foraDoLugar) out.push(el('div', 'tip warn', t));
+    if (casasPapel && casasPapel.join() !== casas.join()) {
+      const mP = media(casasPapel), mA = media(casas), d = Math.round((mP - mA) * 100);
+      out.push(el('div', `tip ${d > 0 ? 'ok' : ''}`, `📐 A formação por papel (cada um no lugar do papel) daria ${pct(mP)} contra o top${d > 0 ? ` (+${d} pontos): vale testar` : d < 0 ? ` (${d} pontos): aqui a posição sugerida rende mais` : ' (igual)'}.`));
+    }
+  }
+  // TESTE DO TANK: o tanque, se for corpo a corpo e estiver da 3ª fileira para trás, vai para a frente.
+  const tank = team[iTank];
+  const filaTank = TB_CASAS[casas[iTank]] ? TB_CASAS[casas[iTank]].r : 0;
+  if (tank && tank.alcance <= 1 && filaTank >= 2) {
+    const frentes = casas.map((c, i) => ({ c, i, r: TB_CASAS[c] ? TB_CASAS[c].r : 9 })).filter((x) => x.i !== iTank).sort((a, b) => a.r - b.r);
+    const troca = frentes[0];
+    if (troca) {
+      const alt = casas.slice(); alt[iTank] = troca.c; alt[troca.i] = casas[iTank];
+      const vAqui = avaliarPos(casas, team, sel.ec, sel.enemy, sel.P, sel.T), vAlt = avaliarPos(alt, team, sel.ec, sel.enemy, sel.P, sel.T);
+      const mAqui = media(casas), mAlt = media(alt);
+      const rAlt = simBatalha(alt, team, sel.ec, sel.enemy, sel.T, true);
+      const uT = rAlt.A[iTank], uT0 = r.A[iTank];
+      const dif = Math.round((mAlt - mAqui) * 100);
+      const nomeT = shortName(tank.nome), nomeX = shortName(team[troca.i].nome);
+      if (dif < 0) {
+        out.push(el('div', 'tip', `❓ E com o ${nomeT} na frente (trocando com o ${nomeX})? Contra o top daria ${pct(mAlt)} em vez de ${pct(mAqui)} (${dif} pontos); contra este time ${pct(vAlt)}. `
+          + `Na frente ele ${uT.morreu != null ? `cai aos ${segs(uT.morreu)}` : 'aguenta até o fim'}${uT.apanhouDe.size ? ` apanhando de ${nomesE(uT.apanhouDe)}` : ''}; `
+          + `${uT0.apanhouDe.size ? `atrás ele entra aos ${segs(uT0.entrou ?? 0)}, quando os deles já estão gastos` : 'atrás ele fica protegido'} — por isso a sugestão o deixa lá. `
+          + `Isso costuma acontecer quando ele perde o 1×1 para quem chega primeiro: segurar a frente só vale se ele aguentar quem bate nele.`));
+      } else if (dif > 0 || vAlt > vAqui + 0.005) {
+        out.push(el('div', 'tip ok', `💡 Com o ${nomeT} na frente (trocando com o ${nomeX}) fica melhor: contra o top ${pct(mAlt)} (${dif >= 0 ? '+' : ''}${dif} pontos), contra este time ${pct(vAlt)}. Ele ${uT.morreu != null ? `segura até ${segs(uT.morreu)}` : 'aguenta a luta toda'} e protege quem bate de longe.`));
+      }
+    }
+  }
+  out.push(el('span', 'sub', 'Papéis: 🛡️ Tanque · ⚔️ Soldado · 🗡️ Assassino · 🏹 Atirador · 🔮 Mago · 🧱 Resistente de longe — pelos status (aguenta × bate, alcance e Speed) e por como a espécie joga nas partidas reais (Tracker do jogo). Não existe \"suporte\" de verdade: no PvP do PokeIdle não há cura, escudo nem buff (todo golpe é dano), e a Speed só acelera os golpes em até 7%.'));
+  out.push(el('span', 'sub', `Como a simulação funciona: cada um vai no inimigo mais perto e anda até ficar no alcance (🗡️ 1 casa, 🏹 até 4); o dano por segundo e a vida vêm do duelo 1×1 do jogo (tipo, golpe, nível, IV, Z-Move). A luta de verdade é calculada pelo servidor: é estimativa.`));
+  return out;
+}
+
+let pvpTracker = null, pvpTrackerPedido = false;
+let pvpPosModo = (() => { try { return localStorage.getItem('pvpPosModo') || 'top'; } catch { return 'top'; } })();
+const pvpOtimoCache = new Map();
+// 🏟️ REGRAS DE TORNEIO (Torneio da Comunidade do jogo 1.457, 20/11/2026): o streamer escolhe as regras (shiny, Mega,
+// Outland liberados/proibidos/exigidos, tipagens, potência e nível). Com elas ligadas, o Planejador e o "⭐ Melhor
+// time do meta" só usam quem passa nelas.
+const PVP_REGRAS_PADRAO = { on: false, shiny: 'livre', mega: 'livre', outland: 'livre', nivelMax: 0, potMin: 0, potMax: 0, tipos: '' };
+let pvpRegras = (() => { try { return { ...PVP_REGRAS_PADRAO, ...(JSON.parse(localStorage.getItem('pvpRegras') || 'null') || {}) }; } catch { return { ...PVP_REGRAS_PADRAO }; } })();
+const pvpRegrasGravar = () => { try { localStorage.setItem('pvpRegras', JSON.stringify(pvpRegras)); } catch {} };
+function pvpPassaRegras(m) {
+  const r = pvpRegras;
+  if (!r.on) return true;
+  const pk = m.pk || {};
+  const tem = { shiny: !!pk.shiny, mega: /^Mega /i.test(m.nome || ''), outland: Number(m.speciesId) >= 2001 && Number(m.speciesId) < 3000 };
+  for (const k of ['shiny', 'mega', 'outland']) { if (r[k] === 'proibido' && tem[k]) return false; if (r[k] === 'exigido' && !tem[k]) return false; }
+  if (r.nivelMax > 0 && Number(m.level) > r.nivelMax) return false;
+  const pot = Number(pk.potencia) || 1;
+  if (r.potMin > 0 && pot < r.potMin) return false;
+  if (r.potMax > 0 && pot > r.potMax) return false;
+  const tipos = String(r.tipos || '').split(/[,\s]+/).map((x) => x.trim().toUpperCase()).filter(Boolean);
+  if (tipos.length && !(m.tipos || []).some((t) => tipos.includes(String(t).toUpperCase()))) return false;
+  return true;
+}
+function pvpRegrasCard() {
+  const r = pvpRegras;
+  const c = el('details', 'card'); c.open = !!r.on;
+  const sm = el('summary'); sm.append(el('b', null, `🏟️ Regras de torneio${r.on ? ' · LIGADAS' : ''}`), el('span', 'sub', ' — monte o time para um Torneio da Comunidade (o jogo mostra as regras no card do torneio)'));
+  c.append(sm);
+  const muda = (k, v) => { pvpRegras = { ...pvpRegras, [k]: v }; pvpRegrasGravar(); pvpPlan = null; renderPvp(true); };
+  const g = el('div', 'actions'); g.style.cssText = 'flex-wrap:wrap;justify-content:flex-start;gap:10px;margin:8px 0';
+  const lig = el('label', 'tr-chk'); const cb = el('input'); cb.type = 'checkbox'; cb.checked = !!r.on; cb.onchange = () => muda('on', cb.checked); lig.append(cb, el('span', null, 'Usar as regras'));
+  g.append(lig);
+  for (const [k, rot] of [['shiny', 'Shiny'], ['mega', 'Mega'], ['outland', 'Outland']]) {
+    const s = el('select'); for (const [v, l] of [['livre', `${rot}: liberado`], ['proibido', `${rot}: proibido`], ['exigido', `${rot}: só ${rot.toLowerCase()}`]]) { const o = el('option', null, l); o.value = v; s.append(o); }
+    s.value = r[k]; s.onchange = () => muda(k, s.value); g.append(s);
+  }
+  const num = (k, ph, w) => { const i = el('input'); i.type = 'number'; i.min = '0'; i.placeholder = ph; i.style.width = w; if (r[k]) i.value = r[k]; i.onchange = () => muda(k, Number(i.value) || 0); return i; };
+  g.append(num('nivelMax', 'Nível máx.', '90px'), num('potMin', 'P mín.', '70px'), num('potMax', 'P máx.', '70px'));
+  const ti = el('input'); ti.type = 'text'; ti.placeholder = 'Tipagens (ex.: FOGO, ÁGUA) — vazio = todas'; ti.value = r.tipos || ''; ti.style.minWidth = '260px'; ti.onchange = () => muda('tipos', ti.value);
+  g.append(ti);
+  c.append(g, el('span', 'sub', 'Lendário, nota, qualidade e IV o jogo confere na hora de escolher a equipe (e diz o motivo de cada recusa).'));
+  return c;
+}
+function renderPvpPlan(root, c) {
+  const { meta, entries, tab, refLevel, mineAll, arqs, live } = c;
+  root.append(pvpRegrasCard());
+  const mine = pvpRegras.on ? c.mine.filter(pvpPassaRegras) : c.mine;
+  const mt = live && live.meuTime;
+  const doJogo = mt && Array.isArray(mt.ids) ? mt.ids.filter((id) => mine.some((m) => m.id === id)).slice(0, 5) : [];
+  // Começou pela sugestão porque o time do jogo ainda não tinha chegado? Quando ele chegar (e você não mexeu), troca.
+  if (pvpPlan && pvpPlanSugestao && doJogo.length) pvpPlan = null;
+  // Vazio também conta como "sem plano" (caso do 369, 20/11/2026: tirou todos e o planejador ficava 0/5 para sempre).
+  if (!pvpPlan || !pvpPlan.length) { pvpPlanSugestao = !doJogo.length; pvpPlan = doJogo.length ? doJogo.slice() : pvpSuggest(mine, entries, tab, refLevel).map((x) => x.c.id); }
+  pvpPlan = pvpPlan.filter((id) => mine.some((m) => m.id === id)).slice(0, 5);
+  const team = pvpPlan.map((id) => mine.find((m) => m.id === id)).filter(Boolean);
+  const ehDoJogo = doJogo.length > 0 && doJogo.length === team.length && team.every((m) => doJogo.includes(m.id));
+  // A posição de cada um no jogo (os que não estão no time do jogo vão para a casa padrão do alcance, como o jogo faz).
+  const casasJogo = casasDaEquipe(team.map((m) => (mt && mt.casas ? mt.casas[String(m.id)] : null)), team.map((m) => m.alcance));
+  // Papéis (tanque, soldado…): status base + como a espécie joga no Tracker do jogo (lido 1× a cada 6 h).
+  if (!pvpTracker && !pvpTrackerPedido) { pvpTrackerPedido = true; call('poke:pvp:tracker', 'todas').then((tk) => { if (tk) { pvpTracker = tk; if (page === 'pvp' && pvpTab === 'plan') renderPvp(true); } }).catch(() => {}); }
+  if (pvpTracker) preparaTracker(pvpTracker, (id) => (meta.info && meta.info[id] ? meta.info[id].alcance : null), meta.at || 1);
+  const papeis = team.map((m) => papelDe(m, pvpTracker));
+  const casasPapel = casasPorPapel(team, papeis);
+  team.forEach((m, i) => { m.papel = papeis[i]; });
+
+  const top = (arqs.filter((a) => a.tier !== 'U').length ? arqs.filter((a) => a.tier !== 'U') : arqs).slice(0, 12);
+  if (pvpArqSel == null || !arqs.some((a) => a.id === pvpArqSel)) pvpArqSel = top[0] ? top[0].id : (arqs[0] ? arqs[0].id : null);
+  const arq = arqs.find((a) => a.id === pvpArqSel);
+  const timeDe = (a) => { const enemy = arqTeam(a, meta).slice(0, 5); return { enemy, ec: casasDaEquipe(enemy.map((k) => k.casa), enemy.map((k) => k.alcance)) }; };
+  const sel = arq ? timeDe(arq) : { enemy: [], ec: [] };
+  sel.enemy.forEach((e) => { e.papel = papelDe(e, pvpTracker); });
+
+  const pc = el('div', 'card pvp-plan');
+  const ph = el('div', 'pvp-sh');
+  ph.append(el('div', 'ext-sec', `Planejador (${team.length}/5)${ehDoJogo ? ' · o seu time do jogo' : ''}`));
+  const vsSel = el('select');
+  for (const a of arqs) { const o = el('option', null, `${a.tier === 'U' ? '—' : a.tier} · ${arqName(a, meta)} (${a.n})`); o.value = String(a.id); vsSel.append(o); }
+  vsSel.value = String(pvpArqSel);
+  vsSel.onchange = () => { pvpArqSel = Number(vsSel.value); renderPvp(true); };
+  const right = el('div', 'actions'); right.style.margin = '0';
+  // ⭐ MELHOR TIME DO META (pedido do dono, 20/11/2026: "a formação que mais dá certo pelo meta, antes de mexer"): os 5
+  // que mais rendem contra o top 50 (a mesma conta do "Com o que você tem", só com quem a conta pode usar) já
+  // posicionados no modo "⭐ Melhor contra o top 50".
+  const melhor = button('⭐ Melhor time do meta', 'mini', () => {
+    const sug = pvpSuggest(mine, entries, tab, refLevel).map((x) => x.c.id);
+    if (!sug.length) { if (typeof toast === 'function') toast('Ainda não li os pokémon desta conta: abra a conta no PokeIdle e volte aqui.'); return; }
+    pvpPlan = sug; pvpPlanSugestao = false; pvpPosModo = 'top';
+    try { localStorage.setItem(`pvpPlan:${pvpAcc}`, JSON.stringify(pvpPlan)); localStorage.setItem('pvpPosModo', 'top'); } catch {}
+    if (typeof toast === 'function') toast('⭐ Montei o time que mais rende contra o top 50, já na melhor posição.');
+    renderPvp(true);
+  });
+  melhor.title = 'Os 5 da sua conta que mais rendem contra o top 50 do Ranqueado, já na posição que mais vence. Só entra quem a conta pode usar (nível até o do treinador + 5).';
+  right.append(melhor, el('span', 'sub', 'Contra:'), vsSel);
+  ph.append(right);
+  pc.append(ph);
+  if (!doJogo.length) pc.append(el('div', 'tip', 'O seu time do PvP ainda não chegou do jogo: abra a aba PvP no jogo uma vez (ou espere uns segundos). Enquanto isso, o planejador começa com uma sugestão.'));
+
+  const body = el('div', 'pp-body');
+  const left = el('div', 'pp-left');
+  // --- o seu time: clique para tirar
+  const meu = el('div', 'pp-time');
+  meu.append(el('div', 'ext-sec', `Seu time (${team.length}/5) · clique para tirar`));
+  for (const m of team) {
+    const b = el('button', 'pp-item on');
+    const pp = papeis[team.indexOf(m)];
+    b.title = `Tirar do planejador (no jogo nada muda)\n${pp.ic} ${pp.nome}: ${pp.faz}. Lugar: ${pp.onde}.\n${pp.porque.join(' · ')}`;
+    b.append(el('b', null, `✕ ${m.nome}`), el('span', 'pp-papel', `${pp.ic} ${pp.nome}`), el('span', null, `Nv ${fmt(m.level)} · ${alcIcon(m.alcance)}${m.el ? ` · Z ${TIPO_PT[String(m.el).toUpperCase()] || m.el}` : ''}${doJogo.includes(m.id) ? ' · no time do jogo' : ' · trocado aqui'}`));
+    b.onclick = () => { pvpPlanSugestao = false; pvpPlan = pvpPlan.filter((x) => x !== m.id); renderPvp(true); };
+    meu.append(b);
+  }
+  if (!team.length) meu.append(el('span', 'sub', 'Escolha até 5 na lista abaixo.'));
+  if (doJogo.length && !ehDoJogo) meu.append(button('↺ Voltar ao time do jogo', 'mini', () => { pvpPlan = doJogo.slice(); renderPvp(true); }));
+  left.append(meu);
+  // --- a lista: clique para pôr
+  const q = el('input'); q.type = 'text'; q.placeholder = 'Buscar seu pokémon para pôr…'; q.value = pvpBusca;
+  q.oninput = () => { pvpBusca = q.value; const pos = q.selectionStart; renderPvp(true).then(() => { const n = $('#page-pvp .pp-left input'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }); };
+  left.append(q);
+  const list = el('div', 'pp-list');
+  for (const m of mineAll.filter((x) => !pvpPlan.includes(x.id) && pvpPassaRegras(x) && (!pvpBusca || x.nome.toLowerCase().includes(pvpBusca.toLowerCase()))).slice(0, 80)) {
+    const b = el('button', `pp-item${m.usavel ? '' : ' off'}`);
+    b.append(el('b', null, m.nome), el('span', null, `Nv ${fmt(m.level)} · ${alcIcon(m.alcance)}${m.el ? ` · Z ${TIPO_PT[String(m.el).toUpperCase()] || m.el}` : ''}`));
+    b.onclick = () => { if (pvpPlan.length >= 5) return toast('O time tem no máximo 5: clique num do "Seu time" para tirar antes.'); pvpPlanSugestao = false; pvpPlan.push(m.id); renderPvp(true); };
+    list.append(b);
+  }
+  left.append(list);
+  // Time com menos de 5: sugestões do meta que você NÃO tem, para completar (com a tag).
+  if (team.length < 5 && sel.enemy.length) {
+    const tenho = new Set(mineAll.map((m) => m.speciesId));
+    const vistosS = new Set();
+    const cands = [];
+    for (const e of entries) {
+      if (tenho.has(e.speciesId) || vistosS.has(e.speciesId)) continue;
+      vistosS.add(e.speciesId);
+      cands.push({ c: e, s: pvpScore(e, sel.enemy.map((x) => ({ ...x, w: 1 })), tab, refLevel) });
+    }
+    cands.sort((a, b) => b.s.score - a.s.score);
+    const sg = el('div', 'pp-sug');
+    sg.append(el('div', 'ext-sec', `Para completar o time (${5 - team.length} vaga${5 - team.length > 1 ? 's' : ''})`));
+    for (const { c: e, s: sc } of cands.slice(0, 4)) {
+      const it = el('div', 'pp-item sug');
+      it.append(el('b', null, e.nome), el('span', 'pp-tag', '💡 sugestão — você não tem'),
+        el('span', null, `usado no top 50 · Nv ~${fmt(e.level)}${sc.forte.length ? ` · bate forte em ${sc.forte.slice(0, 2).map(([n]) => shortName(n)).join(', ')}` : ''}`));
+      sg.append(it);
+    }
+    if (cands.length) { sg.append(el('span', 'sub', 'Procure em "Meu time" > comprar no Market com o seu orçamento.')); left.append(sg); }
+  }
+
+  // --- o meio: tabuleiro + qual posição mostrar
+  const mid = el('div', 'pp-mid');
+  const modos = el('div', 'pvp-tabs');
+  for (const [k, l] of [['top', '⭐ Melhor contra o top 50'], ['arq', '🎯 Melhor contra este time'], ['papel', '📐 Formação por papel'], ['jogo', '🎮 Como está no jogo']]) {
+    modos.append(button(l, pvpPosModo === k ? 'on' : '', () => { pvpPosModo = k; try { localStorage.setItem('pvpPosModo', k); } catch {} renderPvp(true); }));
+  }
+  const boardBox = el('div');
+  const ondeBox = el('div', 'pp-tips');
+  const desenhar = (casasMinhas) => {
+    boardBox.replaceChildren(boardEl([{ team: sel.enemy, casas: sel.ec, cls: 'enemy', flip: true }, { team, casas: casasMinhas, cls: 'mine', flip: false }]));
+    ondeBox.replaceChildren(...team.map((m, i) => el('div', 'tip', `${shortName(m.nome)} → ${nomeCasa(casasMinhas[i])}`)));
+  };
+  desenhar(casasJogo);
+  mid.append(modos, el('div', 'pp-front', arq ? `Adversário: time de ${arq.rep} (#${arq.best}), ${arqName(arq, meta)}` : 'Sem arquétipo'), boardBox,
+    el('div', 'pp-front', 'Você embaixo. Para usar: "Editar tabuleiro" no PvP do jogo e ponha cada um na casa indicada.'), ondeBox);
+
+  // --- a direita: chances
+  const rightCol = el('div', 'pp-right');
+  if (!team.length) rightCol.append(el('div', 'mempty', 'Escolha até 5 pokémon para ver a chance de vencer e a melhor posição.'));
+  else if (!top.length || !sel.enemy.length) rightCol.append(el('div', 'mempty', 'Atualize o meta para ter os times do topo.'));
+  else {
+    const res = el('div', 'pp-sum'); res.append(el('b', null, `Calculando contra os times do top (0/${top.length})…`));
+    const tipsBox = el('div', 'pp-tips');
+    rightCol.append(res, tipsBox);
+    (async () => {
+      const alvos = [];
+      for (const a of top) {
+        const t = timeDe(a);
+        if (!t.enemy.length) continue;
+        const s = await simTeam(team, t.enemy);
+        if (page !== 'pvp' || pvpTab !== 'plan') return;
+        if (s) alvos.push({ a, enemy: t.enemy, ec: t.ec, P: s.m, T: s.t, w: a.n || 1, est: s.est });
+        res.replaceChildren(el('b', null, `Calculando contra os times do top (${alvos.length}/${top.length})…`));
+      }
+      if (!alvos.length) { res.replaceChildren(el('b', null, 'Não deu para simular agora (a conta precisa estar aberta no app).')); return; }
+      const ch = `${pvpAcc}|${team.map((m) => m.id).join(',')}|${meta.at}`;
+      let ot = pvpOtimoCache.get(ch);
+      if (!ot) {
+        const daSel = alvos.find((x) => x.a.id === pvpArqSel);
+        ot = { top: await otimizarPos(team, alvos, casasJogo, [casasPapel]), arq: daSel ? await otimizarPos(team, [daSel], casasJogo, [casasPapel]) : null };
+        pvpOtimoCache.set(ch, ot);
+      }
+      // "Melhor contra este time" depende do adversário escolhido: calcula se ainda não tem.
+      const daSel = alvos.find((x) => x.a.id === pvpArqSel);
+      if (daSel && (!ot.arq || ot.arqId !== pvpArqSel)) { ot.arq = await otimizarPos(team, [daSel], casasJogo, [casasPapel]); ot.arqId = pvpArqSel; }
+      const casasModo = pvpPosModo === 'jogo' ? casasJogo : pvpPosModo === 'papel' ? casasPapel : pvpPosModo === 'arq' && ot.arq ? ot.arq.casas : ot.top.casas;
+      desenhar(casasModo);
+      const media = (casas) => { const pw = alvos.reduce((s, x) => s + x.w, 0) || 1; return alvos.reduce((s, x) => s + x.w * avaliarPos(casas, team, x.ec, x.enemy, x.P, x.T), 0) / pw; };
+      const vsSelV = daSel ? avaliarPos(casasModo, team, daSel.ec, daSel.enemy, daSel.P, daSel.T) : null;
+      const cls = (v) => (v >= 0.55 ? 'ok' : v >= 0.45 ? 'meh' : 'bad');
+      res.replaceChildren(
+        ...(vsSelV != null ? [el('b', `big ${cls(vsSelV)}`, `${pct(vsSelV)} de chance de vencer este time`)] : []),
+        el('span', null, `Contra o top (média de ${alvos.length} times, pesados por quantos usam): ${pct(media(casasModo))} nesta posição.`),
+        el('span', null, `Posição do jogo: ${pct(media(casasJogo))} · melhor contra o top: ${pct(ot.top.v)}${ot.top.v - media(casasJogo) >= 0.01 ? ` (+${Math.round((ot.top.v - media(casasJogo)) * 100)} pontos mudando as casas)` : ' (a do jogo já está boa)'}.`),
+        el('span', 'sub', 'Estimativa com o duelo 1×1 do jogo e o tabuleiro real: cada um vai no adversário mais perto, e quem bate sem apanhar de volta (principalmente de longe) leva vantagem. AoE não conta no PvP.'));
+      // Contra cada time do top, na posição mostrada.
+      tipsBox.replaceChildren();
+      tipsBox.append(el('div', 'ext-sec', 'Contra cada time do top'));
+      for (const x of [...alvos].sort((p, q) => q.w - p.w)) {
+        const v = avaliarPos(casasModo, team, x.ec, x.enemy, x.P, x.T);
+        const r = el('div', `tip ${cls(v)}`, `${x.a.tier} · ${arqName(x.a, meta)} (${x.a.n} do top): ${pct(v)}`);
+        r.style.cursor = 'pointer'; r.title = 'Ver este time no tabuleiro';
+        r.onclick = () => { pvpArqSel = x.a.id; renderPvp(true); };
+        tipsBox.append(r);
+      }
+      // Dicas sem AoE: frente, retaguarda e nível.
+      if (daSel) {
+        const add = (txt, k) => tipsBox.append(el('div', `tip ${k || ''}`, txt));
+        if (daSel.T) for (const x of porQueEssaPosicao(casasModo, team, daSel, media, papeis, casasPapel)) tipsBox.append(x);
+        tipsBox.append(el('div', 'ext-sec', 'Dicas contra este time'));
+        const meleeThem = daSel.enemy.filter((e) => e.alcance <= 1);
+        const tank = [...team].sort((a, b) => ((b.stats ? b.stats.hp + b.stats.def + b.stats.spd : 0) - (a.stats ? a.stats.hp + a.stats.def + a.stats.spd : 0)))[0];
+        if (!daSel.T && meleeThem.length >= 2 && tank) add(`${meleeThem.length} deles batem corpo a corpo: ${shortName(tank.nome)} (mais HP e defesa) segura melhor a frente.`);
+        const ranged = daSel.enemy.filter((e) => e.alcance >= 3);
+        if (ranged.length) add(`Atiradores de longe deles: ${ranged.map((e) => shortName(e.nome)).join(', ')}. Quem tem alcance alto do seu lado chega à retaguarda deles.`);
+        const lvl = Math.round(team.reduce((s, m) => s + m.level, 0) / team.length);
+        const lvlE = Math.round(daSel.enemy.reduce((s, m) => s + m.level, 0) / daSel.enemy.length);
+        if (lvl < lvlE * 0.7) add(`Nível médio ${fmt(lvl)} contra ${fmt(lvlE)}: no duelo do jogo o nível pesa muito. Suba os escolhidos.`, 'warn');
+        const mx = el('div', 'pp-matrix');
+        const hd = el('div', 'pm-row hd'); hd.append(el('span', null, 'Seu'), ...daSel.enemy.map((e) => el('span', null, shortName(e.nome))));
+        mx.append(hd);
+        team.forEach((m, i) => { const r = el('div', 'pm-row'); r.append(el('span', null, shortName(m.nome))); daSel.P[i].forEach((p) => r.append(el('span', p >= 0.55 ? 'ok' : p >= 0.45 ? 'meh' : 'bad', pct(p)))); mx.append(r); });
+        tipsBox.append(el('div', 'ext-sec', 'Duelos 1×1 (chance de vencer)'), mx);
+      }
+    })();
+  }
+  body.append(left, mid, rightCol);
+  pc.append(body);
+  root.append(pc);
+}
+
+// ================= HISTÓRICO =================
+function renderPvpHist(root) {
+  const me = (pvpData.me || []).slice().sort((a, b) => a.t - b.t);
+  const live = pvpData.live || {};
+  const p = live.euPvp || null;
+  const card = el('div', 'card');
+  card.append(el('div', 'ext-sec', 'Seu PvP agora'));
+  const row = el('div', 'pvp-me-row six');
+  const stat = (v, l) => { const d = el('div', 'fstat'); d.append(el('b', null, v), el('span', null, l)); return d; };
+  if (p) {
+    row.append(stat(`${p.tierId || '—'} ${p.divisaoNum || ''}`.trim(), 'tier'), stat(fmt(p.pontos), 'PR'), stat(fmt(p.pico), 'pico'),
+      stat(`${fmt(p.vitorias)} / ${fmt(p.derrotas)}`, 'vitórias / derrotas'), stat(pct(p.vitorias / Math.max(1, p.vitorias + p.derrotas)), 'de vitórias'),
+      stat(p.sequencia ? `${p.sequencia > 0 ? '+' : ''}${p.sequencia}` : '0', 'sequência'));
+    card.append(row);
+    if (p.decaiEm) card.append(el('div', 'tip warn', `Decaimento: sem jogar, o PR começa a cair em ${new Date(p.decaiEm).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}.`));
+    if (!p.partidas) card.append(el('div', 'mempty', 'Esta conta ainda não jogou o Ranqueado.'));
+  } else card.append(el('div', 'mempty', 'Abra a conta no PokeIdle para ler o PvP dela.'));
+  root.append(card);
+  const gc = el('div', 'card');
+  gc.append(el('div', 'ext-sec', 'PR nos últimos 30 dias (foto de hora em hora, guardada neste PC)'));
+  if (me.length < 2) gc.append(el('div', 'mempty', 'O gráfico aparece depois de algumas horas com o app aberto (uma foto por hora, quando algo muda).'));
+  else {
+    const W = 900, H = 180, P = 28;
+    const t0 = me[0].t, t1 = me[me.length - 1].t;
+    const prs = me.map((r) => r.pr); const lo = Math.min(...prs), hi = Math.max(...prs, lo + 10);
+    const x = (tt) => P + ((tt - t0) / Math.max(1, t1 - t0)) * (W - 2 * P);
+    const y = (v) => H - P - ((v - lo) / (hi - lo)) * (H - 2 * P);
+    const pts = me.map((r) => `${x(r.t).toFixed(1)},${y(r.pr).toFixed(1)}`).join(' ');
+    const box = el('div');
+    box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" class="pr-chart"><line x1="${P}" y1="${H - P}" x2="${W - P}" y2="${H - P}" class="ax"/><text x="${P}" y="${P - 8}" class="lb">${fmt(hi)} PR</text><text x="${P}" y="${H - 8}" class="lb">${fmt(lo)} PR</text><polyline points="${pts}" class="ln"/>${me.map((r) => `<circle cx="${x(r.t).toFixed(1)}" cy="${y(r.pr).toFixed(1)}" r="2.5" class="pt"><title>${new Date(r.t).toLocaleString('pt-BR')} · ${r.pr} PR · ${r.v}V/${r.d}D</title></circle>`).join('')}</svg>`;
+    gc.append(box);
+    const byDay = new Map();
+    for (const r of me) { const k = new Date(r.t).toLocaleDateString('pt-BR'); const cur = byDay.get(k) || { first: r, last: r }; cur.last = r; byDay.set(k, cur); }
+    const days = el('div', 'pvp-days');
+    const hd = el('div', 'pd-row hd'); hd.append(el('span', null, 'Dia'), el('span', null, 'Vitórias'), el('span', null, 'Derrotas'), el('span', null, 'PR'));
+    days.append(hd);
+    for (const [k, d] of [...byDay.entries()].slice(-10).reverse()) {
+      const dv = d.last.v - d.first.v, dd = d.last.d - d.first.d, dp = d.last.pr - d.first.pr;
+      const r = el('div', 'pd-row'); r.append(el('span', null, k), el('span', 'ok', `+${dv}`), el('span', 'bad', `+${dd}`), el('span', dp >= 0 ? 'ok' : 'bad', `${dp >= 0 ? '+' : ''}${dp}`));
+      days.append(r);
+    }
+    gc.append(days);
+  }
+  root.append(gc);
+}

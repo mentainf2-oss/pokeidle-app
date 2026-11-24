@@ -2,7 +2,11 @@
 
 Userscript do Tampermonkey para o [PokeIdle](https://pokeidle.io): lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas para upar e revender, boss e tokens, Prey, análise de mercado e decisões com a API do Claude.
 
-## Instalar
+## App de PC (sem Tampermonkey)
+
+A pasta [desktop/](desktop/) tem o app de PC: o PokeIdle App rodando em até 4 contas, com a aba Lucro, contas irmãs e papéis. Baseado no Idleterino (MIT). Veja [desktop/README.md](desktop/README.md).
+
+## Instalar (Tampermonkey)
 
 1. Instale a extensão Tampermonkey no navegador.
 2. Abra [pokeidle-app.user.js (raw)](https://raw.githubusercontent.com/mentainf2-oss/pokeidle-app/main/pokeidle-app.user.js). O Tampermonkey mostra a tela de instalação: clique em **Instalar**.

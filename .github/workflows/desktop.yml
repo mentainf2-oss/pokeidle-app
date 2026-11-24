@@ -1,0 +1,57 @@
+# Monta o app de PC (Windows e Linux) a cada mudança no app ou no script, e publica a versão no GitHub Releases.
+# O app instalado se atualiza sozinho por essas versões (com o token só de leitura salvo na aba Lucro).
+name: App de PC
+
+on:
+  push:
+    branches: [main]
+    paths: ['desktop/**', 'pokeidle-app.user.js', '.github/workflows/desktop.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-release
+  cancel-in-progress: false
+
+jobs:
+  versao:
+    runs-on: ubuntu-latest
+    outputs:
+      v: ${{ steps.v.outputs.v }}
+    steps:
+      - id: v
+        run: echo "v=1.0.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: versao
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Versão
+        run: npm version ${{ needs.versao.outputs.v }} --no-git-tag-version --allow-same-version
+      - name: Dependências
+        run: npm install --no-audit --no-fund
+      - name: Junta o PokeIdle App no preload das contas
+        run: node tools/montar-preload.js
+      - name: Instalador do Windows
+        if: runner.os == 'Windows'
+        run: npx electron-builder --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: AppImage e .deb do Linux
+        if: runner.os == 'Linux'
+        run: npx electron-builder --linux --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

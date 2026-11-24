@@ -1,0 +1,115 @@
+{
+  "name": "pokeidle-app-desktop",
+  "productName": "PokeIdle App",
+  "version": "1.0.0",
+  "description": "PokeIdle App no PC: o nosso app de mercado, casas, boss e estudo rodando em até 4 contas, com painel de lucro e coordenação entre contas. Baseado no Idleterino (MIT).",
+  "author": "mentainf2-oss",
+  "license": "MIT",
+  "homepage": "https://github.com/mentainf2-oss/pokeidle-app",
+  "repository": "github:mentainf2-oss/pokeidle-app",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "node tools/montar-preload.js && electron-builder --win",
+    "dist:linux": "node tools/montar-preload.js && electron-builder --linux",
+    "montar": "node tools/montar-preload.js"
+  },
+  "dependencies": {
+    "electron-updater": "^6.6.2",
+    "qrcode-generator": "^1.4.4"
+  },
+  "devDependencies": {
+    "electron": "45.2.1",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "com.mentainf2.pokeidleapp",
+    "productName": "PokeIdle App",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "mentainf2-oss",
+        "repo": "pokeidle-app",
+        "private": true,
+        "releaseType": "release"
+      }
+    ],
+    "files": [
+      "main.js",
+      "preload.js",
+      "poke-preload.js",
+      "pokeidle.js",
+      "platforms/**/*",
+      "renderer/**/*",
+      "build/icon.png",
+      "extensions.js",
+      "diario.js",
+      "seguranca.js",
+      "overlay.html",
+      "comercio.js",
+      "fichaImagem.js",
+      "celular.js",
+      "poke-preload.gerado.js",
+      "pkapp-main.js",
+      "pokeidle-app.user.js"
+    ],
+    "protocols": [
+      {
+        "name": "PokeIdle App",
+        "schemes": [
+          "pokeidleapp"
+        ]
+      }
+    ],
+    "electronFuses": {
+      "enableCookieEncryption": true,
+      "runAsNode": false,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "onlyLoadAppFromAsar": true,
+      "enableEmbeddedAsarIntegrityValidation": true
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "artifactName": "PokeIdleApp-Setup.exe",
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "PokeIdle App",
+      "runAfterFinish": true
+    },
+    "portable": {
+      "artifactName": "PokeIdleApp-portatil.exe"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "build/icon.png",
+      "category": "Network",
+      "executableName": "pokeidle-app",
+      "synopsis": "PokeIdle App: mercado, casas, boss e lucro em várias contas",
+      "maintainer": "mentainf2-oss <mentainf2-oss@users.noreply.github.com>",
+      "syncDesktopName": true
+    },
+    "appImage": {
+      "artifactName": "PokeIdleApp-linux.AppImage"
+    },
+    "deb": {
+      "artifactName": "PokeIdleApp-linux.deb"
+    }
+  },
+  "desktopName": "pokeidle-app.desktop"
+}

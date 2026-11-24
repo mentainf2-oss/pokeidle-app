@@ -1,0 +1,252 @@
+// Idleterino — guia de ajuda: as dúvidas mais comuns, com busca. Cada item: [categoria, pergunta, passos/resposta].
+// Linhas que começam com "1." viram passos numerados; o resto, parágrafos.
+window.HELP = [
+  ['Primeiros passos', 'Por onde eu começo?', [
+    '1. Em Twitch e Kick, clique em "Entrar com…" e faça login na página oficial de cada uma.',
+    '2. Em PokeIdle, clique em "＋ Adicionar conta", dê um nome e entre no jogo, como no navegador.',
+    '3. No Início você vê tudo junto: lives, pontos, bônus ativos e as suas contas do jogo.',
+    'Não usa a Kick ou a Twitch? Desligue em Ajustes: o que fica desligado não gasta memória.',
+  ]],
+  ['PokeIdle', 'Como adicionar uma conta do PokeIdle?', [
+    '1. Vá em PokeIdle e clique em "＋ Adicionar conta".',
+    '2. Dê um nome para reconhecer a conta (ex.: Principal, ALT 1). O endereço já vem como https://pokeidle.io/app.',
+    '3. Clique em Adicionar e entre no jogo pela tela de login dele (Google, Discord ou e-mail e senha).',
+    'Se a conta estiver aberta em outro lugar (navegador, IdleDeck), ela cai lá quando entrar aqui: o jogo deixa uma conexão por conta.',
+  ]],
+  ['PokeIdle', 'Quantas contas eu posso ter?', [
+    'O PokeIdle permite até 4 contas por pessoa e identifica as contas pelo IP. As que passarem disso são removidas pelo jogo.',
+    'Por isso o app trava em 4 contas do PokeIdle e nunca oferece forma de burlar essa regra.',
+  ]],
+  ['PokeIdle', 'Posso entrar com o Gmail (Google)?', [
+    'Pode. Clique em "Login com Google" na tela do jogo e siga a página oficial do Google.',
+    'Se aparecer "Não foi possível fazer o login", clique em ↻ (recarregar) na barra da conta e tente de novo. Persistindo, avise no Discord com um print.',
+  ]],
+  ['PokeIdle', 'Qual modo de tela eu escolho: Cena, Otimizado, Economia ou ULTRA?', [
+    'São os mesmos modos do próprio jogo, e a escolha é sua, conta por conta, na barra em cima do jogo.',
+    'Cena: o jogo completo, com a batalha. Otimizado: sem animações de golpe. Economia: sem a cena, só estatísticas.',
+    'ULTRA (★ sugerido para as ALTs): só uma caixa com os números. Nos testes gastou ~30% menos memória e quase nada de CPU.',
+    'Em Ajustes do PokeIdle dá para ligar o "ULTRA automático no fundo": as contas que você não está olhando passam para o ULTRA sozinhas.',
+    'Em todos os modos a conta continua caçando e online.',
+  ]],
+  ['PokeIdle', 'O app vai pesando com o tempo. O que é "Otimizar"?', [
+    'Com horas aberta, a página do jogo vai acumulando memória e CPU, mesmo no modo Economia. "⚡ Otimizar" fecha e abre a conta num processo novo e libera tudo isso.',
+    'O login continua salvo e a contagem da sessão do jogo também. A conta fica fora só alguns segundos.',
+    'O botão mostra quanta memória a conta usa agora (fica laranja acima de 700 MB). "⚡ Otimizar todas" faz uma por vez.',
+    'Em Ajustes do PokeIdle, "Otimizar sozinho" faz isso a cada 30 min, 1 h, 2 h ou 5 h, sempre no tempo escolhido (uma conta por vez).',
+  ]],
+  ['PokeIdle', 'Entrei com e-mail e senha e a tela travou. E agora?', [
+    'O app agora resolve sozinho: se o login deu certo mas a tela ficou parada, ele abre a conta de novo em alguns segundos (o mesmo que fechar e abrir o app).',
+    'Se a página do jogo congelar, ele também reabre a conta sozinho depois de 15 segundos.',
+    'Se aparecer "Falha na verificação" do Cloudflare, clique em ↻ na barra da conta e tente de novo. O "Confirme que é humano" é sempre você que marca.',
+  ]],
+  ['PokeIdle', 'O que é "Congelar"?', [
+    'Congelar troca a tela da conta por uma foto e para de desenhar o jogo. A conta continua conectada e caçando.',
+    'Clique na foto para voltar ao vivo. Ótimo para as ALTs: junto com o ULTRA, quase não gasta nada.',
+    'Em Ajustes do PokeIdle você pode ligar "Congelar ALTs sozinho" depois de alguns minutos sem abrir a conta.',
+  ]],
+  ['Extensões', 'Como conectar uma extensão (sniper, /hunt…)?', [
+    '1. Baixe a extensão do lugar oficial de quem fez. Ela vem como arquivo .zip, .crx ou como uma pasta.',
+    '2. Vá em Extensões, no menu da esquerda.',
+    '3. Arquivo .zip ou .crx: clique em "📦 Instalar .zip / .crx" e escolha o arquivo.',
+    '4. Pasta: clique em "📁 Instalar pasta" e escolha a pasta que tem o arquivo manifest.json dentro.',
+    '5. Pronto: a extensão aparece na lista, ligada. As contas do PokeIdle recarregam sozinhas para aplicar.',
+    'Para desligar, use o botão ao lado da extensão. Para tirar de vez, clique em Remover.',
+  ]],
+  ['PokeIdle', 'Dá para ver a principal junto com as ALTs?', [
+    'Sim. Com "▦ Ver juntas" ligado, aparece o botão "★ Principal junto / ★ Principal separada". Junto: a principal entra na grade com as ALTs. Separada: ela aparece sozinha e as ALTs ficam juntas.',
+  ]],
+  ['PokeIdle', 'Dá para ver as ALTs todas juntas, lado a lado?', [
+    'Sim. Em PokeIdle, clique em "▦ Ver ALTs juntas" (em cima, ao lado de Ajustes). Ao abrir uma ALT, todas as ALTs aparecem lado a lado, cada uma na sua coluna.',
+    'A conta principal (★) continua sempre sozinha. Por padrão é a primeira conta adicionada; para trocar, abra a conta certa e clique na estrela ☆ ao lado do nome.',
+    'Clique no nome em cima de uma coluna para controlar aquela ALT pela barra (modo, zoom, congelar…).',
+    'Dica: o modo ULTRA e o zoom menor (− na barra) deixam cada coluna mais leve e com mais coisa à vista. "▢ Ver ALTs uma por vez" volta ao normal.',
+  ]],
+  ['PokeIdle', 'Cliquei em "Votar no IdleHub.io" (ou num link de fora). Onde abre?', [
+    'Links de outros sites que o jogo abre (IdleHub, Discord, ChatGPT…) abrem no seu navegador padrão (Chrome, Edge…), fora do app.',
+    'No IdleHub.io, entre com uma conta Google (só para provar que é uma pessoa: não precisa ser a do jogo), confira o nick e confirme o voto. O nick já vai preenchido, então o diamante cai na conta certa: 1 diamante a cada 2 votos.',
+    'Vale 1 voto por dia por nick. O Início mostra quanto falta, com o tempo que o próprio jogo informa.',
+  ]],
+  ['PokeIdle', 'O mercado/RMT abre apertado e a barra de busca some. Como resolver?', [
+    'O jogo muda de layout conforme o espaço. Com mais espaço ele mostra a barra de busca e mais coisas.',
+    'Na barra de cima da conta, use o zoom (− 100% +): em 80% ou 90% o jogo cabe muito mais. Também dá para usar Ctrl + rodinha do mouse dentro do jogo.',
+    'O botão « (em cima da lista de contas) recolhe a lista: as contas viram chips com o nome no topo e o jogo fica com a largura toda. » abre a lista de novo.',
+    'O zoom fica salvo em cada conta.',
+  ]],
+  ['Extensões', 'Onde fica o painel da extensão (ex.: Cockpit do Rotom Sniper)?', [
+    'No Chrome, o painel abre pelo ícone da extensão na barra do navegador. No Idleterino, ele fica na tela de cada conta do PokeIdle.',
+    'Vá em PokeIdle, escolha a conta e clique no botão 🧩 com o nome da extensão, ao lado de Congelar.',
+    'Cada conta tem o seu painel, com os dados e as regras daquela conta. Abra o painel da conta que você quer usar.',
+    'Pegar a pasta de uma extensão que você já usa no Chrome ou no Edge: ela fica em AppData\\Local\\Google\\Chrome (ou Microsoft\\Edge)\\User Data\\Default\\Extensions\\<ID da extensão>\\<versão>. Copie essa pasta para outro lugar e instale com "📁 Instalar pasta".',
+  ]],
+  ['Extensões', 'Instalei e a extensão não funciona. E agora?', [
+    'Confira se ela está ligada na lista e se aparece algum aviso embaixo do nome ("Não carregou: …").',
+    'Clique em ↻ na conta do PokeIdle para recarregar o jogo.',
+    'Algumas extensões usam recursos que só existem no Chrome e não funcionam em apps. As que mexem só na página do jogo costumam funcionar.',
+  ]],
+  ['Extensões', 'Extensão é segura?', [
+    'Uma extensão roda dentro das suas contas do PokeIdle e consegue ver o que acontece nelas. Instale só de quem você confia.',
+    'Elas nunca entram nas sessões da Twitch e da Kick. E as regras do jogo continuam valendo com extensão.',
+  ]],
+  ['Twitch e Kick', 'Como os pontos funcionam?', [
+    'Cada live assistida rende 10 pontos a cada ~5 min (subs ganham mais). O app deixa 2 lives escondidas tocando em 160p, sem som.',
+    'Com o "Foco em bônus" ligado, as lives vão para os canais mais perto do próximo bônus.',
+    'Na Twitch, o baú de +50 é pego sozinho (dá para desligar em Ajustes da Twitch).',
+  ]],
+  ['Twitch e Kick', 'Como compro o bônus?', [
+    'Abra o canal e clique em "Loja": abre a loja oficial do canal. A compra é sempre feita por você.',
+    'Comprou pelo celular? Use o "+1h" em Bônus ativos para o cronômetro contar.',
+    'Nas contas do PokeIdle, o tempo de bônus da Twitch e da Kick aparece direto do jogo, no cartão da conta.',
+  ]],
+  ['Desempenho', 'O app está pesando no meu PC. O que faço?', [
+    '1. Coloque as ALTs em ULTRA (ou ligue o "ULTRA automático no fundo").',
+    '2. Congele as contas que você não está olhando.',
+    '3. Deixe "Lives ao mesmo tempo" em 2 e o "Modo leve (160p)" ligado.',
+    '4. Desligue em Ajustes a plataforma que você não usa (Twitch ou Kick).',
+  ]],
+  ['Segurança', 'Minhas contas estão seguras?', [
+    'Os logins ficam só no seu PC, criptografados pelo Windows. Não existe servidor do Idleterino e o app nunca lê nem guarda senhas.',
+    'Cada conta tem a sua sessão separada. Baixe o app só pelo site oficial ou pelo GitHub e mantenha um antivírus ligado.',
+    'Vai vender ou emprestar o PC? Em Ajustes, use "Apagar todos os logins deste PC".',
+  ]],
+  ['App', 'Como atualizo o Idleterino?', [
+    'Quando sai versão nova, aparece uma faixa no topo do Início. Ela baixa sozinha e, quando termina, mostra o botão "Atualizar agora": um clique e o app fecha, instala e abre de novo.',
+    'Também dá pelo ícone perto do relógio: botão direito > "Atualizar agora".',
+    'Na versão 0.1.6 ou antes (sem a faixa): botão direito no ícone perto do relógio > Sair, e abra de novo.',
+    'Versão portátil e .deb (Linux): a faixa avisa e o botão "Baixar no site" abre a página de download.',
+  ]],
+  ['Início', 'O que aparece no Início?', [
+    'Lembretes: evento do jogo, voto no IdleHub liberado (1 por dia, por conta) e bônus da Twitch/Kick acabando.',
+    'Farm: a conta principal num cartão e as ALTs somadas, com XP, ouro e abates por hora (o mesmo placar "Estatísticas da sessão" do jogo).',
+    'Mercado: seus anúncios e suas vendas de todas as contas, e as maiores vendas do servidor (Tabela de preços), em coins ou gemas. Atualiza sozinho a cada 10 min.',
+    'O app só consulta o mercado, pela conexão que a conta já tem aberta. Nunca compra, vende ou edita nada.',
+  ]],
+  ['Início', 'Como funciona a meta de XP (🎯)?', [
+    'No cartão de cada conta aparece em quanto tempo ela chega no próximo nível e no nível que libera a próxima hunt.',
+    'A conta usa o seu XP/h da sessão e os bônus de XP de treinador (VIP, Twitch, Kick, guild, evento…): quando um bônus acaba, o ritmo cai e o tempo já leva isso em conta.',
+    'Passe o mouse em cima da meta para ver quais bônus estão valendo e quando cada um acaba.',
+  ]],
+  ['Início', 'O que é a "Melhor hunt agora" (🧭)?', [
+    'São duas opções: ⚡ "Quer mais XP" (a hunt liberada que mais rende XP para o pokémon em campo) e 💰 "Quer mais ouro" (a que mais rende ouro, já descontando o risco de gastar poção). Quando é a mesma hunt, aparece "Melhor em XP e ouro". O "+X%" compara com a hunt em que você está.',
+    'A conta calcula quanto tempo o seu pokémon leva para derrubar cada selvagem, com as fórmulas do próprio jogo: os stats e golpes dele (e o Z-Move) contra a vida e a defesa da espécie no nível da hunt, a efetividade ampliada da hunt (×2 vira ×2,5; ×4 vira ×5,5; ×0,5 vira ×0,33), o IV de Speed, o AoE (o golpe pega o bando inteiro) e a bicicleta equipada (só a caminhada). Depois soma o XP e o ouro por abate e o quanto o seu pokémon apanha lá ("pouca poção", "gasta poção", "gasta muita poção").',
+    'Hunt em que a conta já ficou 10 min ou mais com o mesmo pokémon usa o número MEDIDO e acerta a escala das outras. Passe o mouse para ver as melhores e o que entrou na conta. Trocou o pokémon em campo, a sugestão muda.',
+  ]],
+  ['PvP', 'O que tem na aba PvP?', [
+    'Meta: a tier list dos arquétipos do top 50 (times que dividem 3 ou mais pokémon), com quantos usam, PR médio, taxa de vitória e se subiu ou caiu nos últimos dias; os pokémon e tipos mais usados; e o top 50 com as equipes.',
+    'Meu time: o seu time contra cada arquétipo do topo (simulado), o melhor time com o que você tem, o Upgrade (quem trocar e por quem), o time anti-meta sem limite de pokémon com o preço no Market, o orçamento em gemas e quem mais vence cada arquétipo.',
+    'Planejador: escolha até 5, escolha o adversário (um arquétipo) e veja os dois lados do tabuleiro: o time dele como costuma ficar e o seu posicionamento contra ele, com a chance de vencer e dicas. Cada um fica na fileira da distância dele: sem distância na 1ª (a frente), distância 2 na 2ª ou 3ª, distância 3 na 4ª e distância 4 na 5ª (a última).',
+    'Histórico: tier, PR, pico, vitórias e derrotas, sequência, quando o PR começa a cair e o gráfico do PR dos últimos 30 dias.',
+  ]],
+  ['PvP', 'Como o app calcula quem vence?', [
+    'Com o duelo 1×1 do próprio jogo (o mesmo do "Comparar" e do ginásio): status no nível, IV, qualidade, potência, refino, shiny, golpe, STAB, tipos e Z-Move.',
+    'O seu time contra um time do topo = cada um seu contra cada um dele. A "força" junta o melhor seu contra cada adversário e a média de todos os duelos.',
+    'O time anti-meta usa um pokémon "do tamanho do topo" (nível, IV, refino, qualidade, potência e shiny medianos do top 50) de cada espécie forte do jogo, inclusive Mega.',
+    'É estimativa: a luta de verdade tem posicionamento, alcance e AoE, que o planejador mostra à parte.',
+  ]],
+  ['PvP', 'O app compra no Market?', [
+    'Não. Ele só consulta o preço "a partir de" (o mais barato à venda) e quantas ofertas existem, na atualização do meta.',
+    'Em "🔔 Avisar quando baratear", o app confere a cada 30 min e manda um aviso quando aparecer bem abaixo do preço de costume. A compra é sempre sua, no Market do jogo.',
+  ]],
+  ['PvP', 'De onde vem o meta e de quanto em quanto tempo atualiza?', [
+    'Do próprio jogo: a tabela do Ranqueado e a equipe pública de cada jogador do top 50 (a mesma que aparece ao clicar no nome dele).',
+    'A conta principal lê sozinha uma vez por dia, uma consulta a cada poucos segundos (uns 5 minutos no total). O jogo segue normal e nada abre na sua tela.',
+    'O resultado fica salvo neste PC. Dá para pedir de novo em "Atualizar meta" (30 min depois da última leitura).',
+  ]],
+  ['Extensões', 'O Rotom Sniper e o /hunt já vêm no app?', [
+    'Sim. O Idleterino baixa as duas da Chrome Web Store (a fonte oficial) na primeira vez que abre, e confere versão nova uma vez por dia.',
+    'Rotom Sniper: a extensão oficial do PokeIdle (painel no botão 🧩 de cada conta). /hunt: mostra as melhores hunts para o seu pokémon; só mostra, não joga sozinha.',
+    'Não quer alguma? Em Extensões, desligue ou remova. Removida não volta sozinha; o botão "Instalar" traz de volta.',
+  ]],
+  ['PokeIdle', 'Como uso o Precificador de Pokémon?', [
+    '1. No jogo, abra a ficha do Pokémon e clique em "Copiar p/ ChatGPT".',
+    '2. No Idleterino, clique em 🏷 Precificador (no PokeIdle, no Mercado do Início ou em Extensões).',
+    '3. Cole o texto, marque Z-Move e AoE se ele tiver, e clique em Precificar.',
+    'Ferramenta feita pelo briaoale, a partir das vendas do mercado. Abre numa janela própria, sem acesso às suas contas.',
+  ]],
+  ['Twitch e Kick', 'Entrou streamer novo no PokeIdle. Preciso adicionar?', [
+    'Não. O app lê a lista oficial de canais que o próprio jogo mostra (Bônus Twitch e Bônus na Kick) e adiciona sozinho os canais novos com "Pontos ativos".',
+    'Canal que você removeu da lista não volta sozinho.',
+  ]],
+  ['Twitch e Kick', 'A loja da Kick agora tem bônus de 3h, 5h e 10h. O app entende?', [
+    'Sim. Em Kick, o seletor de bônus tem os 12 pacotes (XP, Capture Boost e Secret Lure em 1, 3, 5 e 10 h), igual à Twitch.',
+    'O cronômetro da Kick usa o tempo que o próprio jogo mostra quando uma conta do PokeIdle está aberta no app.',
+  ]],
+  ['App', 'Fechei a janela e o app continuou rodando?', [
+    'Sim, de propósito: ele fica na bandeja, perto do relógio, juntando pontos e com as contas conectadas.',
+    'Para sair de vez: botão direito no ícone > Sair, ou Ajustes > Sair do app.',
+  ]],
+  ['Vigia e avisos', 'Como recebo aviso no celular quando uma conta para?', [
+    '1. Ajustes > Vigia e avisos: ligue "Aviso no celular (ntfy)".',
+    '2. Instale o app ntfy no celular (gratuito, sem cadastro).',
+    '3. Android: leia o QR code com a câmera. iPhone: no ntfy, toque em + e cole o nome do canal que aparece no app.',
+    '4. Toque em "Testar". A notificação chega até com a tela bloqueada, no Wi-Fi ou no 4G.',
+    'O aviso leva só o nick e o que aconteceu (parada, caiu, travou, shiny, Market, relatório). Nunca login nem senha.',
+  ]],
+  ['Vigia e avisos', 'E pelo Discord?', [
+    '1. No Discord, num servidor ou canal SEU: Configurações do canal > Integrações > Webhooks > Novo webhook > Copiar URL.',
+    '2. No Idleterino: Ajustes > Vigia e avisos > cole o link em "Aviso no Discord" > Salvar > Testar.',
+    'Quem tiver o link do webhook consegue mandar mensagem no canal: não compartilhe.',
+  ]],
+  ['Vigia e avisos', 'O que o vigia considera "conta parada"?', [
+    'Conta logada que não ganha XP há 5 min (dá para mudar para 3, 10, 15 ou 30 min). Costuma ser pokémon morto, poção acabada ou a conta parada num menu.',
+    'Também avisa quando a conta cai ou desloga (2 min fora) e quando trava e o app reabre sozinho.',
+  ]],
+  ['Vigia e avisos', 'Como ver as contas no celular sem notificação?', [
+    '1. Ajustes > Painel no celular: ligue o painel.',
+    '2. Na primeira vez, o Windows pergunta se o Idleterino pode usar a rede: escolha só "Redes privadas".',
+    '3. Leia o QR code com a câmera do celular, no mesmo Wi-Fi do PC.',
+    'É só leitura: nível, XP/h, ouro/h, horas e se alguma conta está parada. Tem código de acesso e não sai da sua casa. "Trocar o código" invalida o link antigo.',
+  ]],
+  ['Noite e recap', 'Como funciona o "Vou dormir"?', [
+    '1. No Início, clique em "🌙 Vou dormir". O app mostra cada conta: se está logada, se a hunt gasta muita poção e qual hunt rende mais com pouca poção.',
+    '2. Troque a hunt no jogo se quiser (o app não troca nem joga por você) e clique em "Boa noite!".',
+    '3. Todas vão para o ULTRA e o Otimizar liga a cada 1 h.',
+    'Quando você voltar ao PC (depois de 4 h), tudo volta como estava e aparece o relatório "Bom dia, treinador", que dá para copiar e postar. Também dá para clicar em "☀ Acordei".',
+  ]],
+  ['Noite e recap', 'O que é o Wrapped e o Cartão do Treinador?', [
+    'O Wrapped é a retrospectiva da semana ou do mês: horas de farm, XP, ouro, hunt favorita, shinys e o melhor dia. No fim vira uma imagem para copiar e postar.',
+    'O Cartão do Treinador mostra a sua principal, as horas de farm, os shinys e as conquistas.',
+    'Os números começam a contar a partir da 0.3.0 e ficam só no seu PC.',
+  ]],
+  ['PokeIdle', 'O que são as horas na lista de contas?', [
+    '"Logada há" é desde quando a conta está logada sem cair. "Hoje" e "7 dias" somam todo o tempo logada pelo Idleterino.',
+  ]],
+  ['Extensões', 'Dá para instalar sem baixar zip nem pasta?', [
+    '1. Abra a página da extensão na Chrome Web Store (vale para quem usa Chrome, Opera, Opera GX, Edge ou Brave) ou na loja do Opera.',
+    '2. Copie o link da barra de endereço.',
+    '3. Em Extensões, clique em "🔗 Instalar pelo link" e cole. O app baixa da loja oficial e mostra o que a extensão pode fazer antes de instalar.',
+    'Ou use "📥 Trazer do meu navegador": o app acha as extensões do PokeIdle que você já tem no navegador e baixa a cópia oficial da loja.',
+  ]],
+  ['Extensões', 'O que é "✔ verificada" e "⚠ por sua conta"?', [
+    'Verificada: o Idleterino conhece e confere (ex.: Rotom Sniper, /hunt). Atualiza sozinha.',
+    'Por sua conta: o app instala, mas não conferiu. Ela só se atualiza quando você aceitar, e o app mostra antes se a versão nova pede permissões novas.',
+    'Qualquer extensão roda dentro das contas do PokeIdle e pode ver o que acontece nelas, inclusive o login do jogo. Instale só de quem você confia.',
+  ]],
+  ['Segurança', 'Uma atualização deu problema. Como volto atrás?', [
+    'Ajustes > Backups e versões:',
+    '1. "Restaurar" volta contas, canais, ajustes e extensões como estavam no dia escolhido (os logins não mudam).',
+    '2. "Ver versões anteriores" > "Voltar para a 0.x.x": o app baixa a versão do GitHub, confere a assinatura, instala e abre sozinho. A versão com problema não volta sozinha; a correção chega normalmente.',
+    'Se a mesma versão fechar sozinha 3 vezes seguidas ao abrir, o próprio app oferece essas saídas.',
+    'No portátil e no Linux, baixe a versão anterior em github.com/ViinniSantoos/idleterino/releases.',
+  ]],
+  ['Noite e recap', 'Como funciona o Laboratório de hunts?', [
+    '1. No Início, clique em "🧪 Laboratório", escolha a conta e clique em "Começar".',
+    '2. Cace na primeira hunt. Quando quiser, troque de hunt no jogo: o app percebe a troca e mede cada uma separado.',
+    '3. Com pelo menos 2 hunts de 10 min cada, clique em "Ver o veredito": a que dá mais XP e a que dá mais ouro, com a imagem para postar.',
+    'O app só mede (com o placar do próprio jogo): quem troca de hunt é você. Não troque o pokémon em campo no meio do teste.',
+  ]],
+  ['Noite e recap', 'Como coloco o Idleterino na minha live (OBS)?', [
+    '1. Ajustes > Modo Streamer: ligue o overlay e escolha o tamanho (Mini, Barra ou Cartão) e as cores.',
+    '2. Clique em "Copiar link".',
+    '3. No OBS: Fontes > + > Navegador (Browser) > cole o link em URL. Mini: 300 × 42. Barra: 560 × 52. Cartão: 290 × 120. O fundo já é transparente.',
+    'É fixo e pequeno, para um canto sem cobrir o jogo. Mostra a sua principal: nick, nível, XP ganho na live, XP/h e shinys, com animação quando aparece shiny ou sobe de nível. "Testar animação" mostra como fica. Zere a contagem no começo de cada live.',
+    'O overlay só funciona neste PC (o OBS precisa estar no mesmo computador). Ninguém da internet acessa.',
+  ]],
+  ['Comércio da guild', 'Como meus anúncios aparecem no #comércio da guild no Discord?', [
+    'Guild TFT: o canal oficial (comercio-tft) já vem configurado. Em Ajustes > Comércio da guild, ponha o seu Discord e ligue "Postar os anúncios" nas contas que quiser. Cada anúncio vira um tópico no fórum.',
+    'Outra guild: o líder cria um webhook no canal de comércio (Editar canal > Integrações > Webhooks > Novo) com a tag da guild entre colchetes no nome, ex.: "Comércio [ABC]", e passa o link só para os membros; cada um cola em "Outro canal".',
+    'Pronto: o que você anunciar no Market do jogo aparece no canal em até 5 min, com preço, IV, qualidade e potência. Vendeu? O post vira "VENDIDO". Tirou do Market? Vira "RETIRADO".',
+    'Cada post tem o botão "Abrir no Idleterino": quem clica cai direto no anúncio, no Market do jogo dentro do app (na conta logada; se ela estiver no ULTRA, sai dele enquanto o Market estiver aberto e volta depois). Na primeira vez o navegador pergunta se pode abrir o Idleterino. A compra é você quem confirma.',
+    'Só posta conta que é de fato da guild do canal (o app lê a guild no jogo). Nada é postado sem você ligar a conta. O app não compra nem vende nada.',
+    'O link do webhook é a chave do canal. Se vazar, o líder apaga o webhook e cria outro.',
+  ]],
+];

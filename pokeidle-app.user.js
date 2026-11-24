@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.32
+// @version      5.33
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -31,6 +31,7 @@
 
 (function () {
   'use strict';
+  const VERSAO_APP = '5.33';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -256,6 +257,7 @@
     if (s.evento !== undefined) M.evento = s.evento;
     if (s.casa?.lista) sincronizarCasas(s.casa.lista);
     if (typeof s.level === 'number') M.nivel = s.level; else if (typeof s.nivel === 'number') M.nivel = s.nivel;
+    if (typeof s.nick === 'string' && s.nick) M.nick = s.nick;
     if (s.boss && typeof s.boss === 'object') { M.emBoss = !!(s.boss.key || s.boss.dentro); if ('auto' in s.boss) M.bossAuto = s.boss.auto; }
   }
   function receber(txt) {
@@ -1222,6 +1224,7 @@
   async function comprar(a, ctx) {
     if (a.moeda !== 'gold' && a.moeda !== 'orb') return false;
     if (a.moeda === 'orb' && !CFG.gemasAtivas) return false;   // Gemas só com a chave de Gemas ligada
+    if (ehIrma(a)) { avisoRaro('irma' + a.id, `👥 ${ctx.nome}: o anúncio é de outra conta sua — não compro`, 60); return false; }
     if (M.agendados.has(a.id)) return false;
     const moeda = a.moeda, qtd = ctx.qtd || 1, total = a.preco * qtd;
     ctx = { ...ctx, moeda };
@@ -1501,7 +1504,7 @@
     const med = M.medias[id]?.[moeda]?.media, min = moeda === 'orb' ? M.resumo[id]?.minOrb : M.resumo[id]?.minGold;
     if (!med && !min) return null;
     const lista = M.listaItem?.[id + ':' + moeda]; if (!lista) return null;               // sem a lista dos outros vendedores não dá para saber o degrau
-    const outros = lista.linhas.filter((a) => a.id !== meuId && !M.meus.some((x) => x.id === a.id)).map((a) => a.preco);
+    const outros = lista.linhas.filter((a) => a.id !== meuId && !M.meus.some((x) => x.id === a.id) && !ehIrma(a)).map((a) => a.preco);
     const menor = outros.length ? Math.min(...outros) : min || med;
     const degrau = moeda === 'orb' ? (menor > 20 ? 1 : 0) : Math.max(1, Math.round(menor * 0.005));
     let p = Math.min(menor - degrau, med || Infinity);
@@ -1716,6 +1719,9 @@
 
     return !!ok;
   }
+  // 👥 contas irmãs (app de PC com várias contas): anúncio de uma conta sua não é concorrência nem oportunidade
+  M.irmas = { ids: new Set(), nicks: new Set() };
+  const ehIrma = (a) => !!a && ((a.vendedorId != null && M.irmas.ids.has(String(a.vendedorId))) || (a.vendedor && M.irmas.nicks.has(String(a.vendedor).toLowerCase())));
   // quantos da mesma espécie o app já tem em andamento (casas, fila de venda, vitrine e compras pendentes)
   function emAndamento(nome) {
     const n0 = String(nome || '').replace(/ Nv .*$/, '').trim(); if (!n0) return 0;
@@ -1815,7 +1821,7 @@
     const resp = await pedirM(listarPokemon({ moeda, soShiny: !!shiny, busca: nome, ordem: 'baratos', nivelMin: String(Math.floor(nv * 0.85)), nivelMax: String(Math.ceil(nv * 1.2)), notaMin: nota ? String(Math.max(3.5, nota - 0.05).toFixed(2)).replace('.', ',') : '' }), 'vitrine');
     if (!resp) return null;
     const meus = new Set([...M.meus.map((x) => String(x.id)), ...excluirIds.map(String)]);
-    const L = (resp.linhas || []).filter((x) => x.moeda === moeda && !meus.has(String(x.id)) && x.ficha?.nome === nome && !!x.ficha.shiny === !!shiny && ((pot === 5) === (x.ficha.potencia === 5)) && (!nota || (x.ficha.nota ?? 0) >= nota - 0.05)).sort((x, z) => x.preco - z.preco);
+    const L = (resp.linhas || []).filter((x) => x.moeda === moeda && !meus.has(String(x.id)) && !ehIrma(x) && x.ficha?.nome === nome && !!x.ficha.shiny === !!shiny && ((pot === 5) === (x.ficha.potencia === 5)) && (!nota || (x.ficha.nota ?? 0) >= nota - 0.05)).sort((x, z) => x.preco - z.preco);
     const r = L.length ? { preco: L[0].preco, nv: L[0].ficha.level, nota: L[0].ficha.nota, n: L.length } : { preco: null, n: 0 };
     M.concCache[k] = { em: Date.now(), r }; return r;
   }
@@ -3712,7 +3718,41 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     }
   }
 
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, estudoToken, resultadoBossDia, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.32' }, configurable: true }); } catch {}
+  // ---- ponte com o app de PC (várias contas): resumo da conta, contas irmãs e papel de cada conta ----
+  const PAPEIS = {
+    tudo: { compras: true, sniperPk: true, sniperIt: true, casas: true, boss: true },
+    boss: { compras: true, sniperPk: false, sniperIt: false, casas: false, boss: true },
+    casas: { compras: true, sniperPk: true, sniperIt: false, casas: true, boss: false },
+    mercado: { compras: true, sniperPk: true, sniperIt: true, casas: false, boss: false },
+  };
+  const ponteDesktop = {
+    resumoConta() {
+      const r24 = resumoReal(24), r7 = resumoReal(168), cb = cambioImplicito()?.taxa || 0, vg = vagasPk(), bd = (() => { try { return resultadoBossDia(); } catch { return null; } })();
+      const rv = (() => { try { return revendasDoApp(7); } catch { return []; } })();
+      return JSON.parse(JSON.stringify({
+        nick: M.nick || null, vendedorId: meuId(), versao: VERSAO_APP, ligado: !!M.ligado, simulacao: !!CFG.simulacao, papel: CFG.papel || 'tudo', mod: CFG.mod,
+        coins: M.gold ?? null, gemas: M.gemas ?? null, tokens: M.tokens ?? null, gemasHoje: E.gemasHoje, gastoHoje: E.gastoHoje, limiteGemasDia: CFG.gemasMaxPorDia, cambio: cb || null,
+        vitrine: { usadas: vg.usadas, livres: vg.livres, fila: (E.filaVenda || []).length }, giro: (() => { try { return emGiro(); } catch { return false; } })(),
+        real: E.real ? { em: E.real.em, d1: r24, d7: r7 } : null,
+        revendas7: { n: rv.length, lucroC: rv.reduce((s2, x) => s2 + x.lucroC, 0) },
+        boss: bd && { lutas: bd.lutas, vit: bd.vit, porHora: bd.porHora, drops: bd.drops, recebido: bd.recebido, pendente: bd.pendente, custo: bd.custo, lucro: bd.lucro },
+        emBoss: !!M.emBoss, bossAuto: !!M.bossAuto,
+        casas: Object.values(E.postos || {}).filter(Boolean).map((p) => ({ nome: p.nome, nv: p.xp ? nivelDeXp(p.xp) : null, bot: !!p.bot, shiny: !!p.shiny })),
+        ideias: M.estudo?.ideias || [], log: M.log.slice(0, 25).map((l) => ({ t: l.t, msg: l.msg, tipo: l.tipo })),
+      }));
+    },
+    definirIrmas(lista) {
+      M.irmas = { ids: new Set((lista || []).map((x) => x && x.vendedorId).filter((x) => x != null).map(String)), nicks: new Set((lista || []).map((x) => x && x.nick).filter(Boolean).map((x) => String(x).toLowerCase())) };
+      return { ids: M.irmas.ids.size, nicks: M.irmas.nicks.size };
+    },
+    aplicarPapel(papel) {
+      const p = PAPEIS[papel]; if (!p) return false;
+      CFG.papel = papel; Object.assign(CFG.mod, p); salvarCfg(); log(`👥 papel desta conta: ${papel} (definido no app de PC)`, 'ok'); pintar(); return true;
+    },
+    papeis: () => Object.keys(PAPEIS),
+  };
+  try { Object.defineProperty(PAGINA, '__PKAPP_PONTE', { value: ponteDesktop, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, estudoToken, resultadoBossDia, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: VERSAO_APP }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));
