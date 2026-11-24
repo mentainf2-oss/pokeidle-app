@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.25
+// @version      5.26
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -54,14 +54,14 @@
     compraNivelMax: 200, compraNotaMin: 3.6, compraPrecoMax: 60_000_000,
     evitarOutland: true,                                           // nunca compra pokémon de Outland (#2001–2999)
     // compra para casa: só o que dá muito lucro, uma busca por casa a cada X min, poucas compras por dia
-    casaLucroMin: 40_000_000, casaMargemMin: 0.6, casaLucroHMin: 1_000_000, casaBuscaMin: 15, casaComprasDia: 12, casaVendasMinAlvo: 4,
+    casaLucroMin: 40_000_000, casaMargemMin: 0.6, casaLucroHMin: 1_000_000, casaBuscaMin: 15, casaComprasDia: 0, casaVendasMinAlvo: 4,
     // vitrine: até 10 pokémon anunciados; anúncio parado baixa um pouco de preço (nunca abaixo do custo)
     vagasPk: 10, pkReajusteH: 8, pkReajustePct: 0.04, pkReajusteCadaMin: 120,
     // ritmo de pedidos ao servidor (ele segura rajadas por conta)
     pedidoMinMs: 1500, pedidosPorMin: 24,
     vendaFatorMediana: 0.95, vendaDias: 7, especiesPreferidas: [],
     vendaRapida: true, fatorRapido: 0.9, mexerEmTodos: true,   // vender rápido (com lucro) e gerir todos os seus anúncios, não só os do app
-    casaDaColecao: true, casaNaoParar: true, filaMax: 8,         // casa pronta com vitrine cheia: vai para a fila e entra outro
+    casaDaColecao: true, casaNaoParar: true, filaMax: 15,         // casa pronta com vitrine cheia: vai para a fila e entra outro
     alvoPorPokemon: true, nivelMaxCasa: 1000, trocarParaCoinsH: 6,
     // giro rápido da vitrine (no evento de XP upar é barato: vender mais rápido, com menos lucro por pokémon)
     // estudo contínuo do mercado: o que vale, o que vende rápido e o que deu lucro decide o que comprar
@@ -69,7 +69,7 @@
     giro: 'auto', giroFator: 0.82, giroFatorGemas: 0.9, giroNivelMax: 500, giroTrocaH: 2, giroPasso: 0.06, giroMargem: 0.01, giroCasaFator: 0.5,
     negociar: true, negociarMaxRespostas: 8,
     // shiny nas casas (em Gemas): desligado até você ligar
-    casaShiny: true, casaShinyPrecoMax: 5000, casaShinyNvMax: 300, casaShinyLucroMin: 800, casaShinyMargemMin: 0.35, casaShinyDia: 2, casaShinyVendasMin: 40, casaShinyBuscas: 2,
+    casaShiny: true, casaShinyPrecoMax: 5000, casaShinyNvMax: 300, casaShinyLucroMin: 800, casaShinyMargemMin: 0.35, casaShinyDia: 0, casaShinyVendasMin: 40, casaShinyBuscas: 2,
 
     // itens
     margemMin: 0.08, liquidezMin: 30, maxUnidadesPorItem: 5,
@@ -128,6 +128,9 @@
   }
   if (!CFG.migShiny521) {                                         // v5.21: o jogador pediu shiny nas casas, até 5k 💠, só os muito vendidos
     CFG.casaShiny = true; CFG.casaShinyPrecoMax = 5000; CFG.casaShinyVendasMin = CFG.casaShinyVendasMin || 40; CFG.migShiny521 = true; salvarCfg();
+  }
+  if (!CFG.migSemLimite526) {                                     // v5.26: o jogador pediu sem limite de quantidade (o lucro e a conferência decidem)
+    CFG.casaComprasDia = 0; CFG.casaShinyDia = 0; CFG.filaMax = Math.max(CFG.filaMax || 0, 15); CFG.migSemLimite526 = true; salvarCfg();
   }
   if (!E.casaContaReal) { E.casaComprasHoje = null; E.casaShinyHoje = null; E.casaContaReal = true; }   // v5.25: a conta antiga somava sorteios perdidos
   for (const r of E.regras || []) r.reservadas = 0;                 // compras agendadas não sobrevivem a recarregar a página
@@ -1128,7 +1131,7 @@
     }).join('');
     const pos = R.familias.filter((f) => f.ganho > 0).length;
     return `<div class="kv" style="margin:0 0 6px"><span>Vendas de shiny</span><b>${fmt(R.nShiny)} (~${fmt(Math.round(R.nShiny / R.dias))}/dia)</b><span>Famílias que valem mais alto</span><b>${pos} de ${R.familias.length}</b>
-      <span>Casa com shiny</span><b class="${CFG.casaShiny ? 'bom' : 'mudo'}">${CFG.casaShiny ? `ligada · até ${fmt(CFG.casaShinyPrecoMax)} 💠 (limite do dia ${fmt(CFG.gemasMaxPorDia)}), lucro ≥ ${fmt(CFG.casaShinyLucroMin)} 💠, ${CFG.casaShinyDia}/dia` : 'desligada (Config → Casas)'}</b></div>
+      <span>Casa com shiny</span><b class="${CFG.casaShiny ? 'bom' : 'mudo'}">${CFG.casaShiny ? `ligada · até ${fmt(CFG.casaShinyPrecoMax)} 💠 (limite do dia ${fmt(CFG.gemasMaxPorDia)}), lucro ≥ ${fmt(CFG.casaShinyLucroMin)} 💠, ${CFG.casaShinyDia > 0 ? CFG.casaShinyDia + '/dia' : 'sem limite por dia'}` : 'desligada (Config → Casas)'}</b></div>
       <table><tr><th>Nível</th><th class="num">✨ shiny 💠</th><th class="num">normal 💠</th><th class="num">Shiny vale</th></tr>${fx}</table>
       <p class="mudo" style="margin:6px 0 2px">Mediana das vendas sem os adicionais (Mega, Z, AoE). Por família: comprado baixo (Nv ≤ 200) e vendido no Nv 500–1.200, já sem a taxa das Gemas. Horas numa casa a 25%.</p>
       <p style="margin:6px 0 2px"><b>Compra liberada só para:</b> ${shinyUteis().map((f) => `${esc(f.nome)} <span class="mudo">(${f.vendas})</span>`).join(', ') || '—'} <span class="mudo">— ≥ ${CFG.casaShinyVendasMin} vendas de shiny em 30 dias, ≥ 5 no nível alto</span></p>
@@ -1609,7 +1612,7 @@
     if (ag - (E.casaBusca[cid] || 0) < CFG.casaBuscaMin * 60_000) return;          // uma busca por casa a cada X min
     E.casaBusca[cid] = ag; persistir();
     const feitas = E.casaComprasHoje?.dia === E.dia ? E.casaComprasHoje.n : 0;
-    if (feitas >= CFG.casaComprasDia) return avisoRaro('casaDia', `🏠 já foram ${feitas} compras para casas hoje (limite ${CFG.casaComprasDia})`, 60);
+    if (CFG.casaComprasDia > 0 && feitas >= CFG.casaComprasDia) return avisoRaro('casaDia', `🏠 já foram ${feitas} compras para casas hoje (limite ${CFG.casaComprasDia})`, 60);
     const gf = emGiro() ? CFG.giroCasaFator : 1, alvo = emGiro() ? Math.min(alvoDaCasa(cid), CFG.giroNivelMax) : alvoDaCasa(cid), pct = E.postos[key]?.pct || 25, xpH = xpHoraCasa(pct);
     // só espécies que vendem no nível-alvo e dão bom lucro na mediana; 4 buscas no máximo
     const cands = rankingEspecies(alvo).filter((e) => e.nAlto >= CFG.casaVendasMinAlvo && e.lucro >= CFG.casaLucroMin * gf * 0.7).slice(0, 4);
@@ -1665,7 +1668,7 @@
     const ag = Date.now(); E.casaBuscaSh = E.casaBuscaSh || {};
     if (ag - (E.casaBuscaSh[cid] || 0) < CFG.casaBuscaMin * 60_000) return false;
     const feitas = E.casaShinyHoje?.dia === E.dia ? E.casaShinyHoje.n : 0;
-    if (feitas >= CFG.casaShinyDia) { avisoRaro('shDia', `✨ já foram ${feitas} shiny para casas hoje (limite ${CFG.casaShinyDia})`, 120); return false; }
+    if (CFG.casaShinyDia > 0 && feitas >= CFG.casaShinyDia) { avisoRaro('shDia', `✨ já foram ${feitas} shiny para casas hoje (limite ${CFG.casaShinyDia})`, 120); return false; }
     E.casaBuscaSh[cid] = ag; persistir();
     const pct = E.postos[key]?.pct || 25, xpH = xpHoraCasa(pct);
     // dá para pagar hoje? (limite do dia e reserva de Gemas valem para o shiny também)
@@ -3015,12 +3018,12 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
       <div class="cart"><h4>Compra para casa: só o que vale muito</h4><div class="form">
         <label>Lucro mín. por pokémon<input id="h-lmin"></label><label>Lucro mín. vs custo<input id="h-marg"></label>
         <label>Lucro mín. por hora de casa<input id="h-lh"></label><label>Buscar a cada (min)<input id="h-busca"></label>
-        <label>Compras por dia (casas)<input id="h-dia"></label><label>Nível máx. na compra<input id="h-nvmax"></label>
+        <label>Compras por dia (0 = sem limite)<input id="h-dia"></label><label>Nível máx. na compra<input id="h-nvmax"></label>
       </div><p class="mudo">Cada casa vazia faz no máximo uma busca a cada X min, em até 4 espécies que vendem no nível-alvo.</p></div>
       <div class="cart"><h4>✨ Casa com shiny (Gemas)</h4><div class="form">
         <label>Comprar shiny para upar<select id="h-sh"><option value="0">Não</option><option value="1">Sim</option></select></label><label>Preço máx. (💠)<input id="h-shp"></label>
         <label>Lucro mín. (💠)<input id="h-shl"></label><label>Lucro mín. vs custo<input id="h-shm"></label>
-        <label>Nível máx. na compra<input id="h-shn"></label><label>Shiny por dia<input id="h-shd"></label>
+        <label>Nível máx. na compra<input id="h-shn"></label><label>Shiny por dia (0 = sem limite)<input id="h-shd"></label>
         <label>Vendas mín. da família (30 d)<input id="h-shv"></label>
       </div><p class="mudo">Compra shiny barato de nível baixo, sobe até o nível que mais rende pelo precificador (até ${CFG.nivelMaxCasa}) e vende em Gemas. Precisa de "Operar em Gemas"; os limites de Gemas do dia e a conferência do Claude valem. Veja a análise em Análise → Mercado.</p></div>
       <div class="cart"><h4>🌀 Giro rápido da vitrine</h4><div class="form">
@@ -3636,7 +3639,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     }
   }
 
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.25' }, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.26' }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));
