@@ -1539,7 +1539,7 @@
   function shinyUteis() {
     const R = PRC.resumoShiny(); if (!R) return [];
     return R.familias.filter((f) => f.vendas >= CFG.casaShinyVendasMin && f.nA >= 5 && f.ganho > 0)
-      .map((f) => ({ ...f, nota: f.vendas * Math.max(0, liquidoVenda(f.alto, 'orb', 'pokemon') - f.baixo) })).sort((a, z) => z.nota - a.nota);
+      .map((f) => ({ ...f, nota: f.vendas * Math.max(0, liquidoVenda(f.alto, 'orb', 'pokemon') - f.baixo) })).filter((f) => f.nota > 0).sort((a, z) => z.nota - a.nota);
   }
   // casa com shiny: compra shiny barato de nível baixo em Gemas e sobe até o nível que mais rende (shiny só vende em Gemas)
   async function comprarShinyParaUpar(key, cid) {
