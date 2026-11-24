@@ -2,6 +2,7 @@
 
 | Versão | Data | O que mudou |
 | --- | --- | --- |
+| 5.10 | 2026-11-23 | Boss Token: compra sempre até o preço que você define (Coins e 💠), sem margem de lucro e sem passar pela conferência do Claude. Sem preço definido, o automático é o ponto de equilíbrio do boss. |
 | 5.9 | 2026-11-23 | Lucro real: o app lê o histórico de compras e vendas da sua conta no jogo (24 h e 7 dias, por moeda) a cada 30 min e mostra na aba Análise. |
 | 5.8 | 2026-11-23 | Visual novo: 7 abas com ícones e sub-abas (Mercado, Boss, Análise), chips de estado no topo, módulos como interruptores, botão de largura. Logs mostram quantidade e preço unitário ("30× a 5 💠 = 150 💠"). Calculadora "Quantos tokens dá" na aba Boss. Atualização automática pelo GitHub. |
 | 5.7 | 2026-11-23 | Conferência do Claude pede resposta direta (1.024 tokens); resposta confusa não fica em cache. |

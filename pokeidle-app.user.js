@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.9
+// @version      5.10
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -1021,7 +1021,8 @@
     if (!cabeNoOrcamento(total, moeda)) { log(`orçamento: pulei ${ctx.nome} ${qtdM(qtd, a.preco, moeda)}`); return false; }
     if (!CFG.simulacao && disjuntor(total, moeda)) return false;
     const limiteClaude = moeda === 'orb' ? CFG.claudeAprovaAcimaGemas : CFG.claudeAprovaAcima;
-    const conferir = CFG.claudeKey && !CFG.simulacao && (CFG.claudeConfere === 'todas' || (CFG.claudeConfere === 'acima' && limiteClaude > 0 && total >= limiteClaude));
+    const tokenNoSeuPreco = ctx.tipo === 'item' && Number(ctx.itemId ?? a.itemId) === ITEM.TOKEN && (moeda === 'orb' ? CFG.tokenPrecoMaxGemas > 0 : CFG.tokenPrecoMax > 0) && a.preco <= tetoDoJogador(ITEM.TOKEN, moeda);
+    const conferir = !tokenNoSeuPreco && CFG.claudeKey && !CFG.simulacao && (CFG.claudeConfere === 'todas' || (CFG.claudeConfere === 'acima' && limiteClaude > 0 && total >= limiteClaude));
     if (conferir) {
       const ok = await claudeAprova(a, { ...ctx, qtd });
       if (!ok) { log(`🧠 Claude vetou: ${ctx.nome} ${qtdM(qtd, a.preco, moeda)}`); return false; }
@@ -1543,7 +1544,7 @@
     const evs = [0, 1, 2].map((d) => { const p = premioDe(pos, Date.now() + d * 86400_000); return { premio: p, d, liq: evBoss(p, par).liquidoG }; });
     return evs.sort((a, z) => z.liq - a.liq)[0];
   }
-  const tetoTokenGemas = () => { const e = evTokenGemas(); return e && e.liq > 0 ? Math.max(0, e.liq - (CFG.tokenLucroMinGemas || 0)) : 0; };
+  const tetoTokenGemas = () => { const e = evTokenGemas(); return e && e.liq > 0 ? e.liq : 0; };   // só quando você não define um preço
   function registrarLutaBoss(venceu, drops) {
     const b = E.boss; b.lutas++; venceu ? b.vitorias++ : b.derrotas++;
     if (M.bossEntrouEm) { const d = (Date.now() - M.bossEntrouEm) / 1000; if (d > 5 && d < 1800) { b.duracoes.push(Math.round(d)); b.duracoes = b.duracoes.slice(-60); } }
@@ -1631,7 +1632,8 @@
         const qtd = Math.min(a.qtd, falta, Math.floor((tm === 'orb' ? CFG.gemasMaxPorCompra : CFG.gastoMaxPorCompra) / a.preco));
         if (qtd < 1) break;
         const ev = evTokenGemas();
-        if (await comprar(a, { tipo: 'item', itemId: ITEM.TOKEN, nome: 'Bronze Boss Token', qtd, depois: 'guardar', motivo: `boss ${CFG.bossKey} (${NOME_PREMIO[ev.premio]}) rende ~${ev.liq.toFixed(1)} 💠 por token; teto ${curtoM(teto, tm)} = lucro mín. ${CFG.tokenLucroMinGemas} 💠` })) falta -= qtd;
+        const fixo = tm === 'orb' ? CFG.tokenPrecoMaxGemas > 0 : CFG.tokenPrecoMax > 0;
+        if (await comprar(a, { tipo: 'item', itemId: ITEM.TOKEN, nome: 'Bronze Boss Token', qtd, depois: 'guardar', precoDoJogador: fixo, motivo: fixo ? `até o seu preço de ${curtoM(teto, tm)}` : `boss ${CFG.bossKey} (${NOME_PREMIO[ev.premio]}) rende ~${ev.liq.toFixed(1)} 💠 por token` })) falta -= qtd;
       }
     }
   }
@@ -2118,7 +2120,7 @@ Recomende compras SOMENTE dentro de interesses_do_jogador (listas vazias = qualq
   const CONFERENTE = `Você confere, uma a uma, as compras que um bot vai fazer no mercado do jogo PokeIdle, ANTES de serem enviadas. Seja rigoroso: na dúvida, NAO.
 Moedas: Coins (gold) e Gemas (orb, 💠, dinheiro real). Use o câmbio dado para comparar moedas. Comissão do vendedor: 15% (pokémon em Gemas: 13%/10%/7,5% por faixa). Pensão de pokémon anunciado: 100k Coins/dia.
 Reprove (NAO) se: o custo, convertido pelo câmbio, for maior que o líquido da revenda planejada; a referência de preço for fraca (poucas vendas) ou bem acima do precificador em Gemas (o precificador usa 30 dias de vendas e vale mais); o preço passar do teto do jogador; for pokémon de Outland com evitar_outland; a quantidade passar do pedido; o motivo do bot não bater com os números.
-Boss Token é comprado para FAZER boss: aprove se o preço for ≤ o teto (lucro esperado por boss menos o lucro mínimo), mesmo sem lucro de revenda.
+Boss Token é comprado para FAZER boss: aprove sempre que o preço for ≤ teto_do_jogador; não julgue lucro nem revenda do token.
 Pokémon para casa: aprove só se o lucro esperado no nível-alvo for alto e a espécie vender nesse nível.
 Os limites de gasto do jogador (por compra, por dia e a reserva) já são checados pelo bot e vêm no JSON: não reprove por eles.
 Formato da resposta, exatamente duas linhas, sem markdown:
@@ -2142,7 +2144,7 @@ motivo em até 15 palavras`;
       } else {
         const id = Number(ctx.itemId ?? a.itemId);
         dossie.item = { id, nome: E.nomesItens[id], media_7d: { coins: M.medias[id]?.gold?.media, gemas: M.medias[id]?.orb?.media }, menor_anuncio_agora: { coins: M.resumo[id]?.minGold, gemas: M.resumo[id]?.minOrb }, teto_do_jogador: tetoDoJogador(id, moeda) || null };
-        if (id === ITEM.TOKEN) { const ev = evTokenGemas(); dossie.boss = { boss: CFG.bossKey, melhor_dia: ev && NOME_PREMIO[ev.premio], lucro_liquido_por_token_gemas: ev && +ev.liq.toFixed(2), lucro_minimo_por_boss_gemas: CFG.tokenLucroMinGemas }; }
+        if (id === ITEM.TOKEN) { const ev = evTokenGemas(); dossie.boss = { boss: CFG.bossKey, melhor_dia: ev && NOME_PREMIO[ev.premio], lucro_liquido_por_token_gemas: ev && +ev.liq.toFixed(2) }; }
       }
       const r = await chamarClaude(CFG.claudeModeloRapido, [{ role: 'user', content: 'Compra para conferir (JSON):\n' + JSON.stringify(dossie) }], false, 1024, CONFERENTE, true);
       // lê a decisão mesmo com markdown ou pontuação ("**SIM**", "Sim.", "SIM — motivo"); sem SIM/NAO claro = não compra
@@ -2464,8 +2466,7 @@ motivo em até 15 palavras`;
         <label>Teto por token em 💠 <span class="mudo">(0 = automático)</span><input id="b-tetog"></label>
         <label>Lucro mín. por token<input id="b-evmin"></label>
         <label>Tokens comprados em<select id="b-tm"><option value="ambas">Coins e Gemas</option><option value="gold">Coins</option><option value="orb">Gemas</option></select></label>
-        <label>Comprar tokens<select id="b-auto"><option value="1">Todos abaixo do teto</option><option value="0">Só até o estoque-alvo (módulo Boss)</option></select></label>
-        <label>Lucro mín. por boss (💠)<input id="b-lmin"></label>
+        <label>Comprar tokens<select id="b-auto"><option value="1">Todos até o seu preço</option><option value="0">Só até o estoque-alvo (módulo Boss)</option></select></label>
         <label>Segundos por luta <span class="mudo">(0 = medir)</span><input id="b-seg"></label>
       </div>
       <div class="kv" id="b-num"></div>
@@ -2484,7 +2485,6 @@ motivo em até 15 palavras`;
     $('#b-tm').value = CFG.bossTokenMoeda; $('#b-tm').onchange = (e) => { CFG.bossTokenMoeda = e.target.value; salvarCfg(); pintar(); };
     $('#b-calc').oninput = () => pintar(); $('#b-calc-t').onchange = () => pintar();
     $('#b-auto').value = CFG.tokenAutoCompra ? '1' : '0'; $('#b-auto').onchange = (e) => { CFG.tokenAutoCompra = e.target.value === '1'; salvarCfg(); log(CFG.tokenAutoCompra ? '👑 tokens: compra todos abaixo do teto' : '👑 tokens: só até o estoque-alvo'); pintar(); };
-    $('#b-lmin').value = String(CFG.tokenLucroMinGemas).replace('.', ','); $('#b-lmin').onchange = (e) => { const v = num(e.target.value); if (v != null) { CFG.tokenLucroMinGemas = v; salvarCfg(); log(`👑 lucro mín. por boss = ${v} 💠`); pintar(); } };
     $('#b-seg').value = CFG.bossSegPorLuta; $('#b-seg').onchange = (e) => { const v = num(e.target.value); if (v != null) { CFG.bossSegPorLuta = v; salvarCfg(); pintar(); } };
     $('#b-evmin').value = Math.round(CFG.bossEvMinPct * 100) + '%'; $('#b-evmin').onchange = (e) => { const v = num(String(e.target.value).replace('%', '')); if (v != null) { CFG.bossEvMinPct = v > 2 ? v / 100 : v; salvarCfg(); pintar(); } };
   }
@@ -2858,7 +2858,7 @@ motivo em até 15 palavras`;
       }
       const t = Date.now(), q = quadroBoss(t), troca = proximaTroca(t), par = REGIOES[CFG.bossRegiao] ?? 2, cb = cambioImplicito();
       $('#b-num').innerHTML = `<span>Tokens no inventário</span><b>${M.tokens ?? '?'}</b><span>Token agora</span><b>${curto(tokenPreco())}${M.resumo[ITEM.TOKEN]?.minOrb ? ' · ' + fmt(M.resumo[ITEM.TOKEN].minOrb) + ' 💠' : ''}</b>
-        <span>Câmbio usado</span><b>${cb ? curto(cb.taxa) + ' Coins/💠' : '—'}</b><span>Teto de compra de token</span><b>${(() => { const tg = tetoDoJogador(ITEM.TOKEN, 'orb'), tc = tetoDoJogador(ITEM.TOKEN, 'gold'), ev = evTokenGemas(); return `${tg ? tg.toFixed(1) + ' 💠' : '—'} · ${tc ? curto(tc) : '—'}${ev && !CFG.tokenPrecoMaxGemas ? ` <span class="mudo">(${NOME_PREMIO[ev.premio]} rende ${ev.liq.toFixed(1)} 💠 − ${CFG.tokenLucroMinGemas})</span>` : ''}`; })()}</b>
+        <span>Câmbio usado</span><b>${cb ? curto(cb.taxa) + ' Coins/💠' : '—'}</b><span>Teto de compra de token</span><b>${(() => { const tg = tetoDoJogador(ITEM.TOKEN, 'orb'), tc = tetoDoJogador(ITEM.TOKEN, 'gold'), ev = evTokenGemas(); return `${tg ? tg.toFixed(1) + ' 💠' : '—'} · ${tc ? curto(tc) : '—'}${CFG.tokenPrecoMaxGemas ? ' <span class="mudo">(seu preço)</span>' : ev ? ` <span class="mudo">(automático: ${NOME_PREMIO[ev.premio]} rende ${ev.liq.toFixed(1)} 💠)</span>` : ''}`; })()}</b>
         <span>Preço dos drops</span><b class="mudo">${[ITEM.ZFRAG, ITEM.AOE, ITEM.MEGA, ITEM.MEGASH, ITEM.SAFARI].map((id) => { const f = fonteGemaItem(id); return `${esc((E.nomesItens[id] || id).toString().replace(' Stone Fragment', '').replace(' TM Disk Piece', ' TM'))} ${fmt(Math.round(f.preco))}`; }).join(' · ')} 💠 <br>(${esc(fonteGemaItem(ITEM.MEGA).como)}${M.resumoEm ? ', lido ' + new Date(M.resumoEm).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : ''})</b>
         <span>Próxima troca da rotação</span><b>${new Date(troca).toLocaleString('pt-BR', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}</b>
         <span>Venda dos drops</span><b>${CFG.gemasAtivas ? 'em Gemas 💠' : '<span class="ruim">Gemas desligadas</span>'}</b>
@@ -2955,7 +2955,7 @@ motivo em até 15 palavras`;
     }
   }
 
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.9' }, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.10' }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));
