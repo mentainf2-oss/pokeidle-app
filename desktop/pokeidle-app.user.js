@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.48
+// @version      5.49
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -31,7 +31,7 @@
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.48';
+  const VERSAO_APP = '5.49';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -2570,6 +2570,28 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
     const g = M.resumo[id]?.minGold || M.medias[id]?.gold?.media || null, o = M.resumo[id]?.minOrb || M.medias[id]?.orb?.media || null;
     return { coins: g, gemas: o, emCoins: g || (o && cb ? o * cb : null) };
   }
+  // pontos de sacrifício pela nota (/shared/sacrificio.mjs: 3,5 = 10, 4,0 = 25, 5,0 = 110, 6,0 = 320, 6,5 = 560, 7,0 = 1.000; entre eles, estimado)
+  const PTS_NOTA = [[3.5, 10], [4.0, 25], [5.0, 110], [6.0, 320], [6.5, 560], [7.0, 1000]];
+  function pontosSacrificio(nota) {
+    const n = Math.round((Number(nota) || 0) * 10) / 10; if (n < 3.5) return 0; if (n >= 7) return 1000;
+    for (let i = 0; i < PTS_NOTA.length - 1; i++) { const [a, pa] = PTS_NOTA[i], [z, pz] = PTS_NOTA[i + 1]; if (n >= a && n <= z) return Math.round(pa * (pz / pa) ** ((n - a) / (z - a))); }
+    return 0;
+  }
+  // pokémon da coleção que rendem mais no sacrifício que no mercado: fora do time, das casas, dos anúncios e da fila, nota 3,5+, sem shiny e sem P5
+  function sacrificioCandidatos(porPt) {
+    const ocup = new Set([...Object.values(E.postos || {}).filter(Boolean).map((p) => String(p.pokemonId)), ...M.meus.map((a) => String(a.pokemonId)), String(M.activeId), ...(E.filaVenda || []).map((x) => String(x.pokemonId))]);
+    const out = [];
+    for (const p of M.pokemons || []) {
+      if (p.slot != null || ocup.has(String(p.id)) || p.shiny || p.potencia === 5 || p.starter || p.heldItemId) continue;
+      const pts = pontosSacrificio(p.nota); if (!pts) continue;
+      const iv = Object.values(p.ivs || {}).reduce((x, y) => x + y, 0);
+      const mk = precoMercado(p.nome, Math.max(50, p.level || 1), p.nota, p.potencia, iv);
+      const liq = mk ? mk.preco * (1 - COMISSAO) : 0;
+      if (porPt && liq > pts * porPt) continue;                       // vende melhor do que vale em pontos
+      out.push({ id: p.id, nome: p.nome, nv: p.level, nota: p.nota, pts, liq: Math.round(liq) });
+    }
+    return out.sort((a, z) => z.pts / Math.max(1, z.liq) - a.pts / Math.max(1, a.liq));
+  }
   function estudoCasas() {
     const R = ritmo(), cv = curvaNivel(), linhas = [];
     const porPctH = lucroCasasPorHora() / Math.max(1, CFG.casas.reduce((s2, c) => s2 + (E.postos[`${c}:0`]?.pct || 25), 0));
@@ -2599,7 +2621,11 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
     { const faixa = (a2, z) => M.base.filter((v) => v.nota >= a2 && v.nota < z && v.nv < 200 && Date.now() - v.em < 3 * 86400_000).map((v) => v.preco);
       const op = [[faixa(3.5, 3.6), 10, '3,5'], [faixa(4.0, 4.1), 25, '4,0']].filter(([L]) => L.length >= 5).map(([L, pts, n]) => ({ n, porPt: mediana(L) / pts, preco: mediana(L), pts }));
       const melhor = op.sort((x, y) => x.porPt - y.porPt)[0];
-      if (melhor) { const custo = melhor.porPt * 1000, g = 0.2 * lucroCasasPorHora(); linhas.push({ acao: `Sacrifício nível 5: ${Math.ceil(1000 / melhor.pts)} pokémon nota ${melhor.n} (~${curto(melhor.preco)} cada) → 14 dias de +20% XP`, custo, ganhoH: g, payback: dias(custo, g), moeda: 'Coins', nota: 'ganho contado só pelo XP Share das casas (+20%); o treinador sobe 20% mais rápido também' }); } }
+      if (melhor) { const custo = melhor.porPt * 1000, g = 0.2 * lucroCasasPorHora(); linhas.push({ acao: `Sacrifício nível 5: ${Math.ceil(1000 / melhor.pts)} pokémon nota ${melhor.n} (~${curto(melhor.preco)} cada) → 14 dias de +20% XP`, custo, ganhoH: g, payback: dias(custo, g), moeda: 'Coins', nota: 'ganho contado só pelo XP Share das casas (+20%); o treinador sobe 20% mais rápido também' }); }
+      // da sua coleção: o que vale mais sacrificado do que vendido
+      const cand = sacrificioCandidatos(melhor?.porPt || 0), pts = Math.min(1000, cand.reduce((s2, x) => s2 + x.pts, 0));
+      if (pts >= 50) { const custo = cand.reduce((s2, x) => s2 + x.liq, 0), g = 0.2 * lucroCasasPorHora(), h = pts >= 1000 ? 336 : pts >= 500 ? 144 : pts >= 250 ? 60 : pts >= 125 ? 24 : 8;
+        linhas.push({ acao: `Sacrificar ${cand.length} da sua coleção (${cand.slice(0, 4).map((x) => `${x.nome} n${x.nota}`).join(', ')}${cand.length > 4 ? '…' : ''}) → ~${pts} pontos = ${h} h de +20% XP`, custo: Math.max(1, custo), ganhoH: g, payback: dias(Math.max(1, custo), g), moeda: 'Coins', nota: 'valem menos no mercado do que em pontos' }); } }
     const kf = M.resumo[70011]?.minGold || M.medias[70011]?.gold?.media;
     if (kf) {
       const chances = [[0.745, 'Comum'], [0.2, 'Incomum'], [0.05, 'Rara'], [0.005, 'Mítica'], [0.00005, 'Lendária']];
