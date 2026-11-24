@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.8
+// @version      5.9
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -417,6 +417,35 @@
     const lim = Date.now() - 6 * 3600_000, porId = {}, idDe = Object.fromEntries(Object.entries(E.nomesItens).map(([id, n]) => [n, Number(id)]));
     for (const v of await tudo('itensVendas')) if (v.em >= lim && v.moeda === 'orb' && idDe[v.nome]) (porId[idDe[v.nome]] ??= []).push(v.unitario);
     M.recentesOrb = Object.fromEntries(Object.entries(porId).filter(([, a]) => a.length >= 3).map(([id, a]) => [id, mediana(a)]));
+  }
+  /* --------- 💰 lucro real: o histórico de compras e vendas da sua conta, no próprio jogo --------- */
+  async function lerHistoricoProprio(msg, horas = 24 * 7, maxPaginas = 8) {
+    const lim = Date.now() - horas * 3600_000, linhas = [];
+    for (let pagina = 0; pagina < maxPaginas; pagina++) {
+      const seq = 9000 + Math.floor(Math.random() * 90000);
+      const resp = await pedir({ t: msg, pagina, seq }, (m) => m.t === 'market' && String(m.aba || '').startsWith('historico') && m.aba !== 'historicoGlobal' && (m.seq === seq || m.pagina === pagina), 5000);
+      const L = resp?.linhas || []; if (!L.length) break;
+      linhas.push(...L);
+      if (!resp.temMais || Math.min(...L.map((l) => l.em || Date.now())) < lim) break;
+    }
+    return linhas.filter((l) => (l.em || 0) >= lim && l.tipo !== 'deposito' && l.tipo !== 'saque' && l.tipo !== 'diamante');
+  }
+  async function conferirLucroReal(forcar = false) {
+    if (!forcar && Date.now() - (E.real?.em || 0) < 30 * 60_000) return;
+    const [vendas, compras] = [await lerHistoricoProprio('market.historico'), await lerHistoricoProprio('market.historicoCompras')];
+    const norm = (l, lado) => ({ id: l.id, em: l.em, desc: l.descricao, tipo: l.tipo || (l.pokemonId || l.ficha?.speciesId ? 'pokemon' : 'item'), moeda: l.moeda, bruto: l.bruto ?? l.preco ?? 0, liquido: lado === 'venda' ? l.liquido ?? liquidoVenda(l.bruto ?? l.preco ?? 0, l.moeda, l.tipo || (l.ficha ? 'pokemon' : 'item')) : null });
+    E.real = { em: Date.now(), vendas: vendas.map((l) => norm(l, 'venda')), compras: compras.map((l) => norm(l, 'compra')) };
+    persistir();
+    const r = resumoReal(24);
+    log(`💰 lucro real (24 h, histórico do jogo): Coins ${curto(r.gold.recebido)} recebidos − ${curto(r.gold.gasto)} gastos; Gemas ${fmt(Math.round(r.orb.recebido))} − ${fmt(r.orb.gasto)}`, 'ok');
+  }
+  // soma por moeda numa janela: gasto (compras), recebido (vendas líquidas da comissão) e saldo
+  function resumoReal(horas) {
+    const lim = Date.now() - horas * 3600_000, out = { gold: { gasto: 0, recebido: 0, nC: 0, nV: 0 }, orb: { gasto: 0, recebido: 0, nC: 0, nV: 0 } };
+    for (const c of E.real?.compras || []) if (c.em >= lim && out[c.moeda]) { out[c.moeda].gasto += c.bruto; out[c.moeda].nC++; }
+    for (const v of E.real?.vendas || []) if (v.em >= lim && out[v.moeda]) { out[v.moeda].recebido += v.liquido; out[v.moeda].nV++; }
+    for (const m of ['gold', 'orb']) out[m].saldo = out[m].recebido - out[m].gasto;
+    return out;
   }
   async function loopColetor() {
     if (M.coletorRodando) return;
@@ -2140,7 +2169,7 @@ motivo em até 15 palavras`;
     while (M.ligado) {
       try {
         novoDia();
-        if (CFG.mod.analise) { pedirPlanilhaSeHora(); await retratoItens(); }
+        if (CFG.mod.analise) { pedirPlanilhaSeHora(); await retratoItens(); await conferirLucroReal(); }
         if (CFG.mod.compras) await cicloCompras();
         if (CFG.mod.casas) await cicloCasas();
         if (CFG.mod.casas || CFG.mod.sniperPk || E.filaVenda?.length) { await processarFilaVenda(); await reajustarPokemons(); }
@@ -2583,6 +2612,8 @@ motivo em até 15 palavras`;
 
   function montarAnalise() {
     $('#sec-analise').innerHTML = `
+      <div class="cart"><h4>💰 Lucro real (histórico da sua conta)</h4><div id="a-real"></div>
+        <div style="margin-top:6px"><button class="bt cinza" id="a-real-bt">Atualizar agora</button></div></div>
       <div class="cart"><h4>📒 Planilha própria</h4>
         <p class="mudo" style="margin-top:0">O app lê a Tabela de preços a cada ${CFG.coletaSeg}s e guarda cada venda com a ficha completa (IVs, qualidade, XP, tipos, quem capturou…), sem o corte de 5.000 linhas da planilha do jogo.</p>
         <div class="kv" id="a-col"></div>
@@ -2843,6 +2874,17 @@ motivo em até 15 palavras`;
       $('#b-res').innerHTML = `<div class="kv"><span>Lutas</span><b>${B.lutas} (${B.vitorias} vitórias)</b><span>Tempo médio por luta</span><b>${mediana(B.duracoes) ? mediana(B.duracoes) + ' s' : '—'}</b>${Object.entries(B.drops).map(([id, n]) => `<span>${esc(E.nomesItens[id] || id)}</span><b>${n} · ~${fmt(n * precoGemaItem(id) * (1 - COMISSAO))} 💠</b>`).join('')}</div>`;
     }
     if (abaAtual === 'analise') {
+      { const el = $('#a-real'); if (el) {
+        if (!E.real) el.innerHTML = '<span class="mudo">Ainda não lido. O app lê o seu histórico de compras e vendas a cada 30 min (com Análise ligada).</span>';
+        else {
+          const lin = (h, r2) => `<tr><td>${h}</td><td class="num">${curto(r2.gold.gasto)}<br><span class="mudo">${r2.gold.nC} compras</span></td><td class="num">${curto(r2.gold.recebido)}<br><span class="mudo">${r2.gold.nV} vendas</span></td><td class="num ${r2.gold.saldo >= 0 ? 'bom' : 'ruim'}">${r2.gold.saldo >= 0 ? '+' : ''}${curto(r2.gold.saldo)}</td><td class="num">${fmt(r2.orb.gasto)} / ${fmt(Math.round(r2.orb.recebido))}</td><td class="num ${r2.orb.saldo >= 0 ? 'bom' : 'ruim'}">${r2.orb.saldo >= 0 ? '+' : ''}${fmt(Math.round(r2.orb.saldo))}</td></tr>`;
+          const ult = [...(E.real.vendas || [])].sort((a, z) => z.em - a.em).slice(0, 6);
+          el.innerHTML = `<table><tr><th>Janela</th><th class="num">Coins gastos</th><th class="num">Coins recebidos</th><th class="num">Saldo</th><th class="num">💠 gastas / recebidas</th><th class="num">Saldo 💠</th></tr>${lin('24 h', resumoReal(24))}${lin('7 dias', resumoReal(24 * 7))}</table>
+            <p class="mudo" style="margin:6px 0 2px">Saldo de caixa: compras para guardar (tokens, pokémon nas casas) entram como gasto até serem vendidas. Recebido = já sem a comissão. Lido às ${new Date(E.real.em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.</p>
+            ${ult.length ? `<table><tr><th>Últimas vendas</th><th class="num">Recebido</th></tr>${ult.map((v) => `<tr><td>${esc(v.desc || '')}<br><span class="mudo">${new Date(v.em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span></td><td class="num">${curtoM(v.liquido, v.moeda)}</td></tr>`).join('')}</table>` : ''}`;
+        }
+        const bt = $('#a-real-bt'); if (bt && !bt.onclick) bt.onclick = async () => { bt.disabled = true; bt.textContent = 'Lendo…'; try { await conferirLucroReal(true); } finally { bt.disabled = false; bt.textContent = 'Atualizar agora'; pintar(); } };
+      } }
       $('#a-col').innerHTML = `<span>Coletadas nesta sessão</span><b>${fmt(M.coletados.pokemon)} pokémon · ${fmt(M.coletados.item)} itens</b><span>Próxima planilha automática</span><b>${CFG.planilhaHoraria ? (M.ligado ? Math.max(0, Math.round(((E.ultimaPlanilhaHora || 0) + 3600_000 - Date.now()) / 60000)) + ' min' : 'ao ligar') : 'desligada'}</b>`;
       $('#a-num').innerHTML = `<span>Vendas de pokémon na base (14 dias)</span><b>${fmt(M.base.length)}</b><span>Última planilha</span><b>${E.ultimoCsv ? new Date(E.ultimoCsv).toLocaleTimeString() : '—'}</b><span>Próxima</span><b>${E.ultimoCsv ? Math.max(0, Math.round((E.ultimoCsv + 61 * 60_000 - Date.now()) / 60000)) + ' min' : 'ao ligar'}</b>`;
       const fx = {}, fo = {}, fs = {}, vg = valorGema();
@@ -2913,7 +2955,7 @@ motivo em até 15 palavras`;
     }
   }
 
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.8' }, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.9' }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));
