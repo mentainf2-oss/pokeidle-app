@@ -2,6 +2,7 @@
 
 | Versão | Data | O que mudou |
 | --- | --- | --- |
+| 5.46 | 2026-11-24 | 🗺️ Hunt automática (módulo novo, ligado; desliga em Painel → Controle): a cada 30 min consulta o "Melhor hunt" do app de PC (motor do /hunt com o pokémon em campo, bônus, Dia Sazonal, AoE, bicicleta e ritmo medido) e troca para a hunt que rende 15%+ de XP/h a mais, com risco de poção até 40% (ou o da hunt atual + 5), nunca durante o boss nem com Prey ligado, e no máximo uma troca por hora. Avisos da auditoria saem da categoria Erro e ganham a própria. |
 | 5.45 | 2026-11-24 | 🤝 Negociação mais humana (pedido do jogador: ainda soava artificial): respostas do tamanho da pergunta, minúsculas, sem ponto final, sem "Olá", "Claro!", "Obrigado pelo interesse"; gírias de jogador com moderação, espelhando o jeito da pessoa; exemplos de tom no prompt; o modelo maior (Sonnet) escreve a resposta; um filtro tira o que ainda escapar de atendente. O aviso de "só consigo mudar o preço em X min" também ficou natural. |
 | 5.44 | 2026-11-24 | 📈 Variação do mercado: o preço de referência de cada espécie (Coins e Gemas) compara as vendas das últimas 48 h com as de 14 dias; com 5+ vendas recentes e diferença acima de 15% (evento de XP, espécie nova numa atualização, hunt nova em moda), passa a valer o preço recente, e o motivo mostra quanto o mercado subiu ou caiu. |
 | 5.43 · app de PC | 2026-11-24 | Correções vistas no PC: o painel dentro do jogo não escondia (a condição estava invertida); a aba Decisões ficava parada na primeira leitura — agora relê a cada minuto, e o Parecer a cada 5 min. |

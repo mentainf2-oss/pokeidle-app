@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.45
+// @version      5.46
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -31,12 +31,13 @@
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.45';
+  const VERSAO_APP = '5.46';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
     simulacao: true,
-    mod: { analise: true, compras: false, sniperPk: false, sniperIt: false, casas: false, boss: false, prey: false, claude: false },
+    mod: { analise: true, compras: false, sniperPk: false, sniperIt: false, casas: false, boss: false, prey: false, claude: false, hunt: true },
+    huntGanhoMin: 0.15, huntRiscoMax: 40, huntCadaMin: 30,
 
     // orçamento em Coins (o Claude não mexe)
     gastoMaxPorCompra: 1_000_000_000, gastoMaxPorDia: 3_000_000_000, reservaCoins: 100_000_000,
@@ -204,10 +205,10 @@
   // 📚 catálogo: toda decisão do app fica guardada com o motivo (o texto do log já traz o porquê), por 4 dias
   const DEC = (() => { const L = ler('pkapp.decisoes', []); return Array.isArray(L) ? L : []; })();
   const CATS_DEC = [
-    ['erro', (m, t) => t === 'erro' || /^erro|falhou/i.test(m)], ['auditoria', (m) => /^🔎/.test(m)], ['aprendizado', (m) => /^🎓 aprendizado|^📋 parecer/.test(m)],
+    ['auditoria', (m) => /^🔎/.test(m)], ['erro', (m, t) => t === 'erro' || /^erro|falhou/i.test(m)], ['aprendizado', (m) => /^🎓 aprendizado|^📋 parecer/.test(m)],
     ['claude', (m) => /^🧠/.test(m)], ['venda', (m) => /^💰 vendido|^ANUNCIAR|^VENDER|^🪟/.test(m)], ['preço', (m) => /^(BAIXAR|SUBIR|REAJUSTAR|CORRIGIR)|^🔁|^🤝 aplicando/.test(m)],
     ['negociação', (m) => /^🤝/.test(m)], ['compra', (m, t) => t === 'compra' || /^COMPRAR|^🛒|^✨/.test(m)], ['casa', (m) => /^🏠/.test(m)], ['boss', (m) => /^👑|Boss Token|^🎁/.test(m)],
-    ['pulou', (m) => /pulei|^⛔|não compro|sem preço|sem câmbio|^📚|^🐢/.test(m)], ['ajuste', (m) => /^⚙️|^👥|^▶|^⏹|^🧪|^⚡ modo|ligado$|desligado$/.test(m)],
+    ['pulou', (m) => /pulei|^⛔|não compro|sem preço|sem câmbio|^📚|^🐢/.test(m)], ['hunt', (m) => /^🗺️/.test(m)], ['ajuste', (m) => /^⚙️|^👥|^▶|^⏹|^🧪|^⚡ modo|ligado$|desligado$/.test(m)],
   ];
   const IGNORAR_DEC = /^💰 lucro real|planilha|^🔮 precificador|^🎓 (em|estudo)|^🧾|^📊/;
   let decSujo = false;
@@ -3033,10 +3034,31 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
         if (CFG.mod.boss) await cicloBoss();
         if (CFG.mod.prey) await cicloPrey();
         if (CFG.mod.claude) await cicloClaude();
+        if (CFG.mod.hunt) await cicloHunt();
       } catch (e) { log('erro: ' + e.message, 'erro'); }
       pintar();
       await dormir(CFG.intervaloSeg * 1000 * (0.85 + Math.random() * 0.3));
     }
+  }
+  /* ============================== 🗺️ HUNT AUTOMÁTICA ============================== */
+  // A cada 30 min pergunta ao "Melhor hunt" do app de PC (o motor do /hunt: pokémon em campo, bônus, Dia Sazonal, AoE,
+  // bicicleta e o ritmo medido) qual hunt rende mais XP agora. Troca só se ganhar 15%+ de XP/h, com risco de poção
+  // aceitável, fora do boss e sem Prey ligado (o Prey escolhe o pokémon da hunt atual).
+  async function cicloHunt() {
+    if (Date.now() - (M.huntEm || 0) < CFG.huntCadaMin * 60_000) return;
+    M.huntEm = Date.now();
+    const I = PAGINA.__idleterinoMercado; if (!I || typeof I.huntRank !== 'function') return;   // só no app de PC
+    if (M.emBoss || M.bossAuto || CFG.mod.prey) return;
+    if (Date.now() - (M.huntTrocaEm || 0) < 60 * 60_000) return;                               // dá tempo de medir a hunt nova
+    const r = await I.huntRank().catch(() => null);
+    if (!r || !r.pronto || r.semPokemon || !Array.isArray(r.top) || !r.top.length) return;
+    const at = r.atualEst, limRisco = Math.max(CFG.huntRiscoMax, (at?.riscoPct || 0) + 5);
+    const pick = r.top.find((h) => h.slug && h.slug !== r.atual && h.riscoPct <= limRisco && !h.lenta && (!at || h.xpH >= at.xpH * (1 + CFG.huntGanhoMin)));
+    if (!pick) return;
+    const ganho = at ? pick.xpH / at.xpH - 1 : null;
+    log(`${sim()}🗺️ hunt: ${at ? `${at.nome} (${fmt(at.xpH)} XP/h)` : (r.atual || 'atual')} → ${pick.nome} Nv ${fmt(pick.nivel)} (${fmt(pick.xpH)} XP/h${ganho != null ? `, +${Math.round(ganho * 100)}%` : ''}; ${fmt(pick.kph)} abates/h, risco ${pick.riscoPct}%)`, 'ok');
+    M.huntTrocaEm = Date.now();
+    if (!CFG.simulacao) { enviar({ t: 'hunt.select', slug: pick.slug }); E.huntSlug = pick.slug; persistir(); }
   }
   function notificar(msg) { try { if (Notification.permission === 'granted') new Notification('PokeIdle App', { body: msg }); } catch {} }
 
@@ -4161,7 +4183,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     papeis: () => Object.keys(PAPEIS),
   };
   try { Object.defineProperty(PAGINA, '__PKAPP_PONTE', { value: ponteDesktop, configurable: true }); } catch {}
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, estudoToken, resultadoBossDia, exportarCfg, importarCfg, compilarParecer, fecharDia, aprender, DEC, bossDaConta, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: VERSAO_APP }, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, estudoToken, resultadoBossDia, exportarCfg, importarCfg, compilarParecer, fecharDia, aprender, DEC, bossDaConta, cicloHunt, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: VERSAO_APP }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));

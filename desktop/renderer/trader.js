@@ -19,6 +19,7 @@ const PK_ICO = {
   boss: '<path d="M4 8l4.2 4L12 5.5 15.8 12 20 8l-2 10H6z"/><path d="M6 21h12"/>',
   'negociação': '<path d="M4 5h16v10H9l-5 4z"/>',
   pulou: '<circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/>',
+  hunt: '<path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2z"/><path d="M9 4v14M15 6v14"/>',
   claude: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/>',
   auditoria: '<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/>',
   aprendizado: '<path d="M4 5h6a2 2 0 0 1 2 2v12a2 2 0 0 0-2-2H4z"/><path d="M20 5h-6a2 2 0 0 0-2 2v12a2 2 0 0 1 2-2h6z"/>',
@@ -37,8 +38,8 @@ const pkDia = (d) => { const [a, m, dd] = String(d).split('-'); const sem = ['do
 const pkHora = (ms) => new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 const pkNomePapel = { tudo: 'Tudo', boss: 'Boss', casas: 'Casas', mercado: 'Mercado' };
 const pkDicaPapel = { tudo: 'todos os módulos', boss: 'boss e tokens', casas: 'casas + sniper de pokémon', mercado: 'sniper de pokémon e itens' };
-const pkMods = [['compras', 'Lista de compras'], ['sniperPk', 'Sniper de pokémon'], ['sniperIt', 'Sniper de itens'], ['casas', 'Casas'], ['boss', 'Boss'], ['claude', 'Claude']];
-const pkCats = { compra: 'Compra', venda: 'Venda', 'preço': 'Preço', casa: 'Casa', boss: 'Boss', 'negociação': 'Negociação', pulou: 'Não comprou', claude: 'Claude', auditoria: 'Auditoria', aprendizado: 'Aprendizado', ajuste: 'Ajuste', erro: 'Erro' };
+const pkMods = [['compras', 'Lista de compras'], ['sniperPk', 'Sniper de pokémon'], ['sniperIt', 'Sniper de itens'], ['casas', 'Casas'], ['boss', 'Boss'], ['hunt', 'Hunt automática'], ['claude', 'Claude']];
+const pkCats = { compra: 'Compra', venda: 'Venda', 'preço': 'Preço', casa: 'Casa', boss: 'Boss', 'negociação': 'Negociação', pulou: 'Não comprou', hunt: 'Hunt', claude: 'Claude', auditoria: 'Auditoria', aprendizado: 'Aprendizado', ajuste: 'Ajuste', erro: 'Erro' };
 window.idle.on('poke:pkapp:estado', (s) => { pkEstado = s; if (page === 'trader' && pkTab === 'hoje') renderTrader(); });
 
 function pkKpi(rot, val, sub, cls) {
