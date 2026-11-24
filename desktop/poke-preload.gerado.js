@@ -2090,7 +2090,7 @@ contextBridge.executeInMainWorld({
 });
 
 
-// ===================== PokeIdle App 5.43 (gerado por tools/montar-preload.js — não edite aqui) =====================
+// ===================== PokeIdle App 5.44 (gerado por tools/montar-preload.js — não edite aqui) =====================
 ;(() => {
   const { contextBridge: pontePk, ipcRenderer: ipcPk } = require('electron');
   // o que o script pede ao app: rede só para os sites liberados (API do Claude e precificador) e avisos
@@ -2116,7 +2116,7 @@ contextBridge.executeInMainWorld({
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.43
+// @version      5.44
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -2146,7 +2146,7 @@ contextBridge.executeInMainWorld({
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.43';
+  const VERSAO_APP = '5.44';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -2787,11 +2787,20 @@ contextBridge.executeInMainWorld({
   const NOME_CAT = { fisico: 'físico (ATK)', especial: 'especial (SP.ATK)', misto: 'misto' };
   const textoFatores = (f, pot) => `nota ×${f.fN.toFixed(2)} · P${pot || 1} ×${f.fP.toFixed(2)} · IV ×${f.fI.toFixed(2)}`;
   // preço justo: vendas comparáveis "limpas" dos fatores, depois aplicados os fatores deste pokémon
+  // variação do mercado: se as vendas das últimas 48 h (5+) se afastaram mais de 15% da mediana de 14 dias, vale o preço recente
+  // (evento de XP derrubando preço, espécie nova numa atualização, moda de uma hunt nova…)
+  function baseComTendencia(comps, limpo) {
+    const todos = mediana(comps.map(limpo)), rec = comps.filter((v) => Date.now() - (v.em || 0) < 48 * 3600_000);
+    if (rec.length < 5 || !todos) return { base: todos, tend: null };
+    const r = mediana(rec.map(limpo)), d = r / todos - 1;
+    return Math.abs(d) > 0.15 ? { base: r, tend: d } : { base: todos, tend: null };
+  }
+  const txtTend = (t) => (t == null ? '' : `; 48 h: mercado ${t > 0 ? 'subiu' : 'caiu'} ${Math.round(Math.abs(t) * 100)}%`);
   function precoMercado(nome, nv, nota = 3.6, pot = 1, iv = null) {
     const b = M.base, alvo = fatores(nota, pot, iv);
     const limpo = (v) => v.preco / fatores(v.nota, v.pot, v.iv).total;
     const comps = b.filter((v) => v.nome === nome && v.nv >= nv * 0.8 && v.nv <= nv * 1.25);
-    if (comps.length >= 3) { const base = mediana(comps.map(limpo)); return { preco: base * alvo.total, base, n: comps.length, como: 'espécie', fatores: alvo }; }
+    if (comps.length >= 3) { const { base, tend } = baseComTendencia(comps, limpo); return { preco: base * alvo.total, base, n: comps.length, como: 'espécie' + txtTend(tend), tend, fatores: alvo }; }
     const faixa = b.filter((v) => faixaDe(v.nv) === faixaDe(nv));
     if (faixa.length < 5) return null;
     const be = b.filter((v) => v.nome === nome && v.nv < 150).map(limpo), ba = b.filter((v) => v.nv < 150).map(limpo);
@@ -2811,7 +2820,7 @@ contextBridge.executeInMainWorld({
     const limpo = (v) => v.preco / fatores(v.nota, v.pot, v.iv).total;
     const b = M.baseOrb.filter((v) => v.nome === nome && v.shiny === !!shiny);
     const perto = b.filter((v) => v.nv >= nv * 0.7 && v.nv <= nv * 1.4);
-    if (perto.length >= 3) { const base = mediana(perto.map(limpo)); return { preco: base * alvo.total, base, n: perto.length, como: 'espécie', fatores: alvo }; }
+    if (perto.length >= 3) { const { base, tend } = baseComTendencia(perto, limpo); return { preco: base * alvo.total, base, n: perto.length, como: 'espécie' + txtTend(tend), tend, fatores: alvo }; }
     if (shiny && b.length >= 4) { const base = mediana(b.map(limpo)); return { preco: base * alvo.total, base, n: b.length, como: 'espécie (todos os níveis)', fatores: alvo }; }
     return null;
   }
