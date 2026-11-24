@@ -2,6 +2,7 @@
 
 | Versão | Data | O que mudou |
 | --- | --- | --- |
+| 5.45 | 2026-11-24 | 🤝 Negociação mais humana (pedido do jogador: ainda soava artificial): respostas do tamanho da pergunta, minúsculas, sem ponto final, sem "Olá", "Claro!", "Obrigado pelo interesse"; gírias de jogador com moderação, espelhando o jeito da pessoa; exemplos de tom no prompt; o modelo maior (Sonnet) escreve a resposta; um filtro tira o que ainda escapar de atendente. O aviso de "só consigo mudar o preço em X min" também ficou natural. |
 | 5.44 | 2026-11-24 | 📈 Variação do mercado: o preço de referência de cada espécie (Coins e Gemas) compara as vendas das últimas 48 h com as de 14 dias; com 5+ vendas recentes e diferença acima de 15% (evento de XP, espécie nova numa atualização, hunt nova em moda), passa a valer o preço recente, e o motivo mostra quanto o mercado subiu ou caiu. |
 | 5.43 · app de PC | 2026-11-24 | Correções vistas no PC: o painel dentro do jogo não escondia (a condição estava invertida); a aba Decisões ficava parada na primeira leitura — agora relê a cada minuto, e o Parecer a cada 5 min. |
 | 5.43 · app de PC | 2026-11-24 | 🎯 Aba Farm no Painel: para cada conta, as 8 hunts de nível mais alto que ela alcança, os pokémon dela que podem ir a campo com a efetividade em cada hunt (tipos + Z-Move), em quantas chegam a ×4, o Z-Move que mais renderia, AoE/shiny/mega, o melhor seu hunt por hunt, os tipos que dão ×4 em cada uma e as espécies que valem comprar. Abas e tipos de decisão com ícones. |
