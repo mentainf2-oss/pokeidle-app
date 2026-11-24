@@ -2092,7 +2092,7 @@ contextBridge.executeInMainWorld({
 });
 
 
-// ===================== PokeIdle App 5.47 (gerado por tools/montar-preload.js — não edite aqui) =====================
+// ===================== PokeIdle App 5.48 (gerado por tools/montar-preload.js — não edite aqui) =====================
 ;(() => {
   const { contextBridge: pontePk, ipcRenderer: ipcPk } = require('electron');
   // o que o script pede ao app: rede só para os sites liberados (API do Claude e precificador) e avisos
@@ -2118,7 +2118,7 @@ contextBridge.executeInMainWorld({
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.47
+// @version      5.48
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -2148,7 +2148,7 @@ contextBridge.executeInMainWorld({
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.47';
+  const VERSAO_APP = '5.48';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -4705,6 +4705,18 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
       const custo5 = 5 * pc.Comum.emCoins * (1 - COMISSAO);          // valor de 5 comuns no mercado
       linhas.push({ acao: 'Craft 5 Comuns → 1 Incomum', custo: custo5 - pc.Incomum.emCoins, ganhoH: (40 - 25) * porPctH - 4 * 25 * porPctH, nota: custo5 > pc.Incomum.emCoins ? 'sai mais caro que comprar a Incomum pronta' : 'mais barato que comprar pronta' });
     }
+    if (pc.Incomum.emCoins && pc.Rara.emCoins) {
+      const custo5 = 5 * pc.Incomum.emCoins * (1 - COMISSAO);
+      linhas.push({ acao: 'Craft 5 Incomuns → 1 Rara', custo: custo5 - pc.Rara.emCoins, ganhoH: (75 - 40) * porPctH - 4 * 40 * porPctH, nota: custo5 > pc.Rara.emCoins ? 'sai mais caro que comprar a Rara pronta' : 'mais barato que comprar pronta' });
+    }
+    // o jogo usa até 5 casas ao mesmo tempo (/shared/casas.mjs: MAX_CASAS_EM_USO): vaga sobrando é XP Share de graça
+    if (CFG.casas.length < 5) for (const n of ['Comum', 'Incomum', 'Rara']) { const p2 = pc[n]; if (!p2.emCoins) continue; const g = p2.pct * porPctH; linhas.push({ acao: `Usar a ${CFG.casas.length + 1}ª casa (${n}) — o jogo deixa 5 em uso`, custo: p2.emCoins, ganhoH: g, payback: dias(p2.emCoins, g), moeda: p2.coins ? 'Coins' : 'pago em Gemas', nota: `você usa ${CFG.casas.length} de 5` }); }
+    // Sacrifício (/shared/sacrificio.mjs): pokémon de nota 3,5+ viram pontos (3,5 = 10, 4,0 = 25…); 1.000 pontos = 336 h de +20% de XP
+    // (o resgate do nível 5 rende 2× mais horas por ponto que o do nível 1). Custo: os pokémon mais baratos dessas notas no mercado.
+    { const faixa = (a2, z) => M.base.filter((v) => v.nota >= a2 && v.nota < z && v.nv < 200 && Date.now() - v.em < 3 * 86400_000).map((v) => v.preco);
+      const op = [[faixa(3.5, 3.6), 10, '3,5'], [faixa(4.0, 4.1), 25, '4,0']].filter(([L]) => L.length >= 5).map(([L, pts, n]) => ({ n, porPt: mediana(L) / pts, preco: mediana(L), pts }));
+      const melhor = op.sort((x, y) => x.porPt - y.porPt)[0];
+      if (melhor) { const custo = melhor.porPt * 1000, g = 0.2 * lucroCasasPorHora(); linhas.push({ acao: `Sacrifício nível 5: ${Math.ceil(1000 / melhor.pts)} pokémon nota ${melhor.n} (~${curto(melhor.preco)} cada) → 14 dias de +20% XP`, custo, ganhoH: g, payback: dias(custo, g), moeda: 'Coins', nota: 'ganho contado só pelo XP Share das casas (+20%); o treinador sobe 20% mais rápido também' }); } }
     const kf = M.resumo[70011]?.minGold || M.medias[70011]?.gold?.media;
     if (kf) {
       const chances = [[0.745, 'Comum'], [0.2, 'Incomum'], [0.05, 'Rara'], [0.005, 'Mítica'], [0.00005, 'Lendária']];
@@ -6264,6 +6276,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
         hoje: (() => { try { const r = compilarParecer(hoje(), true); return { lucroG: r.lucroG, caixaG: r.caixaG, partes: r.partes, vendas: r.mov.pokemon.nV + r.mov.item.nV, compras: r.mov.pokemon.nC + r.mov.item.nC, revendas: r.revendas, prejuizos: r.prejuizos, decisoes: r.decisoes, erros: r.porCat.erro || 0, parados: r.parados }; } catch { return null; } })(),
         parecer: (() => { const r = (E.relatorios || []).find((x) => !x.parcial); return r ? { dia: r.dia, em: r.em, lucroG: r.lucroG, linhas: r.linhas, ajustes: r.ajustes || [], atrasado: !!r.atrasado } : null; })(),
         decisoes: DEC.slice(0, 60), painelOculto: !!ler('pkapp.painelOculto', false),
+        investir: (() => { try { return estudoCasas().linhas.filter((l) => l.custo > 0 && l.ganhoH > 0).map((l) => ({ acao: l.acao, custo: Math.round(l.custo), ganhoH: Math.round(l.ganhoH), payback: l.payback != null ? Math.round(l.payback * 10) / 10 : null, nota: l.nota || null, moeda: l.moeda || null })).sort((x, y) => (x.payback ?? 1e9) - (y.payback ?? 1e9)).slice(0, 8); } catch { return []; } })(),
         aprendizado: { hist: (E.aprendizado?.hist || []).slice(0, 10), itensEvitar: Object.entries(E.aprendizado?.itensEvitar || {}).filter(([, t]) => t > Date.now()).map(([id, t]) => ({ id, nome: E.nomesItens?.[id] || id, ate: t })) },
       }));
     },

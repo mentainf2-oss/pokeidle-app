@@ -327,6 +327,18 @@ async function pkFarmTela(root, s) {
     return pkLinha(nm, h.especies.join(', '), mb, tx);
   })));
   root.append(c2);
+  // investimentos que aceleram o farm desta conta (casas, 5ª casa, craft, sacrifício), pelo retorno em dias
+  const cc = s.contas.find((c) => c.id === pkFarmConta), inv = (cc && cc.r && cc.r.investir) || [];
+  if (inv.length) {
+    const c4 = el('div', 'card'); c4.append(el('h2', 'section first', 'Investimentos que aceleram esta conta'));
+    c4.append(pkTabela(['O quê', 'Custo', 'Ganho por hora', 'Se paga em'], inv.map((l) => {
+      const o = el('div'); o.append(el('b', null, l.acao)); if (l.nota || l.moeda) o.append(el('small', 'muted', ` ${[l.nota, l.moeda].filter(Boolean).join(' · ')}`));
+      const pb = el('span', l.payback != null && l.payback <= 7 ? 'ok' : '', l.payback != null ? `${String(l.payback).replace('.', ',')} dias` : '—');
+      return pkLinha(o, pkFmt(l.custo), `+${pkFmt(l.ganhoH)}`, pb);
+    })));
+    c4.append(el('p', 'tip', 'Ganho medido pelo lucro das casas (XP Share) no ritmo atual da conta. Verde = se paga em até 7 dias. O app não compra isso sozinho: a decisão é sua.'));
+    root.append(c4);
+  }
   // comprar
   if (F.comprar && F.comprar.length) {
     const c3 = el('div', 'card'); c3.append(el('h2', 'section first', 'Espécies que valem comprar para estas hunts'));
