@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.24
+// @version      5.25
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -129,6 +129,7 @@
   if (!CFG.migShiny521) {                                         // v5.21: o jogador pediu shiny nas casas, até 5k 💠, só os muito vendidos
     CFG.casaShiny = true; CFG.casaShinyPrecoMax = 5000; CFG.casaShinyVendasMin = CFG.casaShinyVendasMin || 40; CFG.migShiny521 = true; salvarCfg();
   }
+  if (!E.casaContaReal) { E.casaComprasHoje = null; E.casaShinyHoje = null; E.casaContaReal = true; }   // v5.25: a conta antiga somava sorteios perdidos
   for (const r of E.regras || []) r.reservadas = 0;                 // compras agendadas não sobrevivem a recarregar a página
   const novoDia = () => { if (E.dia > hoje()) { E.dia = hoje(); persistir(); } if (E.dia !== hoje()) { E.dia = hoje(); E.gastoHoje = 0; E.gemasHoje = 0; persistir(); } };
 
@@ -1273,6 +1274,7 @@
       return;
     }
     const o = E.ops.find((x) => x.tipo === 'compra' && x.pokemonId != null && x.pokemonId === p.pokemonId); if (o) { o.registrado = true; persistir(); }
+    if (p.depois === 'casa') contarCompraCasa(p);
     if (p.depois === 'casa' || p.casaKey) setTimeout(() => registrarNoPosto(p), 2500);
     else if (p.depois === 'revender') setTimeout(() => anunciarPokemon({ pokemonId: p.pokemonId, nome: p.nome, nv: p.nv, nota: p.nota, pot: p.pot, iv: p.iv, shiny: p.shiny, custo: p.preco, moedaCompra: p.moeda || 'gold', alvo: p.revenderPor, moeda: p.moeda || 'gold', lucro: p.lucro, ficha: p.ficha }), 5000);
   }
@@ -1635,7 +1637,7 @@
     const { a, f, lucro, lucroH, horas, venda } = melhor;
     const ok = await comprar(a, { tipo: 'pokemon', pokemonId: f.id, nome: f.nome, nv: f.level, nota: f.nota, pot: f.potencia, iv: f.ivTotal, xp: f.xp, ficha: fichaMin(f), casaKey: key, depois: 'casa', lucro,
       motivo: `casa ${cid}: lucro ~${curto(lucro)}${horas ? ` (${curto(lucroH)}/h em ~${horas.toFixed(0)} h)` : ''}, vende ~${curto(venda)} no Nv ${alvo}` });
-    if (ok) { E.casaComprasHoje = { dia: E.dia, n: feitas + 1 }; persistir(); }
+    // a conta do dia sobe só quando a compra é CONFIRMADA (sorteio perdido não conta) — ver contarCompraCasa
   }
   // ✨ shiny: o melhor nível para vender (até nivelMaxCasa) pelo precificador, pelo lucro/hora sobre o custo (ou o maior preço sem custo)
   function melhorNivelShiny(f, nvAgora, custo, xpAgora = null, xpH = xpHoraCasa(25)) {
@@ -1690,8 +1692,13 @@
     const { a, f, m } = melhor;
     const ok = await comprar(a, { tipo: 'pokemon', pokemonId: f.id, nome: f.nome, nv: f.level, nota: f.nota, pot: f.potencia, iv: f.ivTotal, xp: f.xp, shiny: true, shinyCasa: true, ficha: fichaMin(f), casaKey: key, depois: 'casa', lucro: m.lucro, alvoNv: m.L,
       motivo: `casa ${cid} (shiny ${m.familia || f.nome}, ${m.nFam} vendas/30 d): vende ~${fmt(m.venda)} 💠 no Nv ${m.L} (rápido; justo ${fmt(m.justo)}), lucro ~${fmt(Math.round(m.lucro))} 💠${m.horas ? ` em ~${m.horas.toFixed(0)} h` : ''}` });
-    if (ok) { E.casaShinyHoje = { dia: E.dia, n: feitas + 1 }; persistir(); }
+
     return !!ok;
+  }
+  function contarCompraCasa(p) {
+    novoDia();
+    const k = p.shiny || p.shinyCasa ? 'casaShinyHoje' : 'casaComprasHoje';
+    E[k] = { dia: E.dia, n: (E[k]?.dia === E.dia ? E[k].n : 0) + 1 }; persistir();
   }
   function registrarNoPosto(p) {
     let key = p.casaKey;
@@ -3629,7 +3636,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     }
   }
 
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.24' }, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.25' }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));
