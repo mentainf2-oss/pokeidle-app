@@ -105,7 +105,7 @@ async function renderTrader() {
   if (pkTab === 'ajustes') {
     const card = el('div', 'card');
     card.append(el('h2', 'section', 'Atualização automática'),
-      el('p', 'sub', 'O repositório é privado: para o app se atualizar sozinho, cole um token do GitHub só de leitura (Settings → Developer settings → Fine-grained tokens → só o repositório pokeidle-app, permissão Contents: Read-only). Ele fica só neste PC.'));
+      el('p', 'sub', 'O app confere versões novas a cada 15 min e se instala sozinho quando o PC fica 2 min sem uso. Enquanto o repositório for público, não precisa de nada. Se você deixar o repositório privado, cole aqui um token do GitHub só de leitura (Settings → Developer settings → Fine-grained tokens → só o repositório pokeidle-app, permissão Contents: Read-only). Ele fica só neste PC.'));
     const inp = el('input'); inp.type = 'password'; inp.placeholder = s.temToken ? 'token salvo — cole outro para trocar' : 'github_pat_…'; inp.style.width = '420px';
     const act = el('div', 'actions'); act.append(inp, button('Salvar token', 'primary', async () => { pkEstado = await window.idle.invoke('poke:pkapp:token', inp.value); inp.value = ''; toast('Token salvo. O app confere versões novas de hora em hora.'); renderTrader(); }));
     card.append(act);

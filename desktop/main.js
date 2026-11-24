@@ -241,26 +241,27 @@ function installUpdate() {
 }
 function setupAutoUpdate() {
   if (!app.isPackaged) return;
+  // Token só de leitura (aba Lucro → Ajustes do app): só é preciso se o repositório estiver privado.
+  const tokenSalvo = () => { try { return JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'pkapp.json'), 'utf8')).githubToken || ''; } catch { return ''; } };
   const auto = !process.env.PORTABLE_EXECUTABLE_FILE && !(isLinux && !process.env.APPIMAGE);
   if (!auto) {
-    // Só confere a versão publicada (o mesmo arquivo que o atualizador lê).
-    const tok = (() => { try { return JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'pkapp.json'), 'utf8')).githubToken || ''; } catch { return ''; } })();
-    if (!tok) return;
-    const feed = 'https://api.github.com/repos/mentainf2-oss/pokeidle-app/releases/latest';
-    const check = () => fetch(feed, { headers: { Authorization: `token ${tok}`, Accept: 'application/vnd.github+json' } }).then((r) => (r.ok ? r.json() : {})).then((j) => `version: ${String(j.tag_name || '').replace(/^desktop-v|^v/, '')}`).then((t) => {
-      const m = /^version:\s*([\d.]+)/m.exec(t);
-      if (m && newer(m[1], app.getVersion()) && !seg.skipped(m[1])) setUpdate({ state: 'manual', version: m[1] });
-    }).catch(() => {});
+    // Portátil e .deb: só confere a versão publicada e avisa.
+    const check = () => { const tok = tokenSalvo(); return fetch('https://api.github.com/repos/mentainf2-oss/pokeidle-app/releases/latest', { headers: { Accept: 'application/vnd.github+json', ...(tok ? { Authorization: `token ${tok}` } : {}) } })
+      .then((r) => (r.ok ? r.json() : {})).then((j) => {
+        const v = String(j.tag_name || '').replace(/^desktop-v|^v/, '');
+        if (/^[\d.]+$/.test(v) && newer(v, app.getVersion()) && !seg.skipped(v)) setUpdate({ state: 'manual', version: v });
+      }).catch(() => {}); };
     check();
-    setInterval(check, 60 * 60 * 1000); // procura versão nova de hora em hora
+    setInterval(check, 15 * 60 * 1000);
     return;
   }
-  // Repositório privado: o atualizador usa o token só de leitura que a pessoa colou no app (Lucro → Ajustes do app).
-  const tok = (() => { try { return JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'pkapp.json'), 'utf8')).githubToken || ''; } catch { return ''; } })();
-  if (!tok) return;
-  autoUpdater.setFeedURL({ provider: 'github', owner: 'mentainf2-oss', repo: 'pokeidle-app', private: true, token: tok });
-  autoUpdater.requestHeaders = { Authorization: `token ${tok}` };
-  // Baixa só depois de conferir: a versão que a pessoa pulou (voltou dela por problema) não volta sozinha.
+  // Repositório público: atualiza sem token. Privado: com o token salvo. Confere a cada 15 min.
+  const configurarFeed = () => {
+    const tok = tokenSalvo();
+    if (tok) { autoUpdater.setFeedURL({ provider: 'github', owner: 'mentainf2-oss', repo: 'pokeidle-app', private: true, token: tok }); autoUpdater.requestHeaders = { Authorization: `token ${tok}` }; }
+    else autoUpdater.setFeedURL({ provider: 'github', owner: 'mentainf2-oss', repo: 'pokeidle-app' });
+  };
+  configurarFeed();
   autoUpdater.autoDownload = false;
   autoUpdater.on('error', () => { if (update && update.state === 'downloading') setUpdate(null); });
   autoUpdater.on('update-available', (i) => {
@@ -269,13 +270,22 @@ function setupAutoUpdate() {
     autoUpdater.downloadUpdate().catch(() => { if (update && update.state === 'downloading') setUpdate(null); });
   });
   autoUpdater.on('download-progress', (p) => { if (update) { update.percent = Math.round(p.percent || 0); send('app:state', appState()); } });
+  // Atualiza sozinho: instala quando o PC está sem uso há 2 min (ou no máximo 30 min depois de baixar). O app fecha e
+  // reabre em segundos e as contas voltam logadas; o jogo continua do ponto em que estava.
+  let pronta = 0;
   autoUpdater.on('update-downloaded', (i) => {
     setUpdate({ state: 'ready', version: i.version });
-    notify('Atualização pronta', `O PokeIdle App ${i.version} está pronto. Clique em "Atualizar agora" no Início.`, showMain);
+    pronta = Date.now();
+    notify('Atualização pronta', `O PokeIdle App ${i.version} vai se instalar sozinho em instantes (ou clique em "Atualizar agora" no Início).`, showMain);
   });
-  const check = () => autoUpdater.checkForUpdates().catch(() => {});
+  setInterval(() => {
+    if (!pronta || !update || update.state !== 'ready') return;
+    let ocioso = 0; try { ocioso = powerMonitor.getSystemIdleTime(); } catch {}
+    if (ocioso >= 120 || Date.now() - pronta > 30 * 60 * 1000) installUpdate();
+  }, 30 * 1000);
+  const check = () => { configurarFeed(); autoUpdater.checkForUpdates().catch(() => {}); };
   check();
-  setInterval(check, 60 * 60 * 1000); // procura versão nova de hora em hora
+  setInterval(check, 15 * 60 * 1000);
 }
 
 // ---------- IPC da casca ----------

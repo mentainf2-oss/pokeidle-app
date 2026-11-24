@@ -2,6 +2,7 @@
 
 | Versão | Data | O que mudou |
 | --- | --- | --- |
+| 5.36 | 2026-11-24 | Config → "Levar a configuração para outro lugar": copia todos os ajustes (menos a chave do Claude) e importa em outro lugar, como o app de PC; ao importar, fica em simulação. App de PC: atualiza sozinho a cada 15 min sem precisar de token enquanto o repositório for público, e instala quando o PC fica 2 min sem uso. |
 | 5.35 | 2026-11-24 | Log de reajuste de item mostrava "Nv undefined" no nome (ex.: Mega Shiny Stone Fragment). |
 | 5.34 | 2026-11-24 | Drops do boss: 4 Mega Shiny e 2 Mega estavam parados no inventário. A revenda de item recusava um segundo anúncio do mesmo item, e o inventário às vezes chega depois do aviso do drop. Agora cada leva vira anúncio próprio (até 3 por item) e o app confere o inventário a cada 2 min durante o boss. |
 | 5.33 | 2026-11-24 | Ponte com o app de PC (pasta desktop/): resumo da conta, contas irmãs (uma conta sua nunca compra nem rebaixa anúncio de outra conta sua) e papel de cada conta (Tudo, Boss, Casas, Mercado). |

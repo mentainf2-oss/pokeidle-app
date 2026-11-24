@@ -2040,7 +2040,7 @@ contextBridge.executeInMainWorld({
 });
 
 
-// ===================== PokeIdle App 5.35 (gerado por tools/montar-preload.js — não edite aqui) =====================
+// ===================== PokeIdle App 5.36 (gerado por tools/montar-preload.js — não edite aqui) =====================
 ;(() => {
   const { contextBridge: pontePk, ipcRenderer: ipcPk } = require('electron');
   // o que o script pede ao app: rede só para os sites liberados (API do Claude e precificador) e avisos
@@ -2066,7 +2066,7 @@ contextBridge.executeInMainWorld({
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.35
+// @version      5.36
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -2096,7 +2096,7 @@ contextBridge.executeInMainWorld({
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.35';
+  const VERSAO_APP = '5.36';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -2168,6 +2168,21 @@ contextBridge.executeInMainWorld({
   if ('sniper' in CFG.mod) { CFG.mod.sniperPk = CFG.mod.sniper; delete CFG.mod.sniper; }       // migração da v4.0
   if ('itens' in CFG.mod) { CFG.mod.sniperIt = CFG.mod.itens; delete CFG.mod.itens; }
   const salvarCfg = () => salvar('pkapp.cfg', CFG);
+  // levar a configuração para outro lugar (navegador ↔ app de PC), sem a chave da API e sem os marcadores internos
+  const SEGREDOS = ['claudeKey'];
+  function exportarCfg() { const c = JSON.parse(JSON.stringify(CFG)); for (const k of SEGREDOS) delete c[k]; for (const k of Object.keys(c)) if (/^mig/.test(k)) delete c[k]; return JSON.stringify({ pkappCfg: 1, de: VERSAO_APP, cfg: c }); }
+  function importarCfg(txt) {
+    let j; try { j = JSON.parse(String(txt || '').trim()); } catch { return { ok: false, erro: 'o texto não é uma configuração válida' }; }
+    const c = j && j.pkappCfg && j.cfg; if (!c || typeof c !== 'object') return { ok: false, erro: 'faltou a configuração' };
+    let n = 0;
+    for (const [k, v] of Object.entries(c)) {
+      if (SEGREDOS.includes(k) || /^mig/.test(k) || !(k in PADRAO)) continue;
+      const pad = PADRAO[k];
+      if (pad !== null && typeof pad !== typeof v) continue;                            // só valores do mesmo tipo
+      CFG[k] = typeof pad === 'object' && pad && !Array.isArray(pad) ? { ...pad, ...v } : v; n++;
+    }
+    CFG.simulacao = true; salvarCfg(); return { ok: true, n };
+  }
   if ((CFG.cfgVersao || 0) < 47) {                                // v4.7: menos pedidos ao servidor
     CFG.snipeSeg = Math.max(CFG.snipeSeg || 0, 15); CFG.snipeItSeg = Math.max(CFG.snipeItSeg || 0, 45);
     CFG.coletaSeg = Math.max(CFG.coletaSeg || 0, 45); CFG.intervaloSeg = Math.max(CFG.intervaloSeg || 0, 45);
@@ -5543,7 +5558,13 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
         <p class="mudo">Vender em Gemas só faz você ganhar Gemas — não precisa da chave acima. A chave vale para gastar Gemas.</p>
       </div>
       <div class="form" id="g-form"></div>
-      <div style="margin-top:10px" class="grade"><button class="bt cinza" id="g-reset">Zerar estatísticas do dia</button><button class="bt verm" id="g-apagar">Apagar regras e histórico</button></div>`;
+      <div style="margin-top:10px" class="grade"><button class="bt cinza" id="g-reset">Zerar estatísticas do dia</button><button class="bt verm" id="g-apagar">Apagar regras e histórico</button></div>
+      <div class="cart"><h4>📦 Levar a configuração para outro lugar (ex.: o app de PC)</h4>
+        <p class="mudo" style="margin:0 0 6px">Copia todos os ajustes, menos a chave da API do Claude. Ao importar, o app fica em simulação até você passar para o modo real.</p>
+        <textarea id="g-cfg" rows="3" style="width:100%;box-sizing:border-box" placeholder="Cole aqui a configuração copiada"></textarea>
+        <div class="grade" style="margin-top:6px"><button class="bt cinza" id="g-cfg-copiar">Copiar configuração</button><button class="bt azul" id="g-cfg-importar">Importar</button></div></div>`;
+    $('#g-cfg-copiar').onclick = async () => { const t = exportarCfg(); $('#g-cfg').value = t; try { await navigator.clipboard.writeText(t); log('📦 configuração copiada (sem a chave do Claude)', 'ok'); } catch { log('📦 configuração no campo abaixo: selecione e copie', 'ok'); } };
+    $('#g-cfg-importar').onclick = () => { const r = importarCfg($('#g-cfg').value); log(r.ok ? `📦 configuração importada: ${r.n} ajustes (em simulação; a chave do Claude não vem junto)` : '📦 não consegui importar: ' + r.erro, r.ok ? 'ok' : 'erro'); if (r.ok) { $('#g-cfg').value = ''; montarConfig(); pintar(); } };
     const f = $('#g-form');
     for (const [k, rot, tipo] of campos) {
       const l = document.createElement('label'); l.textContent = rot;
@@ -5819,7 +5840,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     papeis: () => Object.keys(PAPEIS),
   };
   try { Object.defineProperty(PAGINA, '__PKAPP_PONTE', { value: ponteDesktop, configurable: true }); } catch {}
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, estudoToken, resultadoBossDia, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: VERSAO_APP }, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, estudoToken, resultadoBossDia, exportarCfg, importarCfg, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: VERSAO_APP }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));
