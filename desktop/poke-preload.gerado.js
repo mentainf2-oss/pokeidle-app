@@ -2067,6 +2067,8 @@ contextBridge.executeInMainWorld({
           return { chance: jogo.chanceShiny || 0, lure: jogo.eu.lureAte || 0, kick: fim('kick'), twitch: fim('twitch') };
         },
         hunts() { return hunts.slice(); },
+        // PokeIdle App: para cada espécie, em que ela evolui e em que nível (evoluções de um caminho só)
+        evoMapa() { return catalogoPve().then(({ map }) => { const out = {}; for (const c of map.values()) { const id = Number(c.evolvesToId) || 0, nv = Number(c.evolveLevel) || 0; const d = id && map.get(id); if (d && nv > 0 && c.name && d.name && c.name !== d.name) out[c.name] = { para: d.name, nivel: nv }; } return out; }).catch(() => ({})); },
         // Encaixe: `__plug('nome', function (I) { ... })` instala uma vez; o que ela expõe fica em `extra`.
         extra: extras.api,
         __plug(nome, fn) {
@@ -2100,7 +2102,7 @@ contextBridge.executeInMainWorld({
 });
 
 
-// ===================== PokeIdle App 5.49 (gerado por tools/montar-preload.js — não edite aqui) =====================
+// ===================== PokeIdle App 5.50 (gerado por tools/montar-preload.js — não edite aqui) =====================
 ;(() => {
   const { contextBridge: pontePk, ipcRenderer: ipcPk } = require('electron');
   // o que o script pede ao app: rede só para os sites liberados (API do Claude e precificador) e avisos
@@ -2126,7 +2128,7 @@ contextBridge.executeInMainWorld({
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.49
+// @version      5.50
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -2156,7 +2158,7 @@ contextBridge.executeInMainWorld({
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.49';
+  const VERSAO_APP = '5.50';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -2333,7 +2335,7 @@ contextBridge.executeInMainWorld({
     ['auditoria', (m) => /^🔎/.test(m)], ['erro', (m, t) => t === 'erro' || /^erro|falhou/i.test(m)], ['aprendizado', (m) => /^🎓 aprendizado|^📋 parecer/.test(m)],
     ['claude', (m) => /^🧠/.test(m)], ['venda', (m) => /^💰 vendido|^ANUNCIAR|^VENDER|^🪟/.test(m)], ['preço', (m) => /^(BAIXAR|SUBIR|REAJUSTAR|CORRIGIR)|^🔁|^🤝 aplicando/.test(m)],
     ['negociação', (m) => /^🤝/.test(m)], ['compra', (m, t) => t === 'compra' || /^COMPRAR|^🛒|^✨/.test(m)], ['casa', (m) => /^🏠/.test(m)], ['boss', (m) => /^👑|Boss Token|^🎁/.test(m)],
-    ['pulou', (m) => /pulei|^⛔|não compro|sem preço|sem câmbio|^📚|^🐢/.test(m)], ['hunt', (m) => /^🗺️/.test(m)], ['ajuste', (m) => /^⚙️|^👥|^▶|^⏹|^🧪|^⚡ modo|ligado$|desligado$/.test(m)],
+    ['pulou', (m) => /pulei|^⛔|não compro|sem preço|sem câmbio|^📚|^🐢/.test(m)], ['hunt', (m) => /^🗺️/.test(m)], ['evolução', (m) => /^🧬/.test(m)], ['ajuste', (m) => /^⚙️|^👥|^▶|^⏹|^🧪|^⚡ modo|ligado$|desligado$/.test(m)],
   ];
   const IGNORAR_DEC = /^💰 lucro real|planilha|^🔮 precificador|^🎓 (em|estudo)|^🧾|^📊/;
   let decSujo = false;
@@ -3595,12 +3597,28 @@ contextBridge.executeInMainWorld({
     }
     M.sniperRodando = false;
   }
+  // 🧬 revenda de evolução: anúncio de uma espécie já no nível de evoluir, quando a forma evoluída vale bem mais no mercado.
+  // O app ainda não evolui sozinho (falta o Explorador ver a ação uma vez): por enquanto avisa a oportunidade com o ganho.
+  async function carregarEvo() {
+    if (Date.now() - (M.evoEm || 0) < 3600_000) return; M.evoEm = Date.now();
+    const I = PAGINA.__idleterinoMercado; if (!I || typeof I.evoMapa !== 'function') return;
+    try { const m = await I.evoMapa(); if (m && typeof m === 'object') M.evo = m; } catch {}
+  }
+  function evoOportunidade(a, f) {
+    const e = M.evo?.[f.nome]; if (!e || !(f.level >= e.nivel) || f.shiny) return;
+    const ev = precoMercado(e.para, f.level, f.nota, f.potencia, f.ivTotal); if (!ev || ev.n < 5 || !/^espécie/.test(ev.como)) return;
+    const liq = ev.preco * CFG.vendaFatorMediana * (1 - COMISSAO), lucro = liq - a.preco;
+    if (lucro < Math.max(CFG.snipeLucroMin, a.preco * 0.25)) return;
+    M.evoOport = [{ em: Date.now(), nome: f.nome, para: e.para, nv: f.level, preco: a.preco, vale: Math.round(ev.preco), lucro: Math.round(lucro), anuncio: a.id }, ...(M.evoOport || []).filter((x) => x.anuncio !== a.id)].slice(0, 20);
+    avisoRaro('evo' + a.id, `🧬 evolução: ${f.nome} Nv ${fmt(f.level)} (nota ${f.nota}) a ${curto(a.preco)} → evoluído ${e.para} vale ~${curto(ev.preco)} no mesmo nível (+${curto(lucro)} depois da taxa). Evolua um pelo jogo uma vez e o app aprende a fazer sozinho`, 240);
+  }
   async function avaliarSnipePokemon(a) {
     if (a.estado !== 'aberto' || !podeMoeda(a.moeda, CFG.snipePkMoeda)) return;
     for (const r of E.regras) if (r.tipo !== 'item' && regraBate(r, a)) { M.snipeStats.oportunidades++; return comprar(a, { ...ctxDaRegra(r, a), motivo: 'sniper (lista)' }); }
     if (!CFG.snipeAutoPokemon) return;
     const f = a.ficha || {};
     if (f.level < 50 && !f.shiny) return;
+    if (a.moeda === 'gold') { try { evoOportunidade(a, f); } catch {} }
     let ref, moedaVenda = a.moeda;
     if (a.moeda === 'gold') { if (f.shiny || M.base.length < 300) return; ref = precoMercado(f.nome, f.level, f.nota, f.potencia, f.ivTotal); }
     else {
@@ -5215,6 +5233,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
         if (CFG.mod.prey) await cicloPrey();
         if (CFG.mod.claude) await cicloClaude();
         if (CFG.mod.hunt) await cicloHunt();
+        if (CFG.mod.sniperPk) await carregarEvo();
       } catch (e) { log('erro: ' + e.message, 'erro'); }
       pintar();
       await dormir(CFG.intervaloSeg * 1000 * (0.85 + Math.random() * 0.3));

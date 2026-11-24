@@ -2067,6 +2067,8 @@ contextBridge.executeInMainWorld({
           return { chance: jogo.chanceShiny || 0, lure: jogo.eu.lureAte || 0, kick: fim('kick'), twitch: fim('twitch') };
         },
         hunts() { return hunts.slice(); },
+        // PokeIdle App: para cada espécie, em que ela evolui e em que nível (evoluções de um caminho só)
+        evoMapa() { return catalogoPve().then(({ map }) => { const out = {}; for (const c of map.values()) { const id = Number(c.evolvesToId) || 0, nv = Number(c.evolveLevel) || 0; const d = id && map.get(id); if (d && nv > 0 && c.name && d.name && c.name !== d.name) out[c.name] = { para: d.name, nivel: nv }; } return out; }).catch(() => ({})); },
         // Encaixe: `__plug('nome', function (I) { ... })` instala uma vez; o que ela expõe fica em `extra`.
         extra: extras.api,
         __plug(nome, fn) {
