@@ -2,6 +2,7 @@
 
 | Versão | Data | O que mudou |
 | --- | --- | --- |
+| 5.12 | 2026-11-23 | Negociação: quando um comprador manda mensagem (Comércio) num anúncio seu, o Claude responde e pode baixar o preço para fechar na hora. O código garante o piso (custo + 3%; sem custo, 90% do justo), só baixa, respeita os 30 min entre mudanças e a compra é sempre pelo anúncio. Até 8 respostas por conversa. Liga/desliga em Config. |
 | 5.11 | 2026-11-23 | Vender rápido, sempre com lucro: pokémon em 💠 pelo "vender rápido" do precificador, em Coins a 90% do mercado, itens um degrau abaixo do menor anúncio. O app ajusta todos os seus anúncios a cada 30 min (os seus também), nunca abaixo do custo + 3%; sem custo conhecido, pokémon não desce de 95% do justo. |
 | 5.10 | 2026-11-23 | Boss Token: compra sempre até o preço que você define (Coins e 💠), sem margem de lucro e sem passar pela conferência do Claude. Sem preço definido, o automático é o ponto de equilíbrio do boss. |
 | 5.9 | 2026-11-23 | Lucro real: o app lê o histórico de compras e vendas da sua conta no jogo (24 h e 7 dias, por moeda) a cada 30 min e mostra na aba Análise. |
