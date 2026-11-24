@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.30
+// @version      5.31
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -1462,11 +1462,14 @@
           min * (1 + CFG.margemMinGemas) <= medOrb * (1 - COMISSAO) * cambio;
         if (!daLista && !flip && !cruz) continue;
         const resp = await pedirM({ t: 'market.item', itemId: id, moeda }, 'item', (m) => m.itemId === id && m.moeda === moeda);
+        const outros = (resp?.linhas || []).filter((x) => !M.meus.some((y) => y.id === x.id)).map((x) => x.preco).sort((x, y) => x - y);
         for (const a of resp?.linhas || []) {
           if (M.meus.some((x) => x.id === a.id)) continue;
           const regra = regrasItem.find((x) => regraBate(x, a));
           if (regra) { await comprar(a, { ...ctxDaRegra(regra, a), motivo: 'sniper (lista)' }); continue; }
-          if (flip) await flipItem(id, a, med, moeda, moeda);
+          // revenda realista: um degrau abaixo do próximo anúncio mais caro (é com ele que você vai concorrer), nunca acima da média de 7 dias
+          const prox = outros.find((p2) => p2 > a.preco), degrau = (v) => (moeda === 'orb' ? v - 1 : Math.floor(v * 0.99));
+          if (flip) { const ref = Math.min(med, prox ? degrau(prox) : med); if (moeda === 'orb' && (M.medias[id]?.orb?.unidades || 0) < 20) continue; await flipItem(id, a, ref, moeda, moeda); }
           else if (cruz) await flipItem(id, a, medOrb, 'gold', 'orb', cambio);
         }
       }
@@ -1479,7 +1482,7 @@
     const liquidoUn = medVenda * (1 - COMISSAO);                         // na moeda de venda
     const custoNaVenda = moedaCompra === moedaVenda ? a.preco : a.preco / cambio;
     const lucroUn = liquidoUn - custoNaVenda;
-    const margem = moedaVenda === 'orb' ? CFG.margemMinGemas : CFG.margemMin;
+    const margem = moedaVenda === 'orb' ? Math.max(CFG.margemMinGemas, custoNaVenda >= 300 ? 0.15 : 0) : CFG.margemMin;   // item caro em Gemas: pelo menos 15%
     if (lucroUn / custoNaVenda < margem) return;
     const k = ck(id, moedaVenda);
     const pendente = Object.values(E.pendentes).filter((x) => x.tipo === 'item' && Number(x.itemId) === id).reduce((s2, x) => s2 + (x.qtd || 0), 0);
@@ -3707,7 +3710,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     }
   }
 
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.30' }, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.31' }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));
