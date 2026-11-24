@@ -2,6 +2,7 @@
 
 | Versão | Data | O que mudou |
 | --- | --- | --- |
+| 5.16 | 2026-11-24 | Orçamento do dia acertado pelo histórico da conta a cada 10 min: conta só o que foi comprado de verdade (o sorteio de 3 s perdido não custa nada) mais o que está em andamento. Antes, 9.999 💠 contados contra 687 💠 gastos de fato travavam as compras. |
 | 5.15 | 2026-11-24 | Casa vazia: o app coloca primeiro um pokémon da sua coleção (fora da equipe, vendável, abaixo do nível-alvo), o que mais ganha valor até o alvo; só compra se não houver. Conferência do Claude: recebe as contas já feitas (lucro, margem, vendas de referência) e só veta por critérios claros; resposta em JSON com o número que decidiu. |
 | 5.13 | 2026-11-23 | Aba Claude: histórico das conferências de compra (aprovadas, vetadas e o motivo de cada uma), com o resumo das últimas 24 h. |
 | 5.12 | 2026-11-23 | Negociação: quando um comprador manda mensagem (Comércio) num anúncio seu, o Claude responde e pode baixar o preço para fechar na hora. O código garante o piso (custo + 3%; sem custo, 90% do justo), só baixa, respeita os 30 min entre mudanças e a compra é sempre pelo anúncio. Até 8 respostas por conversa. Liga/desliga em Config. |

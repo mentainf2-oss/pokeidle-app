@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.15
+// @version      5.16
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -423,24 +423,47 @@
   }
   /* --------- 💰 lucro real: o histórico de compras e vendas da sua conta, no próprio jogo --------- */
   async function lerHistoricoProprio(msg, horas = 24 * 7, maxPaginas = 8) {
-    const lim = Date.now() - horas * 3600_000, linhas = [];
+    const lim = Date.now() - horas * 3600_000, linhas = []; let completo = false, ok = false;
     for (let pagina = 0; pagina < maxPaginas; pagina++) {
       const seq = 9000 + Math.floor(Math.random() * 90000);
       const resp = await pedir({ t: msg, pagina, seq }, (m) => m.t === 'market' && String(m.aba || '').startsWith('historico') && m.aba !== 'historicoGlobal' && (m.seq === seq || m.pagina === pagina), 5000);
-      const L = resp?.linhas || []; if (!L.length) break;
+      if (!resp) break;                                             // sem resposta: não dá para dizer que o histórico está completo
+      ok = true;
+      const L = resp.linhas || []; if (!L.length) { completo = true; break; }
       linhas.push(...L);
-      if (!resp.temMais || Math.min(...L.map((l) => l.em || Date.now())) < lim) break;
+      if (!resp.temMais) { completo = true; break; }
+      if (Math.min(...L.map((l) => l.em || Date.now())) < lim) { completo = true; break; }
     }
-    return linhas.filter((l) => (l.em || 0) >= lim && l.tipo !== 'deposito' && l.tipo !== 'saque' && l.tipo !== 'diamante');
+    const res = linhas.filter((l) => (l.em || 0) >= lim && l.tipo !== 'deposito' && l.tipo !== 'saque' && l.tipo !== 'diamante');
+    res.completo = ok && completo; res.maisAntigo = linhas.length ? Math.min(...linhas.map((l) => l.em || Date.now())) : null;
+    return res;
   }
   async function conferirLucroReal(forcar = false) {
-    if (!forcar && Date.now() - (E.real?.em || 0) < 30 * 60_000) return;
+    const comprando = CFG.mod.compras || CFG.mod.sniperIt || CFG.mod.sniperPk || CFG.tokenAutoCompra;
+    if (!forcar && Date.now() - (E.real?.em || 0) < (comprando ? 10 : 30) * 60_000) return;
     const [vendas, compras] = [await lerHistoricoProprio('market.historico'), await lerHistoricoProprio('market.historicoCompras')];
     const norm = (l, lado) => ({ id: l.id, em: l.em, desc: l.descricao, pokemonId: l.pokemonId ?? l.ficha?.id ?? null, itemId: l.itemId ?? null, qtd: Number(String(l.descricao || '').match(/^(\d+)×/)?.[1]) || l.qtd || 1, tipo: l.tipo || (l.pokemonId || l.ficha?.speciesId ? 'pokemon' : 'item'), moeda: l.moeda, bruto: l.bruto ?? l.preco ?? 0, liquido: lado === 'venda' ? l.liquido ?? liquidoVenda(l.bruto ?? l.preco ?? 0, l.moeda, l.tipo || (l.ficha ? 'pokemon' : 'item')) : null });
     E.real = { em: Date.now(), vendas: vendas.map((l) => norm(l, 'venda')), compras: compras.map((l) => norm(l, 'compra')) };
     persistir();
+    acertarOrcamento(compras);
     const r = resumoReal(24);
     log(`💰 lucro real (24 h, histórico do jogo): Coins ${curto(r.gold.recebido)} recebidos − ${curto(r.gold.gasto)} gastos; Gemas ${fmt(Math.round(r.orb.recebido))} − ${fmt(r.orb.gasto)}`, 'ok');
+  }
+  // o orçamento do dia conta cada compra AGENDADA (o sorteio de 3 s pode ser perdido). Com o histórico da conta em mãos,
+  // o gasto do dia passa a ser o que foi comprado DE VERDADE desde a meia-noite de Brasília + o que ainda está em andamento.
+  function acertarOrcamento(compras) {
+    const meia = Date.parse(hoje() + 'T00:00:00-03:00');
+    if (!compras.completo && !(compras.maisAntigo != null && compras.maisAntigo < meia)) return;   // não leu o dia inteiro: não mexe
+    novoDia();
+    const ag = Date.now(), andamento = { orb: 0, gold: 0 };
+    for (const g of E.gastosRecentes || []) if (ag - g.em < 4 * 60_000 && andamento[g.moeda] != null) andamento[g.moeda] += g.total;
+    const real = { orb: 0, gold: 0 };
+    for (const c of E.real.compras) if (c.em >= meia && real[c.moeda] != null) real[c.moeda] += c.bruto;
+    const antes = { orb: E.gemasHoje, gold: E.gastoHoje };
+    E.gemasHoje = Math.round(real.orb + andamento.orb); E.gastoHoje = Math.round(real.gold + andamento.gold);
+    persistir();
+    if (Math.abs(antes.orb - E.gemasHoje) >= 10 || Math.abs(antes.gold - E.gastoHoje) >= 1e6)
+      log(`🧾 orçamento do dia acertado pelo histórico: 💠 ${fmt(antes.orb)} → ${fmt(E.gemasHoje)} · Coins ${curto(antes.gold)} → ${curto(E.gastoHoje)} (${E.gemasHoje < antes.orb || E.gastoHoje < antes.gold ? 'a diferença eram sorteios perdidos, que não custaram nada' : 'inclui compras feitas fora do app'})`, 'ok');
   }
   // soma por moeda numa janela: gasto (compras), recebido (vendas líquidas da comissão) e saldo
   function resumoReal(horas) {
@@ -3144,7 +3167,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     }
   }
 
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.15' }, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.16' }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));
