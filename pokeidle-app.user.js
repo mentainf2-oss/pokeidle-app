@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.18
+// @version      5.19
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -60,7 +60,12 @@
     // ritmo de pedidos ao servidor (ele segura rajadas por conta)
     pedidoMinMs: 1500, pedidosPorMin: 24,
     vendaFatorMediana: 0.95, vendaDias: 7, especiesPreferidas: [],
-    vendaRapida: true, fatorRapido: 0.9, mexerEmTodos: true, casaDaColecao: true, casaNaoParar: true, filaMax: 8,   // casa pronta com vitrine cheia: vai para a fila e entra outro negociar: true, negociarMaxRespostas: 8,   // vender rápido (com lucro) e gerir todos os seus anúncios, não só os do app
+    vendaRapida: true, fatorRapido: 0.9, mexerEmTodos: true,   // vender rápido (com lucro) e gerir todos os seus anúncios, não só os do app
+    casaDaColecao: true, casaNaoParar: true, filaMax: 8,         // casa pronta com vitrine cheia: vai para a fila e entra outro
+    alvoPorPokemon: true, nivelMaxCasa: 1000, trocarParaCoinsH: 6,
+    negociar: true, negociarMaxRespostas: 8,
+    // shiny nas casas (em Gemas): desligado até você ligar
+    casaShiny: false, casaShinyPrecoMax: 2500, casaShinyNvMax: 300, casaShinyLucroMin: 800, casaShinyMargemMin: 0.35, casaShinyDia: 2,
 
     // itens
     margemMin: 0.08, liquidezMin: 30, maxUnidadesPorItem: 5,
@@ -924,7 +929,27 @@
     const lerCache = () => new Promise((res) => { try { if (!DB.db?.objectStoreNames.contains('cache')) return res(null); const r = DB.db.transaction('cache').objectStore('cache').get('precificador'); r.onsuccess = () => res(r.result || null); r.onerror = () => res(null); } catch { res(null); } });
     const salvarCache = (v) => { try { if (DB.db?.objectStoreNames.contains('cache')) DB.db.transaction('cache', 'readwrite').objectStore('cache').put(v); } catch {} };
     const info = () => (pronto() ? { vendas: S.rows.length, geradoEm: S.precos.geradoEm, baixadoEm: S.em, teste: S.precos.teste, correcao: S.precos.correcao } : { erro: S.erro, carregando: S.carregando });
-    return { carregar, precificar, lerFicha, pronto, info, especieId: (id, nome) => (pronto() ? especieId(id, nome) : null) };
+    // ✨ shiny x normal por faixa de nível e, por família, quanto o shiny ganha subindo de nível (vendas em Gemas, 30 dias)
+    function resumoShiny() {
+      if (!pronto()) return null;
+      if (S.resumoSh?.de === S.rows) return S.resumoSh.r;
+      const med = (a) => { const s = [...a].sort((x, y) => x - y), m = s.length >> 1; return s.length ? (s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2) : null; };
+      const FX = [[1, 150], [150, 300], [300, 500], [500, 800], [800, 1200], [1200, 1e9]];
+      const faixas = FX.map(([a, z]) => { const sh = S.ord.s.filter((r) => r.level >= a && r.level < z).map((r) => r.base), no = S.ord.n.filter((r) => r.level >= a && r.level < z).map((r) => r.base); return { a, z, nS: sh.length, medS: med(sh), nN: no.length, medN: med(no) }; });
+      const fam = new Map(); for (const r of S.ord.s) { const k = r.familyName || r.name; if (!fam.has(k)) fam.set(k, []); fam.get(k).push(r); }
+      const familias = [];
+      for (const [nome, rs] of fam) {
+        const lo = rs.filter((r) => r.level <= 200), hi = rs.filter((r) => r.level >= 500 && r.level <= 1200);
+        if (lo.length < 3 || hi.length < 3) continue;
+        const baixo = med(lo.map((r) => r.base)), alto = med(hi.map((r) => r.base));
+        familias.push({ nome, vendas: rs.length, baixo, nB: lo.length, alto, nA: hi.length, nvBaixo: Math.round(med(lo.map((r) => r.level))), nvAlto: Math.round(med(hi.map((r) => r.level))), ganho: alto - baixo });
+      }
+      familias.sort((x, y) => y.ganho - x.ganho);
+      const ats = S.ord.s.map((r) => r.at), dias = ats.length ? Math.max(1, (Math.max(...ats) - Math.min(...ats)) / DAY_MS) : 30;
+      const r = { faixas, familias, nShiny: S.ord.s.length, nNormal: S.ord.n.length, dias };
+      S.resumoSh = { de: S.rows, r }; return r;
+    }
+    return { carregar, precificar, lerFicha, pronto, info, resumoShiny, especieId: (id, nome) => (pronto() ? especieId(id, nome) : null) };
   })();
   // preço do precificador para uma ficha, com os fragmentos (Z-Move, AoE, Mega) pelo menor anúncio de agora
   function precoPrecificador(f) {
@@ -973,6 +998,23 @@
   // mede XP/hora real das casas
   setInterval(() => { for (const p of Object.values(E.postos)) { if (!p || p.xp == null) continue; const agora = Date.now(); if (p._t0 && agora - p._t0 > 600_000) { p.xpHora = (p.xp - p._x0) / ((agora - p._t0) / 3600_000); p._t0 = agora; p._x0 = p.xp; } else if (!p._t0) { p._t0 = agora; p._x0 = p.xp; } } }, 60_000);
 
+  function painelShiny() {
+    const R = PRC.resumoShiny();
+    if (!R) return `<span class="mudo">${PRC.info().carregando ? 'Carregando as vendas do precificador…' : 'Precificador ainda sem dados.'}</span>`;
+    const xpH = xpHoraCasa(25), vg = valorGema();
+    const h = (de, ate) => (xpH ? (xpDoNivel(ate) - xpDoNivel(de)) / xpH : null);
+    const fx = R.faixas.map((f) => `<tr><td>Nv ${f.a}${f.z < 1e8 ? '–' + f.z : '+'}</td><td class="num">${f.medS ? fmt(Math.round(f.medS)) : '—'} <span class="mudo">(${f.nS})</span></td><td class="num">${f.medN ? fmt(Math.round(f.medN)) : '—'} <span class="mudo">(${f.nN})</span></td><td class="num">${f.medS && f.medN ? '×' + Math.round(f.medS / f.medN) : '—'}</td></tr>`).join('');
+    const top = R.familias.filter((f) => f.ganho > 0).slice(0, 12).map((f) => {
+      const hs = h(Math.max(100, f.nvBaixo), f.nvAlto), liq = liquidoVenda(f.alto, 'orb', 'pokemon') - f.baixo, porH = hs ? liq / Math.max(0.5, hs) : null;
+      return `<tr class="${liq > 0 ? 'bom' : ''}"><td>${esc(f.nome)} <span class="mudo">(${f.vendas})</span></td><td class="num">${fmt(Math.round(f.baixo))}<br><span class="mudo">Nv ~${f.nvBaixo}</span></td><td class="num">${fmt(Math.round(f.alto))}<br><span class="mudo">Nv ~${f.nvAlto}</span></td><td class="num">${fmt(Math.round(liq))} 💠${vg ? `<br><span class="mudo">~${curto(liq * vg)}</span>` : ''}</td><td class="num">${hs ? hs.toFixed(0) + ' h' : '—'}<br><span class="mudo">${porH ? fmt(Math.round(porH)) + ' 💠/h' : ''}</span></td></tr>`;
+    }).join('');
+    const pos = R.familias.filter((f) => f.ganho > 0).length;
+    return `<div class="kv" style="margin:0 0 6px"><span>Vendas de shiny</span><b>${fmt(R.nShiny)} (~${fmt(Math.round(R.nShiny / R.dias))}/dia)</b><span>Famílias que valem mais alto</span><b>${pos} de ${R.familias.length}</b>
+      <span>Casa com shiny</span><b class="${CFG.casaShiny ? 'bom' : 'mudo'}">${CFG.casaShiny ? `ligada · até ${fmt(CFG.casaShinyPrecoMax)} 💠, lucro ≥ ${fmt(CFG.casaShinyLucroMin)} 💠, ${CFG.casaShinyDia}/dia` : 'desligada (Config → Casas)'}</b></div>
+      <table><tr><th>Nível</th><th class="num">✨ shiny 💠</th><th class="num">normal 💠</th><th class="num">Shiny vale</th></tr>${fx}</table>
+      <p class="mudo" style="margin:6px 0 2px">Mediana das vendas sem os adicionais (Mega, Z, AoE). Por família: comprado baixo (Nv ≤ 200) e vendido no Nv 500–1.200, já sem a taxa das Gemas. Horas numa casa a 25%.</p>
+      ${top ? `<table><tr><th>Família</th><th class="num">Compra</th><th class="num">Venda</th><th class="num">Ganho</th><th class="num">Casa</th></tr>${top}</table>` : '<span class="mudo">Poucas vendas por família ainda.</span>'}`;
+  }
   function baixarRelatorio() {
     const por = {};
     for (const v of M.base) { const k = v.nome + '|' + faixaDe(v.nv); (por[k] ??= []).push(v.preco); }
@@ -1391,14 +1433,14 @@
     for (const cid of CFG.casas) {
       const key = `${cid}:0`, p = E.postos[key];
       if (Object.values(E.pendentes).some((x) => x.casaKey === key)) continue;
-      if (p?.bot && !p.naFila && p.xp != null && nivelDeXp(p.xp) >= alvoDaCasa(cid)) {
+      if (p?.bot && !p.naFila && p.xp != null && nivelDeXp(p.xp) >= alvoDoPokemon(p, cid)) {
         const nv = nivelDeXp(p.xp), fichaP = fichaDoPokemon(p.pokemonId) || p.ficha;
-        const ok = await anunciarPokemon({ pokemonId: p.pokemonId, nome: p.nome, nv, nota: p.nota, pot: p.pot, iv: p.iv, custo: p.custo, ficha: fichaP, fila: false });
+        const ok = await anunciarPokemon({ pokemonId: p.pokemonId, nome: p.nome, nv, nota: p.nota, pot: p.pot, iv: p.iv, shiny: !!(p.shiny || fichaP?.shiny), custo: p.custo, moedaCompra: p.moedaCompra || 'gold', ficha: fichaP, fila: false });
         if (ok && !CFG.simulacao) { E.postos[key] = null; persistir(); }
         if (ok || !CFG.casaNaoParar) continue;
         // vitrine cheia: a casa não fica parada. O pronto vai para a fila de venda (anuncia quando abrir vaga) e entra outro no lugar.
         if ((E.filaVenda || []).length >= CFG.filaMax) { avisoRaro('filaCheia', `🪟 fila de venda cheia (${CFG.filaMax}): as casas seguem upando o que já têm`, 30); continue; }
-        (E.filaVenda = E.filaVenda || []).some((x) => x.pokemonId === p.pokemonId) || E.filaVenda.push({ pokemonId: p.pokemonId, nome: p.nome, nv, nota: p.nota, pot: p.pot, iv: p.iv, custo: p.custo || 0, moedaCompra: 'gold', ficha: fichaP ? { ...fichaP, level: nv } : null, lucro: 0, em: Date.now(), daCasa: true });
+        (E.filaVenda = E.filaVenda || []).some((x) => x.pokemonId === p.pokemonId) || E.filaVenda.push({ pokemonId: p.pokemonId, nome: p.nome, nv, nota: p.nota, pot: p.pot, iv: p.iv, shiny: !!(p.shiny || fichaP?.shiny), custo: p.custo || 0, moedaCompra: p.moedaCompra || 'gold', ficha: fichaP ? { ...fichaP, level: nv } : null, lucro: 0, em: Date.now(), daCasa: true });
         p.naFila = true; persistir();
         log(`${sim()}🏠 casa ${cid}: ${p.nome} Nv ${nv} pronto e a vitrine está cheia → fila de venda; entra outro para não perder XP`, 'ok');
       }
@@ -1412,6 +1454,7 @@
       }
       const livre = !p || !p.pokemonId || p.naFila;
       if (livre && CFG.casaDaColecao && encherComColecao(key, cid)) continue;   // primeiro um pokémon que já é seu
+      if ((livre || !p.bot) && await comprarShinyParaUpar(key, cid)) continue;
       if (livre || !p.bot) await comprarParaUpar(key, cid);
     }
   }
@@ -1472,6 +1515,47 @@
       motivo: `casa ${cid}: lucro ~${curto(lucro)}${horas ? ` (${curto(lucroH)}/h em ~${horas.toFixed(0)} h)` : ''}, vende ~${curto(venda)} no Nv ${alvo}` });
     if (ok) { E.casaComprasHoje = { dia: E.dia, n: feitas + 1 }; persistir(); }
   }
+  // ✨ shiny: o melhor nível para vender (até nivelMaxCasa) pelo precificador, pelo lucro/hora sobre o custo (ou o maior preço sem custo)
+  function melhorNivelShiny(f, nvAgora, custo, xpAgora = null, xpH = xpHoraCasa(25)) {
+    if (!f?.ivs || !PRC.pronto()) return null;
+    let melhor = null;
+    for (const L of [400, 500, 600, 800, CFG.nivelMaxCasa]) {
+      if (L <= (nvAgora || 0) + 20 || L > CFG.nivelMaxCasa) continue;
+      const r = precoPrecificador({ ...fichaMin(f), level: L }); if (!r?.rapido) continue;
+      const liq = liquidoVenda(r.rapido, 'orb', 'pokemon'), horas = xpH ? Math.max(0.5, (xpDoNivel(L) - (xpAgora ?? xpDoNivel(nvAgora || 100))) / xpH) : null;
+      const lucro = custo != null ? liq - custo : liq, porH = horas ? lucro / horas : lucro;
+      const x = { L, venda: r.rapido, justo: r.justo, liq, lucro, horas, porH, conf: r.confianca };
+      if (!melhor || (custo != null ? porH > melhor.porH : r.rapido > melhor.venda * 1.03)) melhor = x;
+    }
+    return melhor;
+  }
+  // casa com shiny: compra shiny barato de nível baixo em Gemas e sobe até o nível que mais rende (shiny só vende em Gemas)
+  async function comprarShinyParaUpar(key, cid) {
+    if (!CFG.casaShiny || !CFG.gemasAtivas || !PRC.pronto()) return false;
+    const ag = Date.now(); E.casaBuscaSh = E.casaBuscaSh || {};
+    if (ag - (E.casaBuscaSh[cid] || 0) < CFG.casaBuscaMin * 60_000) return false;
+    const feitas = E.casaShinyHoje?.dia === E.dia ? E.casaShinyHoje.n : 0;
+    if (feitas >= CFG.casaShinyDia) { avisoRaro('shDia', `✨ já foram ${feitas} shiny para casas hoje (limite ${CFG.casaShinyDia})`, 120); return false; }
+    E.casaBuscaSh[cid] = ag; persistir();
+    const pct = E.postos[key]?.pct || 25, xpH = xpHoraCasa(pct);
+    const resp = await pedirM(listarPokemon({ moeda: 'orb', soShiny: true, ordem: 'baratos', nivelMax: String(CFG.casaShinyNvMax), precoMax: String(CFG.casaShinyPrecoMax) }), 'vitrine');
+    const ocup = new Set(Object.values(E.postos).filter(Boolean).map((x) => String(x.pokemonId)));
+    const linhas = (resp?.linhas || []).filter((a) => a.moeda === 'orb' && a.ficha?.shiny && a.ficha.ivs && a.preco <= CFG.casaShinyPrecoMax && (a.ficha.level || 0) <= CFG.casaShinyNvMax
+      && !(CFG.evitarOutland && ehOutland(a.ficha)) && !M.agendados.has(a.id) && !ocup.has(String(a.ficha.id)) && !M.meus.some((x) => x.id === a.id)).slice(0, 6);
+    let melhor = null;
+    for (const a of linhas) {
+      const f = a.ficha, m = melhorNivelShiny(f, f.level, a.preco, f.xp ?? null, xpH);
+      await new Promise((r) => setTimeout(r, 30));                        // o precificador é pesado: cede a vez ao jogo
+      if (!m || m.lucro < CFG.casaShinyLucroMin || m.lucro < a.preco * CFG.casaShinyMargemMin) continue;
+      if (!melhor || m.porH > melhor.m.porH) melhor = { a, f, m };
+    }
+    if (!melhor) { avisoRaro('shNada' + cid, `✨ casa ${cid}: nenhum shiny até ${fmt(CFG.casaShinyPrecoMax)} 💠 com lucro ≥ ${fmt(CFG.casaShinyLucroMin)} 💠 e ≥ ${Math.round(CFG.casaShinyMargemMin * 100)}% agora`, 60); return false; }
+    const { a, f, m } = melhor;
+    const ok = await comprar(a, { tipo: 'pokemon', pokemonId: f.id, nome: f.nome, nv: f.level, nota: f.nota, pot: f.potencia, iv: f.ivTotal, xp: f.xp, shiny: true, ficha: fichaMin(f), casaKey: key, depois: 'casa', lucro: m.lucro, alvoNv: m.L,
+      motivo: `casa ${cid} (shiny): vende ~${fmt(m.venda)} 💠 no Nv ${m.L} (rápido; justo ${fmt(m.justo)}), lucro ~${fmt(Math.round(m.lucro))} 💠${m.horas ? ` em ~${m.horas.toFixed(0)} h` : ''}` });
+    if (ok) { E.casaShinyHoje = { dia: E.dia, n: feitas + 1 }; persistir(); }
+    return !!ok;
+  }
   function registrarNoPosto(p) {
     let key = p.casaKey;
     if (!key) key = CFG.casas.map((c) => `${c}:0`).find((k) => !E.postos[k]?.bot);
@@ -1480,7 +1564,7 @@
     log(`${sim()}🏠 casa ${casaId}: registrando ${p.nome}`);
     if (CFG.simulacao) return;
     enviar({ t: 'xpshare.escolher', casaId, slot, pokemonId: p.pokemonId });
-    E.postos[key] = { pokemonId: p.pokemonId, nome: p.nome, xp: p.xp ?? xpDoNivel(p.nv || 100), custo: p.preco, nota: p.nota, pot: p.pot, iv: p.iv, ficha: p.ficha || null, bot: true, pct: E.postos[key]?.pct };
+    E.postos[key] = { pokemonId: p.pokemonId, nome: p.nome, xp: p.xp ?? xpDoNivel(p.nv || 100), custo: p.preco, moedaCompra: p.moeda || 'gold', nota: p.nota, pot: p.pot, iv: p.iv, ficha: p.ficha || null, shiny: !!(p.shiny || p.ficha?.shiny), alvoNv: p.alvoNv || null, bot: true, pct: E.postos[key]?.pct };
     persistir();
   }
   /* --------- 🪟 vitrine: até 10 pokémon anunciados --------- */
@@ -1497,7 +1581,7 @@
     let n = 0;
     for (const cid of CFG.casas) {
       const p = E.postos[`${cid}:0`]; if (!p?.bot || p.naFila || p.xp == null) continue;
-      const al = alvoDaCasa(cid);
+      const al = alvoDoPokemon(p, cid);
       if (nivelDeXp(p.xp) >= al || (p.xpHora && (xpDoNivel(al) - p.xp) / p.xpHora <= h)) n++;
     }
     return n;
@@ -1519,8 +1603,9 @@
     if (!E.filaVenda?.length) return;
     await atualizarMeus();
     let livres = vagasPk().livres - casasProntasEm(0.5);            // casa pronta tem prioridade (senão ela para de upar)
-    E.filaVenda.sort((a, z) => (z.lucro || 0) - (a.lucro || 0));
+    E.filaVenda.sort((a, z) => (a.naoAntes || 0) > Date.now() ? 1 : (z.naoAntes || 0) > Date.now() ? -1 : (z.lucro || 0) - (a.lucro || 0));
     while (livres > 0 && E.filaVenda.length) {
+      if ((E.filaVenda[0].naoAntes || 0) > Date.now()) break;                   // retirado há pouco: o jogo pede 30 min para anunciar de novo
       const x = E.filaVenda.shift(); persistir();
       if (await anunciarPokemon({ ...x, fila: false })) { livres--; for (const [k, p] of Object.entries(E.postos)) if (p?.naFila && String(p.pokemonId) === String(x.pokemonId)) E.postos[k] = null; persistir(); }
       else break;
@@ -1553,6 +1638,34 @@
     }
     const p = precoRapidoItem(a.itemId, a.moeda, a.id); return p ? { preco: p, ref: 'um degrau abaixo do menor anúncio' } : null;
   }
+  // pokémon parado em Gemas há trocarParaCoinsH horas: passa a vender em Coins (capital gira mais rápido), sempre com lucro.
+  // Tenta mudar a moeda do próprio anúncio; se o jogo não aceitar, retira e põe na fila para anunciar em Coins (o jogo pede 30 min).
+  async function trocarParaCoins(a, ag) {
+    if (!(CFG.trocarParaCoinsH > 0) || a.tipo !== 'pokemon' || a.moeda !== 'orb' || a.ficha?.shiny || CFG.venderEmGemas === 'sempre') return false;
+    E.trocas = E.trocas || {};
+    const t = E.trocas[a.id], nome = a.ficha ? `${a.ficha.nome} Nv ${a.ficha.level}` : 'pokémon';
+    if (t && ag - t.em > 3 * 60_000) {                                       // o jogo não mudou a moeda: retira e reanuncia em Coins
+      delete E.trocas[a.id];
+      log(`${sim()}🔁 ${nome}: o anúncio continuou em Gemas — retirando para anunciar em Coins (o jogo pede 30 min)`, 'venda');
+      (E.filaVenda = E.filaVenda || []).some((x) => String(x.pokemonId) === String(a.pokemonId)) || E.filaVenda.push({ pokemonId: a.pokemonId, nome: a.ficha?.nome || 'pokémon', nv: a.ficha?.level, nota: a.ficha?.nota, pot: a.ficha?.potencia, iv: a.ficha?.ivTotal, shiny: false, custo: t.custoC, moedaCompra: 'gold', moedaForcada: 'gold', ficha: a.ficha ? fichaMin(a.ficha) : null, lucro: 0, em: ag, naoAntes: ag + 31 * 60_000 });
+      persistir();
+      if (!CFG.simulacao) { enviar({ t: 'market.cancelar', id: a.id }); M.meusEm = 0; await dormir(1500); }
+      return true;
+    }
+    if (t || ag - (a.criadoEm || ag) < CFG.trocarParaCoinsH * 3600_000) return false;
+    const f = a.ficha; if (!f) return false;
+    const r = precoMercado(f.nome, f.level, f.nota, f.potencia, f.ivTotal); if (!r || r.como !== 'espécie' || r.n < 3) return false;   // sem referência em Coins: fica em Gemas
+    const c = custoDoAnuncio(a), cb = cambioImplicito()?.taxa || 0; if (!cb) return false;
+    const custoC = c ? c.custo * cb : 0;                                     // custo do anúncio vem na moeda dele (Gemas)
+    const piso = Math.ceil((custoC * 1.03 + PENSAO_DIA * CFG.vendaDias) / (1 - COMISSAO));
+    const preco = Math.max(Math.round(r.preco * CFG.fatorRapido), piso);
+    const liqG = liquidoVenda(a.preco, 'orb', 'pokemon') * cb, liqC = liquidoVenda(preco, 'gold', 'pokemon');
+    E.trocas[a.id] = { em: ag, custoC }; (E.editados = E.editados || {})[a.id] = ag; persistir();
+    log(`${sim()}🔁 ${nome}: ${((ag - a.criadoEm) / 3600_000).toFixed(0)} h sem vender em Gemas → Coins a ${curto(preco)} (recebe ~${curto(liqC)} agora vs ~${curto(liqG)} em Gemas parado)`, 'venda');
+    if (!CFG.simulacao) { enviar({ t: 'market.editar', id: a.id, preco, moeda: 'gold' }); M.meusEm = 0; await dormir(1500); }
+    else delete E.trocas[a.id];
+    return true;
+  }
   // todos os seus anúncios (também os que você criou): preço de venda rápida, nunca abaixo do custo; sem custo conhecido, nunca abaixo do preço rápido de mercado
   async function reajustarAnuncios() {
     if (Date.now() - (M.reajTodosEm || 0) < 5 * 60_000) return;
@@ -1564,6 +1677,7 @@
       const ult = Math.max(E.editados[a.id] || 0, a.criadoEm || 0);
       if (ag - ult < 31 * 60_000 || ag < (a.editavelEm || 0)) continue;                 // o jogo só deixa mudar o preço a cada 30 min
       if (a.tipo === 'item' && Date.now() - (M.listaItem?.[a.itemId + ':' + a.moeda]?.em || 0) > 10 * 60_000) await pedirM({ t: 'market.item', itemId: Number(a.itemId), moeda: a.moeda }, 'item', (m) => m.itemId === Number(a.itemId) && m.moeda === a.moeda);
+      if (await trocarParaCoins(a, ag)) continue;
       const alvo = alvoRapidoAnuncio(a); if (!alvo) continue;
       const c = custoDoAnuncio(a), tipoV = a.tipo === 'pokemon' ? 'pokemon' : 'item';
       // lucro de pelo menos 3% sobre o custo; pokémon de custo desconhecido (pode ter sido comprado) não desce abaixo de 95% do preço justo
@@ -1686,10 +1800,11 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para o comprador", "preco"
   }
   // ficha completa de um pokémon seu (casa, coleção), para o precificador
   function fichaDoPokemon(id) { const p = (M.pokemons || []).find((x) => x.id === id); return p ? fichaMin(p) : null; }
-  async function anunciarPokemon({ pokemonId, nome, nv, nota, pot, iv, shiny, custo, alvo, moeda = 'gold', fila = true, lucro, ficha, moedaCompra = 'gold' }) {
+  async function anunciarPokemon({ pokemonId, nome, nv, nota, pot, iv, shiny, custo, alvo, moeda = 'gold', fila = true, lucro, ficha, moedaCompra = 'gold', moedaForcada = null }) {
     ficha = ficha || fichaDoPokemon(pokemonId);
     let ref = null, porque = '';
     const esc2 = moedaVendaPokemon({ nome, nv, nota, pot, iv, shiny, ficha });
+    if (moedaForcada && esc2.opc?.length) { const o = esc2.opc.find((x) => x.moeda === moedaForcada); if (o) esc2.melhor = o; }
     if (esc2.melhor) { moeda = esc2.melhor.moeda; ref = esc2.melhor.ref; if (esc2.opc.length > 1) { const o2 = esc2.opc[1]; porque = ` (rende ~${curto(esc2.melhor.eq)} vs ~${curto(o2.eq)} em ${o2.moeda === 'orb' ? 'Gemas' : 'Coins'})`; } }
     else if (alvo) ref = { preco: alvo / CFG.vendaFatorMediana, n: 0, como: 'sniper' };
     if (shiny) moeda = 'orb';                                      // shiny só se vende em Gemas
@@ -1946,6 +2061,28 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para o comprador", "preco"
     return plano;
   }
   const alvoDaCasa = (cid) => (CFG.alvoPorCasa ? planoAlvos()[cid]?.alvo : null) || CFG.nivelAlvo;
+  // para cada pokémon na casa: o nível (até nivelMaxCasa) em que ele vale mais, pelas vendas da espécie com 3+ vendas no nível.
+  // Pega o MENOR nível que chega a 97% do melhor preço (subir além disso é XP gasto à toa). Menos pokémon prontos, cada um valendo mais.
+  function alvoDoPokemon(p, cid) {
+    const base = alvoDaCasa(cid);
+    if (p?.alvoNv) return p.alvoNv;                                   // escolhido na compra (shiny)
+    if (!CFG.alvoPorPokemon || !p?.nome) return base;
+    M.alvoCache = M.alvoCache || {}; const k = p.pokemonId + ':' + cid, c = M.alvoCache[k];
+    if (c && Date.now() - c.em < 15 * 60_000) return c.alvo;
+    const fSh = p.ficha || fichaDoPokemon(p.pokemonId);
+    if (p.shiny || fSh?.shiny) {
+      const m = melhorNivelShiny(fSh, nivelDeXp(p.xp || 0), null);
+      const alvo = m ? m.L : Math.max(base, CFG.nivelMaxCasa);
+      M.alvoCache[k] = { em: Date.now(), alvo, como: m ? `shiny: ~${fmt(m.venda)} 💠 no Nv ${m.L}` : 'shiny sem preço: Nv máx.' };
+      return alvo;
+    }
+    const pontos = [];
+    for (let L = 300; L <= CFG.nivelMaxCasa; L += 50) { const r = precoMercado(p.nome, L, p.nota, p.pot, p.iv); if (r && r.como === 'espécie' && r.n >= 3) pontos.push({ L, v: r.preco }); }
+    let alvo = base, como = 'padrão da casa';
+    if (pontos.length) { const max = Math.max(...pontos.map((x) => x.v)); const melhor = pontos.find((x) => x.v >= max * 0.97); alvo = melhor.L; como = `vale ~${curto(melhor.v)} no Nv ${melhor.L} (melhor preço até ${CFG.nivelMaxCasa})`; }
+    M.alvoCache[k] = { em: Date.now(), alvo, como };
+    return alvo;
+  }
   function lucroCasasPorHora(extraPct = 0) {
     if (CFG.alvoPorCasa && !extraPct) { const pl = planoAlvos(); const tot = Object.values(pl).reduce((s2, x) => s2 + x.rateH, 0); if (tot) return tot; }
     const cv = curvaNivel().find((c) => { const [a, z] = c.faixa.split('-').map(Number); return CFG.nivelAlvo >= a && CFG.nivelAlvo < z; });
@@ -2363,7 +2500,11 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
           const refN = Number(String(ctx.motivo || '').match(/(\d+) vendas/)?.[1]) || (moeda === 'gold' ? coins?.n : prc?.nFamilia) || 0;
           dossie.contas_do_app = { custo: a.preco, revenda_planejada: ctx.revenderPor, liquido_da_revenda: Math.round(liq), lucro_estimado: Math.round(lucro), margem_pct: Math.round(lucro / a.preco * 100), vendas_referencia: refN, moeda };
         }
-        if (ctx.depois === 'casa') { const cid = Number(String(ctx.casaKey || '').split(':')[0]); const al = cid ? alvoDaCasa(cid) : CFG.nivelAlvo; const r = f.nome ? precoMercado(f.nome, al, f.nota, f.potencia, f.ivTotal) : null; dossie.casa = { nivel_alvo: al, venda_no_alvo_coins: r && Math.round(r.preco), vendas_ref: r?.n, como: r?.como };
+        if (ctx.depois === 'casa' && f.shiny && ctx.alvoNv) {             // shiny para a casa: tudo em Gemas, pelo precificador no nível-alvo
+          const rA = precoPrecificador({ ...fichaMin(f), level: ctx.alvoNv }), liq = rA ? liquidoVenda(rA.rapido, 'orb', 'pokemon') : 0;
+          dossie.casa = { nivel_alvo: ctx.alvoNv, shiny_so_vende_em_gemas: true, precificador_no_alvo: rA && { vender_rapido: rA.rapido, justo: rA.justo, esperar: rA.esperar, vendas_da_familia: rA.nFamilia } };
+          if (rA) dossie.contas_do_app = { custo: a.preco, revenda_planejada: rA.rapido, liquido_da_revenda: Math.round(liq), lucro_estimado: Math.round(liq - a.preco), margem_pct: Math.round((liq - a.preco) / a.preco * 100), vendas_referencia: rA.nFamilia, moeda: 'orb' };
+        } else if (ctx.depois === 'casa') { const cid = Number(String(ctx.casaKey || '').split(':')[0]); const al = cid ? alvoDaCasa(cid) : CFG.nivelAlvo; const r = f.nome ? precoMercado(f.nome, al, f.nota, f.potencia, f.ivTotal) : null; dossie.casa = { nivel_alvo: al, venda_no_alvo_coins: r && Math.round(r.preco), vendas_ref: r?.n, como: r?.como };
           if (r) { const liq = r.preco * (CFG.vendaRapida ? CFG.fatorRapido : CFG.vendaFatorMediana) * (1 - COMISSAO) - PENSAO_DIA * CFG.vendaDias, custoC = moeda === 'orb' ? a.preco * (cb || 0) : a.preco; dossie.contas_do_app = { custo_coins: Math.round(custoC), liquido_no_alvo_coins: Math.round(liq), lucro_estimado: Math.round(liq - custoC), margem_pct: custoC ? Math.round((liq - custoC) / custoC * 100) : null, vendas_referencia: r.n }; } }
       } else {
         const id = Number(ctx.itemId ?? a.itemId);
@@ -2671,6 +2812,11 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
         <label>Lucro mín. por hora de casa<input id="h-lh"></label><label>Buscar a cada (min)<input id="h-busca"></label>
         <label>Compras por dia (casas)<input id="h-dia"></label><label>Nível máx. na compra<input id="h-nvmax"></label>
       </div><p class="mudo">Cada casa vazia faz no máximo uma busca a cada X min, em até 4 espécies que vendem no nível-alvo.</p></div>
+      <div class="cart"><h4>✨ Casa com shiny (Gemas)</h4><div class="form">
+        <label>Comprar shiny para upar<select id="h-sh"><option value="0">Não</option><option value="1">Sim</option></select></label><label>Preço máx. (💠)<input id="h-shp"></label>
+        <label>Lucro mín. (💠)<input id="h-shl"></label><label>Lucro mín. vs custo<input id="h-shm"></label>
+        <label>Nível máx. na compra<input id="h-shn"></label><label>Shiny por dia<input id="h-shd"></label>
+      </div><p class="mudo">Compra shiny barato de nível baixo, sobe até o nível que mais rende pelo precificador (até ${CFG.nivelMaxCasa}) e vende em Gemas. Precisa de "Operar em Gemas"; os limites de Gemas do dia e a conferência do Claude valem. Veja a análise em Análise → Mercado.</p></div>
       <div class="cart"><h4>🪟 Vitrine de pokémon (máx. 10)</h4><div id="h-vit"></div></div>
       <div id="h-casas"></div>
       <div class="cart"><h4>Nível-alvo por lucro/hora (casa 40%)</h4><div id="h-curva"></div></div>
@@ -2681,6 +2827,8 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
       i.onchange = () => { let v = tipo === 'preco' ? lerPreco(i.value) : num(String(i.value).replace('%', '')); if (v == null) return; if (tipo === 'pct' && v > 3) v /= 100; CFG[k] = v; salvarCfg(); log(`⚙️ ${k} = ${tipo === 'preco' ? curto(v) : v}`); }; };
     liga('#h-lmin', 'casaLucroMin', 'preco'); liga('#h-marg', 'casaMargemMin', 'pct'); liga('#h-lh', 'casaLucroHMin', 'preco');
     liga('#h-busca', 'casaBuscaMin'); liga('#h-dia', 'casaComprasDia'); liga('#h-nvmax', 'compraNivelMax');
+    $('#h-sh').value = CFG.casaShiny ? '1' : '0'; $('#h-sh').onchange = (e) => { CFG.casaShiny = e.target.value === '1'; salvarCfg(); log(`⚙️ casa com shiny ${CFG.casaShiny ? 'ligada' : 'desligada'}`); pintar(); };
+    liga('#h-shp', 'casaShinyPrecoMax'); liga('#h-shl', 'casaShinyLucroMin'); liga('#h-shm', 'casaShinyMargemMin', 'pct'); liga('#h-shn', 'casaShinyNvMax'); liga('#h-shd', 'casaShinyDia');
   }
 
   function montarBoss() {
@@ -2858,6 +3006,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
       <div class="grade"><button class="bt" id="a-rel">📄 Relatório de análise</button><button class="bt" id="a-agora">📥 Planilha do jogo agora</button></div>
       <div class="kv" id="a-num"></div>
       <div class="cart"><h4>Preço mediano por faixa de nível (Coins)</h4><div id="a-faixas"></div></div>
+      <div class="cart"><h4>✨ Shiny: upar e vender (Gemas, 30 dias)</h4><div id="a-shiny"></div></div>
       <div class="cart"><h4>Itens agora</h4><div id="a-itens"></div></div>`;
     $('#a-rel').onclick = baixarRelatorio;
     $('#a-p1h').onclick = () => baixarPlanilhaPropria(3600_000);
@@ -3072,8 +3221,8 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
         + (regs.length ? `<table><tr><th>Anúncio do app</th><th class="num">Preço</th><th class="num">Parado</th></tr>${regs.map(([, r]) => { const a = M.meus.find((x) => x.tipo === 'pokemon' && String(idPkAnuncio(x)) === String(r.pid)); return `<tr><td>${esc(r.nome)}</td><td class="num">${curtoM(a?.preco ?? r.preco, r.moeda)}<br><span class="mudo">piso ${curtoM(r.piso, r.moeda)}</span></td><td class="num">${((ag - r.em) / 3600_000).toFixed(1)} h</td></tr>`; }).join('')}</table>` : '')
         + ((E.filaVenda || []).length ? `<p class="mudo">Fila: ${E.filaVenda.map((x) => esc(x.nome)).join(', ')}</p>` : '');
       $('#h-casas').innerHTML = CFG.casas.map((id) => {
-        const al = alvoDaCasa(id), pl = CFG.alvoPorCasa ? planoAlvos()[id] : null;
-        const p = E.postos[`${id}:0`], nv = p?.xp != null ? nivelDeXp(p.xp) : null, pct = nv ? Math.min(100, Math.round((xpDoNivel(nv) - xpDoNivel(100)) / Math.max(1, xpDoNivel(al) - xpDoNivel(100)) * 100)) : 0;
+        const p = E.postos[`${id}:0`], pl = CFG.alvoPorCasa ? planoAlvos()[id] : null, al = p?.pokemonId && p.bot ? alvoDoPokemon(p, id) : alvoDaCasa(id);
+        const nv = p?.xp != null ? nivelDeXp(p.xp) : null, pct = nv ? Math.min(100, Math.round((xpDoNivel(nv) - xpDoNivel(100)) / Math.max(1, xpDoNivel(al) - xpDoNivel(100)) * 100)) : 0;
         const falta = p?.xpHora && nv ? (xpDoNivel(al) - p.xp) / p.xpHora : null;
         return `<div class="cart"><b>🏠 ${id}</b> ${p?.pct ? `<span class="mudo">${p.pct}%</span>` : ''} <span class="mudo">alvo Nv ${al}${pl ? ` · ~${curto(pl.rateH)}/h` : ''}</span> — ${p?.pokemonId ? (p.bot ? `${esc(p.nome)} Nv ${nv ?? '?'}${p.adotado ? ' (adotado)' : ''} → ${al}${falta > 0 ? ` <span class="mudo">(~${falta.toFixed(1)} h)</span>` : ''}` : `${esc(p.nome)} Nv ${nv ?? '?'} <span class="mudo">— seu, ${CFG.casasOcupadas === 'manter' ? 'mantido' : CFG.casasOcupadas === 'adotar' ? 'será adotado' : 'será trocado'}</span>`) : '<span class="mudo">vazia</span>'}
           ${p?.bot ? `<div class="barra"><i style="width:${pct}%"></i></div>` : ''}</div>`;
@@ -3114,6 +3263,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
       $('#b-res').innerHTML = `<div class="kv"><span>Lutas</span><b>${B.lutas} (${B.vitorias} vitórias)</b><span>Tempo médio por luta</span><b>${mediana(B.duracoes) ? mediana(B.duracoes) + ' s' : '—'}</b>${Object.entries(B.drops).map(([id, n]) => `<span>${esc(E.nomesItens[id] || id)}</span><b>${n} · ~${fmt(n * precoGemaItem(id) * (1 - COMISSAO))} 💠</b>`).join('')}</div>`;
     }
     if (abaAtual === 'analise') {
+      { const el = $('#a-shiny'); if (el) el.innerHTML = painelShiny(); }
       { const el = $('#a-real'); if (el) {
         if (!E.real) el.innerHTML = '<span class="mudo">Ainda não lido. O app lê o seu histórico de compras e vendas a cada 30 min (com Análise ligada).</span>';
         else {
@@ -3197,7 +3347,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     }
   }
 
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.18' }, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.19' }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));

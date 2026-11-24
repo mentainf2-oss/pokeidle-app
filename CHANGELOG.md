@@ -2,6 +2,7 @@
 
 | Versão | Data | O que mudou |
 | --- | --- | --- |
+| 5.19 | 2026-11-24 | Análise de shiny (Análise → Mercado): preço por faixa de nível contra os normais e, por família, quanto o shiny ganha subindo de nível. Casa com shiny (opcional, desligada): compra shiny barato em Gemas, sobe até o nível que mais rende pelo precificador e vende em Gemas, com a conferência do Claude. Cada pokémon da casa sobe até o nível em que vale mais (até Nv 1000). Anúncio em Gemas parado há 6 h passa para Coins. Corrigido: "Negociar preço" vinha desligado em instalações novas; aba Casas com erro ao abrir. |
 | 5.18 | 2026-11-24 | Casas não param: pokémon pronto com a vitrine cheia vai para a fila de venda (até 8) e entra outro na casa (da coleção ou comprado; até 12 compras/dia). Sniper compra para a fila quando a vitrine está cheia, com o dobro do lucro mínimo. Pokémon seu (sem custo) também entra na venda rápida. |
 | 5.17 | 2026-11-24 | Aba Sniper pokémon: revendas do app nos últimos 7 dias, casando cada venda do histórico com a compra (lucro em Coins pelo câmbio, tempo até vender, origem sniper/casa). |
 | 5.16 | 2026-11-24 | Orçamento do dia acertado pelo histórico da conta a cada 10 min: conta só o que foi comprado de verdade (o sorteio de 3 s perdido não custa nada) mais o que está em andamento. Antes, 9.999 💠 contados contra 687 💠 gastos de fato travavam as compras. |
