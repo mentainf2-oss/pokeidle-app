@@ -510,6 +510,14 @@ contextBridge.executeInMainWorld({
       const comprar = cand.filter((x) => x.x4 >= Math.ceil(hs.length / 2)).sort((a, b) => b.score - a.score).slice(0, 12);
       return { pronto: true, L, hunts, meus, comprar, tipoDia: tipoDoDia ? tipoDoDia() : null, em: Date.now() };
     }
+    // Bicicleta (PokeIdle App, aba Farm): XP/h e abates/h da melhor hunt com cada raridade de bicicleta, pelo mesmo motor do Melhor hunt
+    async function pveBike() {
+      const base = await huntRank().catch(() => null);
+      if (!base || !base.pronto || base.semPokemon || !base.top || !base.top.length) return { pronto: false };
+      const out = [{ rar: null, vel: 0 }, ...Object.entries(VEL_BIKE).map(([rar, vel]) => ({ rar, vel }))];
+      for (const o of out) { const r = await huntRank({ vel: o.vel }).catch(() => null); const t = r && r.top && r.top[0]; if (t) { o.xpH = t.xpH; o.kph = t.kph; o.hunt = t.nome; } }
+      return { pronto: true, atual: base.bike || null, linhas: out.filter((o) => o.xpH), em: Date.now() };
+    }
     async function pveProximas() {
       if (!jogo.hunts || !jogo.tabelaTipos) return { pronto: false };
       const { map } = await catalogoNota();
@@ -1586,7 +1594,7 @@ contextBridge.executeInMainWorld({
       const M = PIH.engine.MEDIDO || {};
       const I = PIH.engine._interno || {};
       const rar = eu.bicicleta && (eu.bicicleta.equipadaRar || null);
-      const vel = VEL_BIKE[rar] || 0;
+      const vel = opts && opts.vel != null ? Math.max(0, Number(opts.vel) || 0) : (VEL_BIKE[rar] || 0);   // opts.vel: simular outra bicicleta (aba Farm)
       const aoe = !!pk.tmAoe;
       const porGolpe = aoe ? (M.aoeAlvosPorGolpe || 2) : 1;
       const atualSlug = eu.huntSlug || (eu.hunt && eu.hunt.slug) || huntAtualSlug();
@@ -1663,7 +1671,7 @@ contextBridge.executeInMainWorld({
       const tiposPk = tiposDe(cat);
       const atk = [...new Set([...tiposPk, act.el ? String(act.el).toUpperCase() : null].filter(Boolean))];
       const rar = jogo.eu.bicicleta && (jogo.eu.bicicleta.equipadaRar || null);
-      const vel = VEL_BIKE[rar] || 0;
+      const vel = opts && opts.vel != null ? Math.max(0, Number(opts.vel) || 0) : (VEL_BIKE[rar] || 0);   // opts.vel: simular outra bicicleta (aba Farm)
       const bx = bonusXp ? bonusXp.tr : 1;
       const amp = jogo.amp || 1.5;
       const atualSlug = huntAtualSlug();
@@ -2048,7 +2056,7 @@ contextBridge.executeInMainWorld({
         canais() { return JSON.parse(JSON.stringify(canais)); },
         // Aba PvE do app (só leitura).
         pve(o, arg) {
-          const f = o === 'nivel' ? async () => ({ L: Number(jogo.eu.level) || 0 }) : o === 'proximas' ? pveProximas : o === 'farm' ? pveFarm : o === 'evolucoes' ? () => pveEvolucoes(arg) : o === 'meus' ? pveMeus : o === 'buscar' ? () => pveBuscar(arg) : o === 'casas' ? () => pveCasas(arg) : o === 'shiny' ? () => pveShiny(arg) : o === 'boss' ? () => pveBoss(arg) : o === 'outland' ? () => pveOutland(arg) : o === 'prey' ? pvePrey : o === 'bestiario' ? pveBestiario : o === 'mercado' ? () => (arg && typeof arg === 'object' ? pveMercado(arg.moeda, arg.dias, arg.valor) : pveMercado(arg)) : null;
+          const f = o === 'nivel' ? async () => ({ L: Number(jogo.eu.level) || 0 }) : o === 'proximas' ? pveProximas : o === 'farm' ? pveFarm : o === 'bike' ? pveBike : o === 'evolucoes' ? () => pveEvolucoes(arg) : o === 'meus' ? pveMeus : o === 'buscar' ? () => pveBuscar(arg) : o === 'casas' ? () => pveCasas(arg) : o === 'shiny' ? () => pveShiny(arg) : o === 'boss' ? () => pveBoss(arg) : o === 'outland' ? () => pveOutland(arg) : o === 'prey' ? pvePrey : o === 'bestiario' ? pveBestiario : o === 'mercado' ? () => (arg && typeof arg === 'object' ? pveMercado(arg.moeda, arg.dias, arg.valor) : pveMercado(arg)) : null;
           return f ? f().catch((e) => ({ erro: String(e && e.message || e) })) : null;
         },
         // Comércio: nota, stats e espécie da ficha de um anúncio (mesma conta da ficha do jogo).

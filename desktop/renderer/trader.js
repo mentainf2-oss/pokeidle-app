@@ -339,6 +339,20 @@ async function pkFarmTela(root, s) {
     c4.append(el('p', 'tip', 'Ganho medido pelo lucro das casas (XP Share) no ritmo atual da conta. Verde = se paga em até 7 dias. O app não compra isso sozinho: a decisão é sua.'));
     root.append(c4);
   }
+  // bicicleta: quanto cada raridade renderia na melhor hunt desta conta
+  const bk = await window.idle.invoke('poke:pve', pkFarmConta, 'bike', null).catch(() => null);
+  if (bk && bk.pronto && bk.linhas && bk.linhas.length) {
+    const nomeR = { comum: 'Comum', incomum: 'Incomum', rara: 'Rara', mitica: 'Mítica', lendaria: 'Lendária' };
+    const atual = bk.linhas.find((l) => l.rar === bk.atual) || bk.linhas[0];
+    const c5 = el('div', 'card'); c5.append(el('h2', 'section first', 'Bicicleta'));
+    c5.append(pkTabela(['Bicicleta', 'Melhor hunt', 'Abates/h', 'XP/h', 'Ganho'], bk.linhas.map((l) => {
+      const g = atual && atual.xpH ? l.xpH / atual.xpH - 1 : 0;
+      const nm = el('span', l.rar === bk.atual ? 'ok' : null, `${l.rar ? nomeR[l.rar] || l.rar : 'Sem bicicleta'}${l.rar === bk.atual ? ' (a sua)' : ''}`);
+      return pkLinha(nm, l.hunt || '—', Number(l.kph || 0).toLocaleString('pt-BR'), pkFmt(l.xpH), el('span', g > 0.005 ? 'ok' : g < -0.005 ? 'bad' : 'muted', g ? `${g > 0 ? '+' : ''}${Math.round(g * 100)}%` : '—'));
+    })));
+    c5.append(el('p', 'tip', 'A bicicleta só encurta a caminhada entre selvagens (o mesmo cálculo do Melhor hunt, com o seu pokémon em campo). Os fragmentos caem só no Outland; 5 de uma raridade viram 1 da seguinte até Rara. Compare o ganho com o preço no Mercado → Bicicletas.'));
+    root.append(c5);
+  }
   // comprar
   if (F.comprar && F.comprar.length) {
     const c3 = el('div', 'card'); c3.append(el('h2', 'section first', 'Espécies que valem comprar para estas hunts'));
