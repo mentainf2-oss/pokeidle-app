@@ -2,6 +2,7 @@
 
 | Versão | Data | O que mudou |
 | --- | --- | --- |
+| 5.29 | 2026-11-24 | No máximo 3 da mesma espécie em andamento (casas + fila + vitrine + compras pendentes) nas compras para casas; o sniper só passa de 4 com 60%+ de desconto. Antes as 4 casas encheram de Charizard (7 no total) e 5 Garchomp, o que derruba o próprio preço na hora de vender. Ajustável em maxPorEspecie. |
 | 5.28 | 2026-11-24 | Boss: tempo por luta no Rayquaza de 19,5 s (≈ 4.440 lutas/dia, informado pelo jogador: 4× fraco a gelo), em vez dos 60 s padrão — a aba Boss, a conta de lucro por rotação e o custo de parar a caça passam a usar esse ritmo. Dá para mudar em Boss → segundos por luta. |
 | 5.27 | 2026-11-24 | Pokémon seu, adotado ou da coleção (custo desconhecido ou zero) não é anunciado abaixo de 90% do preço justo (75% no giro) — antes o anúncio novo podia sair no "vender rápido" do precificador, que para shiny raro fica bem abaixo do justo (ex.: Vaporeon shiny 6.412 x 11.622 💠). Câmbio Coins/Gemas: se as médias estiverem recarregando, usa o último câmbio lido (até 24 h) em vez de travar vendas e conversões. |
 | 5.26 | 2026-11-24 | Sem limite de quantidade: compras para casas (normais e shiny) não têm mais teto por dia — compra sempre que passa no lucro mínimo, na margem, no estudo e na conferência do Claude. Fila de venda maior (15), para o sniper comprar mais para revenda com a vitrine cheia (na fila só com o dobro do lucro mínimo). Os limites de gasto em Coins e Gemas continuam. |

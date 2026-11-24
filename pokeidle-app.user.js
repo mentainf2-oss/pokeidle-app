@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.28
+// @version      5.29
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -66,6 +66,7 @@
     // giro rápido da vitrine (no evento de XP upar é barato: vender mais rápido, com menos lucro por pokémon)
     // estudo contínuo do mercado: o que vale, o que vende rápido e o que deu lucro decide o que comprar
     estudoAtivo: true, estudoVendasDiaMin: 3, estudoHorasLenta: 36,
+    maxPorEspecie: 3,                                              // no máximo N da mesma espécie entre casas, fila e vitrine (não inundar o próprio mercado)
     giro: 'auto', giroFator: 0.82, giroFatorGemas: 0.9, giroNivelMax: 500, giroTrocaH: 2, giroPasso: 0.06, giroMargem: 0.01, giroCasaFator: 0.5,
     negociar: true, negociarMaxRespostas: 8,
     // shiny nas casas (em Gemas): desligado até você ligar
@@ -1413,6 +1414,7 @@
     // vaga na vitrine é escassa: com poucas sobrando, só entra o que dá o dobro do lucro mínimo
     // vaga na vitrine é escassa: com poucas sobrando, só entra o dobro do lucro mínimo; sem vaga, compra para a fila (até filaMax) com o dobro também
     const naFila = vg.paraSnipe < 1;
+    if (CFG.maxPorEspecie > 0 && desc < 0.6 && emAndamento(f.nome) >= CFG.maxPorEspecie + 1) return avisoRaro('maxEspS' + f.nome, `🎯 ${f.nome}: já tenho ${emAndamento(f.nome)} em andamento — só compro mais com 60%+ de desconto`, 60);
     if (naFila && (E.filaVenda || []).length >= CFG.filaMax) return;
     const lucroMin = (a.moeda === 'orb' ? CFG.snipeLucroMinGemas : CFG.snipeLucroMin) * (vg.paraSnipe <= 2 ? 2 : 1);
     if (a.preco <= ref.preco * (1 - CFG.snipeDescontoMin) && lucro >= lucroMin) {
@@ -1626,6 +1628,7 @@
     if (!cands.length) return avisoRaro('casaSem' + cid, `🏠 casa ${cid}: nenhuma espécie com lucro ≥ ${curto(CFG.casaLucroMin)} e vendas no Nv ${alvo} — esperando`, 60);
     let melhor = null;
     for (const esp of cands) {
+      if (CFG.maxPorEspecie > 0 && emAndamento(esp.nome) >= CFG.maxPorEspecie) { avisoRaro('maxEsp' + esp.nome, `🏠 ${esp.nome}: já tenho ${emAndamento(esp.nome)} em andamento (máx. ${CFG.maxPorEspecie}) — busco outra espécie`, 60); continue; }
       const resp = await pedirM(listarPokemon({ busca: esp.nome, ordem: 'baratos', nivelMax: String(CFG.compraNivelMax), notaMin: String(CFG.compraNotaMin).replace('.', ','), precoMax: String(CFG.compraPrecoMax) }), 'vitrine');
       for (const a of resp?.linhas || []) {
         const f = a.ficha || {};
@@ -1704,6 +1707,12 @@
       motivo: `casa ${cid} (shiny ${m.familia || f.nome}, ${m.nFam} vendas/30 d): vende ~${fmt(m.venda)} 💠 no Nv ${m.L} (rápido; justo ${fmt(m.justo)}), lucro ~${fmt(Math.round(m.lucro))} 💠${m.horas ? ` em ~${m.horas.toFixed(0)} h` : ''}` });
 
     return !!ok;
+  }
+  // quantos da mesma espécie o app já tem em andamento (casas, fila de venda, vitrine e compras pendentes)
+  function emAndamento(nome) {
+    const n0 = String(nome || '').replace(/ Nv .*$/, '').trim(); if (!n0) return 0;
+    const nomes = [...Object.values(E.postos || {}).filter((p) => p?.bot).map((p) => p.nome), ...(E.filaVenda || []).map((x) => x.nome), ...M.meus.filter((a) => a.tipo === 'pokemon').map((a) => a.ficha?.nome), ...Object.values(E.pendentes || {}).filter((x) => x.tipo === 'pokemon').map((x) => x.nome)];
+    return nomes.filter((x) => String(x || '').replace(/ Nv .*$/, '').trim() === n0).length;
   }
   function contarCompraCasa(p) {
     novoDia();
@@ -3649,7 +3658,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     }
   }
 
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.28' }, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.29' }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));
