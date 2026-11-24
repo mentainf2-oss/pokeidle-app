@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.22
+// @version      5.23
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -64,6 +64,8 @@
     casaDaColecao: true, casaNaoParar: true, filaMax: 8,         // casa pronta com vitrine cheia: vai para a fila e entra outro
     alvoPorPokemon: true, nivelMaxCasa: 1000, trocarParaCoinsH: 6,
     // giro rápido da vitrine (no evento de XP upar é barato: vender mais rápido, com menos lucro por pokémon)
+    // estudo contínuo do mercado: o que vale, o que vende rápido e o que deu lucro decide o que comprar
+    estudoAtivo: true, estudoVendasDiaMin: 3, estudoHorasLenta: 36,
     giro: 'auto', giroFator: 0.82, giroFatorGemas: 0.9, giroNivelMax: 500, giroTrocaH: 2, giroPasso: 0.06, giroMargem: 0.01, giroCasaFator: 0.5,
     negociar: true, negociarMaxRespostas: 8,
     // shiny nas casas (em Gemas): desligado até você ligar
@@ -366,6 +368,7 @@
     M.base = todas.filter((v) => v.moeda === 'gold' && !v.shiny);
     M.baseOrb = todas.filter((v) => v.moeda === 'orb');
     aprenderFatores(); aprenderCategorias();
+    try { estudar(); } catch (e) { console.warn('[PKApp] estudo', e); }
     pintar();
   }
   function pedirPlanilhaSeHora() {
@@ -982,7 +985,8 @@
       const baixo = a.filter((v) => v.nv < 200).map((v) => v.preco), alto = a.filter((v) => v.nv >= alvo * 0.8 && v.nv <= alvo * 1.3).map((v) => v.preco);
       return { nome, nBaixo: baixo.length, nAlto: alto.length, baixo: mediana(baixo), alto: mediana(alto) };
     }).filter((o) => o.nBaixo >= 3 && o.nAlto >= 2 && !(CFG.evitarOutland && ehOutland({ nome: o.nome })))
-      .map((o) => ({ ...o, lucro: o.alto * (1 - COMISSAO) - o.baixo - PENSAO_DIA * CFG.vendaDias + (CFG.especiesPreferidas.includes(o.nome) ? 30_000_000 : 0) }))
+      .filter((o) => !estudoEvita(o.nome))
+      .map((o) => ({ ...o, lucro: o.alto * (1 - COMISSAO) - o.baixo - PENSAO_DIA * CFG.vendaDias + (CFG.especiesPreferidas.includes(o.nome) ? 30_000_000 : 0) + (estudoPrefere(o.nome) ? 15_000_000 : 0) }))
       .sort((a, b) => b.lucro - a.lucro);
   }
   function curvaNivel() {
@@ -994,6 +998,114 @@
       const h = xpH ? (xpDoNivel(mid) - xpDoNivel(100)) / xpH : null, lucro = m && base ? m * (1 - COMISSAO) - base - PENSAO_DIA * CFG.vendaDias : null;
       return { faixa: `${a}-${z}`, vendas: s.length, mediana: m, horas: h, lucro, porHora: lucro && h ? lucro / h : null };
     });
+  }
+  /* ============================== 📚 ESTUDO CONTÍNUO DO MERCADO ==============================
+   * Recalcula a cada 15 min, com as vendas coletadas (Coins e Gemas), o precificador e o histórico da sua conta:
+   *  - quanto vale cada atributo (potência, nota, IV) contra a mesma espécie na mesma faixa de nível;
+   *  - o preço por faixa de nível em Coins e em Gemas (em Coins pelo câmbio);
+   *  - o que vende rápido (vendas/dia por espécie) e quanto rende upar;
+   *  - o que deu lucro de verdade nas suas revendas (14 dias) → espécies a preferir e a evitar;
+   *  - a variação de preço (fotos a cada 6 h). As decisões entram no sniper e nas casas. */
+  const FX_ESTUDO = [[50, 150], [150, 300], [300, 500], [500, 800], [800, 1e9]];
+  const fxEstudo = (nv) => { const i = FX_ESTUDO.findIndex(([a, z]) => nv >= a && nv < z); return i < 0 ? null : i; };
+  const nomeFx = (i) => { const [a, z] = FX_ESTUDO[i]; return z > 1e8 ? `${a}+` : `${a}–${z}`; };
+  const bandaNotaE = (n) => (n == null ? null : n < 3.7 ? '< 3,7' : n < 3.8 ? '3,7' : n < 3.9 ? '3,8' : n < 4.0 ? '3,9' : n < 4.2 ? '4,0–4,1' : '4,2+');
+  const bandaIVE = (i) => (i == null ? null : i < 100 ? '< 100' : i < 120 ? '100–119' : i < 140 ? '120–139' : i < 160 ? '140–159' : '160+');
+  // multiplicador de um atributo: preço da venda ÷ mediana da mesma espécie na mesma faixa (só grupos com 4+ vendas)
+  function tabelaAtributo(base, chave) {
+    const ref = {}; for (const v of base) { const f = fxEstudo(v.nv); if (f != null) (ref[v.nome + '|' + f] ??= []).push(v.preco); }
+    const refM = {}; for (const k in ref) if (ref[k].length >= 4) refM[k] = mediana(ref[k]);
+    const g = {};
+    for (const v of base) { const k = chave(v); if (k == null) continue; const e = (g[k] ??= { n: 0, r: [] }); e.n++; const r = refM[v.nome + '|' + fxEstudo(v.nv)]; if (r) e.r.push(v.preco / r); }
+    return Object.fromEntries(Object.entries(g).map(([k, e]) => [k, { n: e.n, x: e.r.length >= 5 ? mediana(e.r) : null }]));
+  }
+  function estudar(forcar = false) {
+    if (!CFG.estudoAtivo || (!forcar && Date.now() - (M.estudoEm || 0) < 15 * 60_000) || M.base.length < 200) return M.estudo;
+    M.estudoEm = Date.now();
+    const cb = cambioImplicito()?.taxa || 0, b = M.base.filter((v) => v.preco > 0 && v.nv), o = M.baseOrb.filter((v) => v.preco > 0 && v.nv);
+    const on = o.filter((v) => !v.shiny), os = o.filter((v) => v.shiny);
+    const span = (a) => (a.length ? Math.max(0.25, (Math.max(...a.map((v) => v.em)) - Math.min(...a.map((v) => v.em))) / 86400_000) : 1);
+    const dias = span(b), diasO = span(o);
+    // 1) atributos
+    const atrib = { pot: {}, nota: {}, iv: {} };
+    for (const [k, f] of [['pot', (v) => v.pot], ['nota', (v) => bandaNotaE(v.nota)], ['iv', (v) => bandaIVE(v.iv)]]) atrib[k] = { coins: tabelaAtributo(b, f), gemas: tabelaAtributo(on, f), shiny: tabelaAtributo(os, f) };
+    // 2) nível: Coins x Gemas (normal), em Coins
+    const niveis = FX_ESTUDO.map((_, i) => { const c = b.filter((v) => fxEstudo(v.nv) === i).map((v) => v.preco), g = on.filter((v) => fxEstudo(v.nv) === i).map((v) => v.preco), s2 = os.filter((v) => fxEstudo(v.nv) === i).map((v) => v.preco);
+      return { faixa: nomeFx(i), nC: c.length, coins: mediana(c), nG: g.length, gemas: mediana(g), gemasEmCoins: mediana(g) && cb ? mediana(g) * cb : null, nS: s2.length, shiny: mediana(s2) }; });
+    // 3) espécies: volume, preço baixo x alto, ganho de upar
+    const por = {}; for (const v of b) (por[v.nome] ??= []).push(v);
+    const especies = Object.entries(por).map(([nome, a]) => {
+      const lo = a.filter((v) => v.nv < 150).map((v) => v.preco), hi = a.filter((v) => v.nv >= 300).map((v) => v.preco), p5 = a.filter((v) => v.pot === 5).map((v) => v.preco);
+      const baixo = mediana(lo), alto = hi.length >= 3 ? mediana(hi) : null;
+      return { nome, porDia: a.length / dias, n: a.length, baixo, alto, nAlto: hi.length, ganho: alto && baixo ? alto * (1 - COMISSAO) - baixo - PENSAO_DIA * CFG.vendaDias : null, p5: p5.length >= 3 ? mediana(p5) : null };
+    }).filter((e) => e.n >= 5 && !(CFG.evitarOutland && ehOutland({ nome: e.nome }))).sort((a, z) => z.porDia - a.porDia);
+    // 4) o seu resultado (revendas casadas, 14 dias)
+    const rv = revendasDoApp(14), meu = {};
+    for (const x of rv) { const nome = String(x.desc || '').replace(/ Nv [\d.]+.*$/, '').trim(); const e = (meu[nome] ??= { nome, n: 0, lucro: 0, horas: [], perdas: 0, origem: {} }); e.n++; e.lucro += x.lucroC; e.horas.push(x.horas); if (x.lucroC < 0) e.perdas++; e.origem[x.compra.origem || '?'] = (e.origem[x.compra.origem || '?'] || 0) + 1; }
+    const meus = Object.values(meu).map((e) => ({ ...e, horasMed: mediana(e.horas), lucroMed: e.lucro / e.n })).sort((a, z) => z.lucro - a.lucro);
+    const porOrigem = {}; for (const x of rv) { const k = x.compra.origem || '?'; const e = (porOrigem[k] ??= { n: 0, lucro: 0, horas: [] }); e.n++; e.lucro += x.lucroC; e.horas.push(x.horas); }
+    // parados há muito na vitrine (sinal de espécie lenta), com o custo que o app conhece
+    const parados = M.meus.filter((a) => a.tipo === 'pokemon' && a.criadoEm && Date.now() - a.criadoEm > CFG.estudoHorasLenta * 3600_000).map((a) => a.ficha?.nome).filter(Boolean);
+    // 5) decisões: evitar (deu prejuízo, demora a vender ou quase não vende) e preferir (deu lucro e vende rápido)
+    const vol = Object.fromEntries(especies.map((e) => [e.nome, e.porDia]));
+    const evitar = {}, preferir = {};
+    for (const e of meus) {
+      if (e.n >= 2 && e.lucro < 0) evitar[e.nome] = `prejuízo nas suas revendas (${e.n}, ${curto(e.lucro)})`;
+      else if (e.n >= 2 && e.horasMed > CFG.estudoHorasLenta) evitar[e.nome] = `demorou ~${Math.round(e.horasMed)} h para vender`;
+      else if (e.n >= 2 && e.lucro > 0 && e.horasMed <= 12) preferir[e.nome] = `lucro ${curto(e.lucro)} em ${e.n} revendas, ~${e.horasMed.toFixed(0)} h`;
+    }
+    for (const nome of parados) if (!evitar[nome] && (vol[nome] ?? 0) < CFG.estudoVendasDiaMin) evitar[nome] = `parado na vitrine há mais de ${CFG.estudoHorasLenta} h e vende pouco`;
+    for (const e of especies.slice(0, 12)) if (!evitar[e.nome] && e.ganho > 0 && e.porDia >= CFG.estudoVendasDiaMin * 5) preferir[e.nome] ??= `vende ~${Math.round(e.porDia)}/dia e rende ~${curto(e.ganho)} upando`;
+    // 6) variação de preço: foto a cada 6 h das 30 espécies que mais vendem
+    E.estudoFotos = E.estudoFotos || [];
+    const ultF = E.estudoFotos[0];
+    if (!ultF || Date.now() - ultF.em > 6 * 3600_000) { E.estudoFotos.unshift({ em: Date.now(), p: Object.fromEntries(especies.slice(0, 30).filter((e) => e.baixo).map((e) => [e.nome, [Math.round(e.baixo), e.alto ? Math.round(e.alto) : null]])) }); E.estudoFotos.length = Math.min(E.estudoFotos.length, 28); persistir(); }
+    const velha = E.estudoFotos.find((f) => Date.now() - f.em >= 20 * 3600_000) || E.estudoFotos[E.estudoFotos.length - 1];
+    const variacao = velha && velha !== E.estudoFotos[0] ? especies.slice(0, 30).map((e) => { const a = velha.p[e.nome]; return a && e.baixo ? { nome: e.nome, antes: a[0], agora: e.baixo, pct: e.baixo / a[0] - 1, desde: velha.em } : null; }).filter((x) => x && Math.abs(x.pct) >= 0.1).sort((x, z) => Math.abs(z.pct) - Math.abs(x.pct)) : [];
+    // 7) conclusões em frases
+    const ideias = [], xP5 = atrib.pot.coins[5]?.x, xP4 = atrib.pot.coins[4]?.x, xN40 = atrib.nota.coins['4,0–4,1']?.x, xN42 = atrib.nota.coins['4,2+']?.x;
+    if (xP5) ideias.push(`P5 vale ×${xP5.toFixed(1)} em Coins${atrib.pot.gemas[5]?.x ? ` e ×${atrib.pot.gemas[5].x.toFixed(1)} em Gemas` : ''}; P2–P4 ${xP4 && xP4 < 1.15 ? 'quase não mudam o preço' : `chegam a ×${(xP4 || 1).toFixed(2)}`}. Snipe de P5 compensa até perto de ×${(xP5 * 0.6).toFixed(1)} o preço de um P1.`);
+    if (xN40 || xN42) ideias.push(`Nota manda no preço: 3,8 ×${(atrib.nota.coins['3,8']?.x || 1).toFixed(2)}, 3,9 ×${(atrib.nota.coins['3,9']?.x || 1).toFixed(2)}, 4,0–4,1 ×${(xN40 || 1).toFixed(1)}, 4,2+ ×${(xN42 || 1).toFixed(1)} (Coins). IV sozinho pesa pouco depois da nota.`);
+    const alto = niveis[4];
+    if (alto.coins && alto.gemasEmCoins) ideias.push(alto.gemasEmCoins > alto.coins * 1.3 ? `Nv 800+ normal vende ~${fmt(Math.round(alto.gemas))} 💠 (~${curto(alto.gemasEmCoins)}) contra ~${curto(alto.coins)} em Coins: alto nível rende mais em Gemas.` : `Nv 800+: Coins (~${curto(alto.coins)}) e Gemas (~${curto(alto.gemasEmCoins)}) pagam parecido.`);
+    const rap = especies.slice(0, 5).map((e) => `${e.nome} (~${Math.round(e.porDia)}/dia)`).join(', ');
+    if (rap) ideias.push(`Mais vendidos (giram mais rápido): ${rap}.`);
+    const upa = especies.filter((e) => e.ganho > 0 && e.porDia >= CFG.estudoVendasDiaMin).sort((a, z) => z.ganho - a.ganho).slice(0, 4);
+    if (upa.length) ideias.push(`Melhor para upar e vender (com volume): ${upa.map((e) => `${e.nome} ${curto(e.baixo)} → ${curto(e.alto)}`).join(', ')}.`);
+    for (const [k, e] of Object.entries(porOrigem)) if (e.n >= 3) ideias.push(`Suas revendas via ${k}: ${e.n} em 14 dias, lucro ${curto(e.lucro)}, ~${mediana(e.horas).toFixed(0)} h da compra à venda.`);
+    M.estudo = { em: Date.now(), dias, diasO, n: b.length, nO: o.length, atrib, niveis, especies, meus, porOrigem, evitar, preferir, variacao, ideias, cb };
+    E.estudoDecisoes = { em: Date.now(), evitar, preferir }; persistir();
+    return M.estudo;
+  }
+  const estudoEvita = (nome) => !!(CFG.estudoAtivo && (M.estudo?.evitar || E.estudoDecisoes?.evitar)?.[nome]);
+  const estudoPrefere = (nome) => !!(CFG.estudoAtivo && (M.estudo?.preferir || E.estudoDecisoes?.preferir)?.[nome]);
+  const estudoVendasDia = (nome) => M.estudo?.especies?.find((e) => e.nome === nome)?.porDia ?? null;
+  function resumoEstudo() {
+    const s2 = M.estudo; if (!s2) return null;
+    const r = (t) => Object.fromEntries(Object.entries(t).filter(([, v]) => v.x).map(([k, v]) => [k, +v.x.toFixed(2)]));
+    return { ideias: s2.ideias, potencia_coins: r(s2.atrib.pot.coins), nota_coins: r(s2.atrib.nota.coins), potencia_gemas: r(s2.atrib.pot.gemas), mais_vendidos: s2.especies.slice(0, 10).map((e) => ({ nome: e.nome, por_dia: Math.round(e.porDia), baixo: Math.round(e.baixo || 0), alto: e.alto && Math.round(e.alto) })), evitar: s2.evitar, preferir: s2.preferir, variacao: s2.variacao.slice(0, 8).map((x) => ({ nome: x.nome, pct: Math.round(x.pct * 100) })) };
+  }
+  function painelEstudo() {
+    const s2 = M.estudo || estudar(true);
+    if (!s2) return '<span class="mudo">Ainda sem vendas suficientes (precisa de 200+ vendas coletadas). Deixe a Análise ligada.</span>';
+    const xx = (v) => (v?.x ? `×${v.x.toFixed(v.x >= 3 ? 1 : 2)} <span class="mudo">(${v.n})</span>` : v?.n ? `<span class="mudo">— (${v.n})</span>` : '—');
+    const linhaAtr = (rot, k, chaves) => chaves.map((c) => `<tr><td>${rot}${c}</td><td class="num">${xx(s2.atrib[k].coins[c])}</td><td class="num">${xx(s2.atrib[k].gemas[c])}</td><td class="num">${xx(s2.atrib[k].shiny[c])}</td></tr>`).join('');
+    const quando2 = (t) => new Date(t).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    return `<p class="mudo" style="margin:0 0 6px">Base: ${fmt(s2.n)} vendas em Coins e ${fmt(s2.nO)} em Gemas coletadas (~${s2.dias.toFixed(1)} dias) + suas revendas. Atualiza a cada 15 min; a base cresce com a coleta.</p>
+      <div class="cart"><h4>💡 O que o estudo concluiu</h4>${s2.ideias.length ? `<ul style="margin:0;padding-left:18px">${s2.ideias.map((t) => `<li style="margin:3px 0">${esc(t)}</li>`).join('')}</ul>` : '<span class="mudo">—</span>'}</div>
+      <div class="cart"><h4>🎯 Decisões que já valem no sniper e nas casas</h4>
+        <p style="margin:2px 0"><b class="bom">Preferir:</b> ${Object.entries(s2.preferir).map(([n, m]) => `${esc(n)} <span class="mudo">(${esc(m)})</span>`).join(' · ') || '<span class="mudo">—</span>'}</p>
+        <p style="margin:2px 0"><b class="ruim">Evitar:</b> ${Object.entries(s2.evitar).map(([n, m]) => `${esc(n)} <span class="mudo">(${esc(m)})</span>`).join(' · ') || '<span class="mudo">nada por enquanto</span>'}</p>
+        <p class="mudo" style="margin:2px 0">Sniper em Coins só compra espécie que vende ≥ ${CFG.estudoVendasDiaMin}/dia.</p></div>
+      <div class="cart"><h4>⚖️ Quanto vale cada atributo (× da mesma espécie e faixa de nível)</h4><table><tr><th></th><th class="num">Coins</th><th class="num">💠 normal</th><th class="num">✨ shiny</th></tr>
+        ${linhaAtr('P', 'pot', ['1', '2', '3', '4', '5'])}${linhaAtr('Nota ', 'nota', ['< 3,7', '3,7', '3,8', '3,9', '4,0–4,1', '4,2+'])}${linhaAtr('IV ', 'iv', ['< 100', '100–119', '120–139', '140–159', '160+'])}</table>
+        <p class="mudo" style="margin:4px 0 0">Cada linha compara só com a mesma espécie na mesma faixa de nível. O IV aparece pouco porque a nota já carrega o IV.</p></div>
+      <div class="cart"><h4>📈 Preço por nível: Coins x Gemas</h4><table><tr><th>Nível</th><th class="num">Coins</th><th class="num">💠 normal</th><th class="num">💠 em Coins</th><th class="num">✨ shiny</th></tr>
+        ${s2.niveis.map((l) => `<tr class="${l.gemasEmCoins && l.coins && l.gemasEmCoins > l.coins * 1.2 ? 'bom' : ''}"><td>Nv ${l.faixa}</td><td class="num">${l.coins ? curto(l.coins) : '—'} <span class="mudo">(${l.nC})</span></td><td class="num">${l.gemas ? fmt(Math.round(l.gemas)) : '—'} <span class="mudo">(${l.nG})</span></td><td class="num">${l.gemasEmCoins ? curto(l.gemasEmCoins) : '—'}</td><td class="num">${l.shiny ? fmt(Math.round(l.shiny)) : '—'} <span class="mudo">(${l.nS})</span></td></tr>`).join('')}</table></div>
+      <div class="cart"><h4>⚡ O que vende rápido (Coins)</h4><table><tr><th>Espécie</th><th class="num">Vendas/dia</th><th class="num">Nv &lt; 150</th><th class="num">Nv 300+</th><th class="num">Upar rende</th><th class="num">P5</th></tr>
+        ${s2.especies.slice(0, 15).map((e) => `<tr class="${s2.evitar[e.nome] ? 'ruim' : s2.preferir[e.nome] ? 'bom' : ''}"><td>${esc(e.nome)}</td><td class="num">${Math.round(e.porDia)}</td><td class="num">${e.baixo ? curto(e.baixo) : '—'}</td><td class="num">${e.alto ? curto(e.alto) : '—'} <span class="mudo">(${e.nAlto})</span></td><td class="num">${e.ganho != null ? curto(e.ganho) : '—'}</td><td class="num">${e.p5 ? curto(e.p5) : '—'}</td></tr>`).join('')}</table></div>
+      <div class="cart"><h4>🧾 O que deu lucro nas suas revendas (14 dias)</h4>${s2.meus.length ? `<table><tr><th>Espécie</th><th class="num">Revendas</th><th class="num">Lucro</th><th class="num">Horas até vender</th></tr>${s2.meus.slice(0, 15).map((e) => `<tr class="${e.lucro >= 0 ? 'bom' : 'ruim'}"><td>${esc(e.nome)} <span class="mudo">${Object.keys(e.origem).join('/')}</span></td><td class="num">${e.n}${e.perdas ? ` <span class="ruim">(${e.perdas} com perda)</span>` : ''}</td><td class="num">${curto(e.lucro)}</td><td class="num">${e.horasMed != null ? e.horasMed.toFixed(1) : '—'}</td></tr>`).join('')}</table>` : '<span class="mudo">Ainda nenhuma revenda casada.</span>'}</div>
+      <div class="cart"><h4>↕️ Variação de preço (Nv &lt; 150)</h4>${s2.variacao.length ? `<table><tr><th>Espécie</th><th class="num">Antes</th><th class="num">Agora</th><th class="num">Mudou</th></tr>${s2.variacao.slice(0, 12).map((x) => `<tr class="${x.pct > 0 ? 'bom' : 'ruim'}"><td>${esc(x.nome)}</td><td class="num">${curto(x.antes)}</td><td class="num">${curto(x.agora)}</td><td class="num">${x.pct > 0 ? '+' : ''}${Math.round(x.pct * 100)}%</td></tr>`).join('')}</table><p class="mudo" style="margin:4px 0 0">Comparado com a foto de ${quando2(s2.variacao[0].desde)}.</p>` : `<span class="mudo">${(E.estudoFotos || []).length < 2 ? 'Juntando fotos de preço (uma a cada 6 h) — a variação aparece a partir da segunda.' : 'Nenhuma espécie mudou 10% ou mais.'}</span>`}</div>`;
   }
   function xpHoraCasa(pct) {
     const amostras = Object.values(E.postos).filter((p) => p && p.pct === pct && p.xpHora);
@@ -1274,6 +1386,8 @@
     }
     if (!ref || ref.n < (a.moeda === 'orb' ? 3 : CFG.snipeMinVendasRef)) return;
     if (a.moeda === 'gold' && ref.como !== 'espécie') return;                 // snipe automático só com vendas da própria espécie
+    if (estudoEvita(f.nome)) return avisoRaro('estEv' + f.nome, `📚 ${f.nome}: o estudo manda evitar (${M.estudo?.evitar?.[f.nome] || E.estudoDecisoes?.evitar?.[f.nome]}) — não compro`, 120);
+    if (a.moeda === 'gold' && CFG.estudoAtivo && !f.shiny) { const vd = estudoVendasDia(f.nome); if (vd != null && vd < CFG.estudoVendasDiaMin) return; }   // vende pouco: demoraria a girar
     const ult = (a.moeda === 'orb' ? M.baseOrb : M.base).filter((v) => v.pokemonId === f.id && v.moeda === a.moeda).sort((x, z) => z.em - x.em)[0];
     if (a.moeda === 'orb') ref = { ...ref, preco: ref.prc.justo };
     if (ult && ult.preco * 1.25 < ref.preco) ref = { ...ref, preco: ult.preco * 1.25, como: 'última venda deste pokémon' };
@@ -2329,6 +2443,7 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
       config_atual: Object.fromEntries(['nivelAlvo', 'compraPrecoMax', 'compraNotaMin', 'vendaFatorMediana', 'snipeDescontoMin', 'snipeLucroMin', 'margemMin', 'tokenEstoqueAlvo', 'tokenPrecoMax', 'bossKey', 'bossEvMinPct', 'especiesPreferidas'].map((k) => [k, CFG[k]])),
       modulos: CFG.mod,
       casas: CFG.casas.map((c) => { const p = E.postos[`${c}:0`]; return { casa: c, pct: p?.pct, pokemon: p?.bot ? p.nome : p?.pokemonId ? 'do jogador' : 'vazia', nivel: p?.xp ? nivelDeXp(p.xp) : null, xpHora: p?.xpHora ? Math.round(p.xpHora) : null }; }),
+      estudo_do_mercado: resumoEstudo(),
       curva_nivel_casa40: curvaNivel().map((c) => ({ ...c, mediana: Math.round(c.mediana || 0), horas: +(c.horas || 0).toFixed(1), lucro: Math.round(c.lucro || 0), porHora: Math.round(c.porHora || 0) })),
       ranking_para_upar: rankingEspecies().slice(0, 12).map((o) => ({ nome: o.nome, baixo: Math.round(o.baixo), alto: Math.round(o.alto), vendasAlto: o.nAlto, lucro: Math.round(o.lucro) })),
       itens: Object.keys(M.resumo).map((id) => ({ id: Number(id), nome: E.nomesItens[id], min: M.resumo[id].minGold, media7d: M.medias[id]?.gold?.media, vendidos7d: M.medias[id]?.gold?.unidades, minGemas: M.resumo[id].minOrb, media7dGemas: M.medias[id]?.orb?.media, vendidos7dGemas: M.medias[id]?.orb?.unidades })).filter((x) => x.media7d || x.media7dGemas),
@@ -2682,6 +2797,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     avaliar: '<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/>',
     investir: '<path d="M4 17l5-5 4 4 7-7"/><path d="M15 9h5v5"/>',
     lucro: '<path d="M7 7h11l-3-3M17 17H6l3 3"/>',
+    estudo: '<path d="M4 5h6a2 2 0 0 1 2 2v12a2 2 0 0 0-2-2H4z"/><path d="M20 5h-6a2 2 0 0 0-2 2v12a2 2 0 0 1 2-2h6z"/>',
     opPk: '<circle cx="12" cy="12" r="8"/><path d="M4 12h5M15 12h5"/><circle cx="12" cy="12" r="2.6"/>',
     opIt: '<path d="M4 8l8-4 8 4v8l-8 4-8-4z"/><path d="M4 8l8 4 8-4M12 12v8"/>',
     min: '<path d="M5 12h14"/>', largo: '<path d="M4 12h16"/><path d="M8 8l-4 4 4 4M16 8l4 4-4 4"/>',
@@ -2689,8 +2805,8 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
   const ico = (k) => `<svg class="ic" viewBox="0 0 24 24">${ICO[k] || ''}</svg>`;
   // abas em grupos: 7 no topo, sub-abas dentro de Mercado, Boss e Análise
   const GRUPOS = [['inicio', 'Início', ['inicio']], ['mercado', 'Mercado', ['compras', 'sniperPk', 'sniperIt']], ['casas', 'Casas', ['casas']], ['lucro', 'Lucro', ['opPk', 'opIt']], ['boss', 'Boss', ['boss', 'prey']],
-    ['analise', 'Análise', ['analise', 'avaliar', 'investir']], ['claude', 'Claude', ['claude']], ['config', 'Config', ['config']]];
-  const NOME_ABA = { opPk: 'Pokémon', opIt: 'Itens', inicio: 'Início', compras: 'Lista de compras', sniperPk: 'Sniper pokémon', sniperIt: 'Sniper itens', casas: 'Casas', boss: 'Boss', prey: 'Prey', analise: 'Mercado', avaliar: 'Avaliar', investir: 'Investir', claude: 'Claude', config: 'Config' };
+    ['analise', 'Análise', ['analise', 'estudo', 'avaliar', 'investir']], ['claude', 'Claude', ['claude']], ['config', 'Config', ['config']]];
+  const NOME_ABA = { estudo: 'Estudo', opPk: 'Pokémon', opIt: 'Itens', inicio: 'Início', compras: 'Lista de compras', sniperPk: 'Sniper pokémon', sniperIt: 'Sniper itens', casas: 'Casas', boss: 'Boss', prey: 'Prey', analise: 'Mercado', avaliar: 'Avaliar', investir: 'Investir', claude: 'Claude', config: 'Config' };
   const ABAS = GRUPOS.flatMap(([, , s]) => s).map((k) => [k, NOME_ABA[k]]);
   const grupoDe = (aba) => GRUPOS.find(([, , s]) => s.includes(aba)) || GRUPOS[0];
   const MOD_DO_GRUPO = { mercado: ['compras', 'sniperPk', 'sniperIt'], casas: ['casas'], boss: ['boss', 'prey'], claude: ['claude'] };
@@ -2710,7 +2826,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     if (ler('pkapp.largo', false)) W.classList.add('largo');
     W.querySelectorAll('.pk-nav button').forEach((b) => (b.onclick = () => { const g = grupoDe(b.dataset.aba); abaAtual = g[2].includes(M.ultimaSub?.[g[0]]) ? M.ultimaSub[g[0]] : b.dataset.aba; pintar(); }));
     arrastavel(W, W.querySelector('.pk-top'));
-    montarInicio(); montarCompras(); montarSniperPk(); montarSniperIt(); montarCasas(); montarLucro(); montarBoss(); montarPrey(); montarInvestir(); montarAvaliar(); montarAnalise(); montarClaude(); montarConfig();
+    montarInicio(); montarCompras(); montarSniperPk(); montarSniperIt(); montarCasas(); montarLucro(); $('#sec-estudo').innerHTML = '<div id="e-corpo"></div><div style="margin-top:6px"><button class="bt cinza" id="e-bt">Estudar agora</button></div>'; $('#e-bt').onclick = () => { estudar(true); pintar(); }; montarBoss(); montarPrey(); montarInvestir(); montarAvaliar(); montarAnalise(); montarClaude(); montarConfig();
     try { const pos = ler('pkapp.pos', null); if (pos) { W.style.left = pos.x + 'px'; W.style.top = pos.y + 'px'; W.style.bottom = 'auto'; } } catch {}
     pintar();
   }
@@ -3400,6 +3516,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
       $('#b-res').innerHTML = `<div class="kv"><span>Lutas</span><b>${B.lutas} (${B.vitorias} vitórias)</b><span>Tempo médio por luta</span><b>${mediana(B.duracoes) ? mediana(B.duracoes) + ' s' : '—'}</b>${Object.entries(B.drops).map(([id, n]) => `<span>${esc(E.nomesItens[id] || id)}</span><b>${n} · ~${fmt(n * precoGemaItem(id) * (1 - COMISSAO))} 💠</b>`).join('')}</div>`;
     }
     if (abaAtual === 'opPk' || abaAtual === 'opIt') pintarLucro(abaAtual);
+    if (abaAtual === 'estudo') $('#e-corpo').innerHTML = painelEstudo();
     if (abaAtual === 'analise') {
       { const el = $('#a-shiny'); if (el) el.innerHTML = painelShiny(); }
       { const el = $('#a-real'); if (el) {
@@ -3485,7 +3602,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     }
   }
 
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.22' }, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.23' }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));
