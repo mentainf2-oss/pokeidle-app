@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.12
+// @version      5.13
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -2299,7 +2299,8 @@ motivo em até 15 palavras`;
       const claro = ok || primeira === 'NAO' || primeira === 'REPROVO' || primeira === 'REPROVADO';
       const motivo = txt.replace(/[*_`#>"']/g, '').trim().replace(/^[^a-zà-ú]*(sim|n[aã]o|aprovo|aprovado|reprovo|reprovado)(?![a-zà-ú])[\s.:;,—–-]*/i, '').replace(/\s+/g, ' ').slice(0, 140);
       log(`🧠 conferência ${ok ? '✔' : '✖'} ${ctx.nome} ${qtdM(ctx.qtd || 1, a.preco, moeda)}: ${claro ? motivo || '(sem motivo)' : 'resposta sem SIM/NAO: ' + (txt.slice(0, 120) || `vazia (${r.stop_reason || '?'})`)}`, ok ? '' : 'erro');
-      if (chave && claro) M.aprovCache.set(chave, { ok, em: Date.now() });   // resposta confusa não fica guardada: tenta de novo na próxima
+      if (chave && claro) M.aprovCache.set(chave, { ok, em: Date.now() });
+      (E.conferencias = E.conferencias || []).unshift({ em: Date.now(), nome: ctx.nome, qtd: ctx.qtd || 1, preco: a.preco, moeda, ok, motivo: claro ? motivo : 'resposta sem SIM/NÃO' }); E.conferencias.length = Math.min(E.conferencias.length, 100); persistir();   // resposta confusa não fica guardada: tenta de novo na próxima
       M.conferidas = (M.conferidas || 0) + 1;
       return ok;
     } catch (e) {
@@ -2788,6 +2789,7 @@ motivo em até 15 palavras`;
 
   function montarClaude() {
     $('#sec-claude').innerHTML = `
+      <div class="cart"><h4>Conferências de compra</h4><div id="k-conf-hist"></div></div>
       <div class="aviso">O app chama a API do Claude com a <b>sua chave</b> (console.anthropic.com). A API é cobrada à parte da assinatura do Claude. A chave fica só neste navegador: use uma chave exclusiva para isto, com limite de gasto, e não a compartilhe.</div>
       <div class="form">
         <label style="grid-column:1/3">Chave da API<input id="k-key" type="password" placeholder="sk-ant-..." autocomplete="off"><span id="k-key-st" class="mudo"></span></label>
@@ -3086,6 +3088,8 @@ motivo em até 15 palavras`;
         <table style="margin-top:6px"><tr><th>IV total</th><th class="num">Fator</th><th class="num">Vendas</th></tr>${linha(FAT.iv, (k) => k)}</table>` : '<span class="mudo">Aprendendo… precisa de pelo menos 200 vendas na base.</span>';
     }
     if (abaAtual === 'claude') {
+      { const L = E.conferencias || [], h = L.filter((x) => Date.now() - x.em < 24 * 3600_000), v = h.filter((x) => !x.ok).length;
+        $('#k-conf-hist').innerHTML = L.length ? `<p class="mudo" style="margin-top:0">Últimas 24 h: ${h.length} conferidas, ${h.length - v} aprovadas, ${v} vetadas. Tokens até o seu preço não passam por aqui.</p><table><tr><th>Quando</th><th>Compra</th><th class="num">Preço</th><th>Decisão</th></tr>${L.slice(0, 15).map((x) => `<tr><td class="mudo">${new Date(x.em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</td><td>${esc(x.nome)}${x.qtd > 1 ? ` ×${x.qtd}` : ''}</td><td class="num">${curtoM(x.preco, x.moeda)}</td><td class="${x.ok ? 'bom' : 'ruim'}">${x.ok ? '✔' : '✖'} ${esc(x.motivo || '')}</td></tr>`).join('')}</table>` : '<span class="mudo">Nenhuma compra conferida ainda. Com a conferência ligada, cada compra aparece aqui com a decisão e o motivo.</span>'; }
       const pr = progressoEstudo();
       $('#k-estudo').innerHTML = !CFG.mod.claude ? '<span class="mudo">Começa quando você ligar o módulo 🧠 Claude com o app rodando.</span>'
         : E.estudoConcluido ? '<span class="bom">✔ Estudo concluído. O Claude decide a cada ' + CFG.claudeIntervaloMin + ' min.</span>'
@@ -3107,7 +3111,7 @@ motivo em até 15 palavras`;
     }
   }
 
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.12' }, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: '5.13' }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));
