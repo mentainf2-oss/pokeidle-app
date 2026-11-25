@@ -2112,7 +2112,7 @@ contextBridge.executeInMainWorld({
 });
 
 
-// ===================== PokeIdle App 5.60 (gerado por tools/montar-preload.js — não edite aqui) =====================
+// ===================== PokeIdle App 5.61 (gerado por tools/montar-preload.js — não edite aqui) =====================
 ;(() => {
   const { contextBridge: pontePk, ipcRenderer: ipcPk } = require('electron');
   // o que o script pede ao app: rede só para os sites liberados (API do Claude e precificador) e avisos
@@ -2138,7 +2138,7 @@ contextBridge.executeInMainWorld({
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.60
+// @version      5.61
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -2168,7 +2168,7 @@ contextBridge.executeInMainWorld({
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.60';
+  const VERSAO_APP = '5.61';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -5404,7 +5404,9 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
       if (!CFG.esconderPopups || d.indexOf('"batalha"') < 0 || !CHAVES.some((k) => d.indexOf(k) >= 0)) return d;
       const m = JSON.parse(d); if (m.t !== 'batalha' || !Array.isArray(m.ev)) return d;
       const doApp = Date.now() - (M.compraAppEm || 0) < 20_000, bossApp = !!M.bossAuto;
-      const ev = m.ev.filter((e) => !((e?.k === 'mktSorteio' && doApp) || ((e?.k === 'bossMorto' || e?.k === 'bossPerdeu') && bossApp)));
+      // boss: só some a luta sem drop; vitória com item (drop) continua aparecendo — pedido do jogador
+      const comDrop = (e) => Array.isArray(e?.drops) && e.drops.some((x) => x && x.itemId);
+      const ev = m.ev.filter((e) => !((e?.k === 'mktSorteio' && doApp) || (((e?.k === 'bossMorto' && !comDrop(e)) || e?.k === 'bossPerdeu') && bossApp)));
       if (ev.length === m.ev.length) return d;
       m.ev = ev; return JSON.stringify(m);
     });
