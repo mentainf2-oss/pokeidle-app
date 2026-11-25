@@ -2112,7 +2112,7 @@ contextBridge.executeInMainWorld({
 });
 
 
-// ===================== PokeIdle App 5.58 (gerado por tools/montar-preload.js — não edite aqui) =====================
+// ===================== PokeIdle App 5.59 (gerado por tools/montar-preload.js — não edite aqui) =====================
 ;(() => {
   const { contextBridge: pontePk, ipcRenderer: ipcPk } = require('electron');
   // o que o script pede ao app: rede só para os sites liberados (API do Claude e precificador) e avisos
@@ -2138,7 +2138,7 @@ contextBridge.executeInMainWorld({
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.58
+// @version      5.59
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -2168,7 +2168,7 @@ contextBridge.executeInMainWorld({
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.58';
+  const VERSAO_APP = '5.59';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -4184,6 +4184,9 @@ contextBridge.executeInMainWorld({
   function alvoRapidoAnuncio(a) {
     if (a.tipo === 'pokemon') {
       const f = a.ficha ? fichaMin(a.ficha) : fichaDoPokemon(a.pokemonId); if (!f) return null;
+      // ✨ shiny vale mais (pedido do jogador): começa no preço justo, sem desconto do giro; só depois de 24 h desce para o meio entre
+      // justo e rápido, e depois de 48 h para o rápido
+      if (a.moeda === 'orb' && (a.ficha?.shiny || f.shiny)) { const r = precoPrecificador(f); if (!r) return null; const h = (Date.now() - desdeQuando(a)) / 3600_000; const pr = h < 24 ? r.justo : h < 48 ? Math.round((r.justo + r.rapido) / 2) : r.rapido; return { preco: Math.max(1, Math.round(pr)), justo: r.justo, shiny: true, ref: `shiny: precificador ${r.rapido}/${r.justo}/${r.esperar} 🔮 — ${h < 24 ? 'preço justo nas primeiras 24 h' : h < 48 ? 'meio entre justo e rápido (24–48 h)' : 'rápido (48 h+)'}` }; }
       if (a.moeda === 'orb') { const r = precoPrecificador(f), fg = fatorGemasAgora(); return r ? { preco: Math.max(1, Math.round(r.rapido * fg)), justo: r.justo, ref: `precificador ${r.rapido}/${r.justo}/${r.esperar} 🔮${fg < 1 ? ` × ${fg} (giro)` : ''}` } : null; }
       const r = precoMercado(f.nome, f.level, f.nota, f.potencia, a.ficha?.ivTotal ?? Object.values(f.ivs || {}).reduce((x, y) => x + y, 0)); if (!r || r.como !== 'espécie' || r.n < 3) return null;
       const fr = fatorRapidoAgora(); return { preco: Math.round(r.preco * fr), justo: r.preco, ref: `mercado ${curto(r.preco)} × ${fr}${emGiro() ? ' (giro)' : ''}` };
@@ -4256,7 +4259,7 @@ contextBridge.executeInMainWorld({
       const favSegura = favoritosSeguram(a, ag);
       if (a.tipo === 'pokemon' && a.ficha && CFG.vendaRapida) {
         const cc = await menorConcorrentePk(a.ficha.nome, a.ficha.level, a.ficha.nota, a.ficha.potencia, a.moeda, a.ficha.shiny);
-        if (cc?.preco && degrauAbaixo(cc.preco, a.moeda) < alvo.preco) alvo = { ...alvo, preco: degrauAbaixo(cc.preco, a.moeda), ref: `${alvo.ref}; abaixo do menor anúncio parecido (${curtoM(cc.preco, a.moeda)}, Nv ${cc.nv}, ${cc.n} à venda)` };
+        if (cc?.preco && degrauAbaixo(cc.preco, a.moeda) < alvo.preco && !(alvo.shiny && degrauAbaixo(cc.preco, a.moeda) < (precoPrecificador(fichaMin(a.ficha))?.rapido || 0))) alvo = { ...alvo, preco: degrauAbaixo(cc.preco, a.moeda), ref: `${alvo.ref}; abaixo do menor anúncio parecido (${curtoM(cc.preco, a.moeda)}, Nv ${cc.nv}, ${cc.n} à venda)` };
       }
       const c = custoDoAnuncio(a), tipoV = a.tipo === 'pokemon' ? 'pokemon' : 'item';
       // lucro de pelo menos 3% sobre o custo; pokémon de custo desconhecido (pode ter sido comprado) não desce abaixo de 95% do preço justo
@@ -4269,7 +4272,7 @@ contextBridge.executeInMainWorld({
       let novo = a.preco > desce ? desce : a.preco < sobe * 0.97 ? sobe : a.preco;
       if (favSegura && novo < a.preco) { avisoRaro('fav' + a.id, `❤️ ${a.ficha?.nome || E.nomesItens?.[a.itemId] || 'anúncio'}: ${favSegura} favorito(s) — seguro o preço (quem favorita quer comprar)`, 180); continue; }
       // giro: já está no preço rápido e não vendeu em 30+ min → desce mais um degrau, até o piso (sempre com lucro)
-      if (giro && !favSegura && novo >= a.preco * 0.97 && ag - desdeQuando(a) > 60 * 60_000) { const passo = Math.max(piso, Math.round(a.preco * (1 - CFG.giroPasso)), 1); if (passo < a.preco) novo = passo; }   // só desce
+      if (giro && !favSegura && !alvo.shiny && novo >= a.preco * 0.97 && ag - desdeQuando(a) > 60 * 60_000) { const passo = Math.max(piso, Math.round(a.preco * (1 - CFG.giroPasso)), 1); if (passo < a.preco) novo = passo; }   // só desce
       if (Math.abs(novo - a.preco) / a.preco < 0.03 || (a.moeda === 'orb' && Math.abs(novo - a.preco) < 1)) continue;
       const nome = a.tipo === 'pokemon' && a.ficha ? `${a.ficha.nome} Nv ${a.ficha.level}` : E.nomesItens[a.itemId] || a.ficha?.nome || 'item ' + a.itemId;
       log(`${sim()}${novo < a.preco ? 'BAIXAR' : 'SUBIR'} ${nome}: ${curtoM(a.preco, a.moeda)} → ${curtoM(novo, a.moeda)} (vender rápido: ${alvo.ref}; ${c ? `custo ~${curtoM(Math.round(c.custo), a.moeda)} pelo ${c.fonte}` : a.tipo === 'pokemon' ? `custo desconhecido: não desce de ${giro ? 75 : 90}% do justo` : 'custo desconhecido: não desce do preço rápido'})`, 'venda');
@@ -4457,11 +4460,14 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
     // vitrine quase cheia: em Gemas usa o "Vender rápido" do precificador, para girar a vaga
     // vender rápido: em Gemas o "vender rápido" do precificador; em Coins o preço de mercado × fatorRapido; nunca abaixo do piso (custo)
     const rapido = CFG.vendaRapida || (moeda === 'orb' && ref.rapido && vagasPk().livres <= 1);
-    const alvoV = rapido ? (moeda === 'orb' && ref.rapido ? ref.rapido * fatorGemasAgora() : ref.preco * fatorRapidoAgora()) : ref.preco * CFG.vendaFatorMediana;
+    const justoSh = shiny && moeda === 'orb' ? (ref?.prc?.justo ?? ref?.justo ?? null) : null;   // ✨ shiny entra no preço justo, sem desconto
+    const alvoV = justoSh ? justoSh : rapido ? (moeda === 'orb' && ref.rapido ? ref.rapido * fatorGemasAgora() : ref.preco * fatorRapidoAgora()) : ref.preco * CFG.vendaFatorMediana;
     let alvoC = alvoV;
     if (rapido) { const cc = await menorConcorrentePk(ficha?.nome || String(nome).replace(/ Nv .*$/, ''), Math.round(nv), nota, pot, moeda, shiny); if (cc?.preco && degrauAbaixo(cc.preco, moeda) < alvoC) { alvoC = degrauAbaixo(cc.preco, moeda); porque += ` — abaixo do menor parecido (${curtoM(cc.preco, moeda)})`; } }
+    if (justoSh && ref.rapido) alvoC = Math.max(alvoC, ref.rapido);   // shiny: o concorrente nunca puxa abaixo do preço rápido
     const preco = Math.max(Math.round(alvoC), piso, 1);
-    if (rapido) porque += emGiro() ? ' — giro rápido' : ' — vender rápido';
+    if (justoSh) porque += ' — shiny no preço justo';
+    else if (rapido) porque += emGiro() ? ' — giro rápido' : ' — vender rápido';
     if (ref.prc) porque += ` [precificador: ${ref.prc.rapido}/${ref.prc.justo}/${ref.prc.esperar} 🔮]`;
     if (CFG.simulacao) { if (!M.simVistos.has('v' + pokemonId)) { M.simVistos.add('v' + pokemonId); M.simListados.set('p' + pokemonId, Date.now()); log(`[SIM] VENDER ${nome} Nv ~${nv} por ${curtoM(preco, moeda)}${porque}`, 'venda'); } return true; }
     log(`VENDER ${nome} Nv ~${nv} por ${curtoM(preco, moeda)}${porque}`, 'venda');
