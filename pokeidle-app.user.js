@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.57
+// @version      5.58
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -31,7 +31,7 @@
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.57';
+  const VERSAO_APP = '5.58';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -1713,6 +1713,12 @@
     for (const cid of CFG.casas) {
       const key = `${cid}:0`, p = E.postos[key];
       if (Object.values(E.pendentes).some((x) => x.casaKey === key)) continue;
+      // adoção errada (pokémon que o app não acha na coleção — "?" — ou que está no seu time): desfaz e não mexe mais nele
+      if (p?.pokemonId && p.adotado) {
+        const pkA = (M.pokemons || []).find((x) => x.id === p.pokemonId);
+        if (!pkA || pkA.slot != null || !p.nome || p.nome === '?') { E.postos[key] = { ...p, bot: false, adotado: false, naoAdotar: true }; persistir(); log(`🏠 casa ${cid}: desfiz a adoção de ${pkA?.nome || p.nome || 'pokémon'} — ${!pkA ? 'não está na sua coleção que o app vê' : pkA.slot != null ? 'está no seu time' : 'espécie desconhecida'}; não vendo`, 'erro'); continue; }
+      }
+      if (p?.naoAdotar && p.pokemonId) continue;
       if (p?.bot && !p.naFila && p.xp != null && nivelDeXp(p.xp) >= alvoDoPokemon(p, cid)) {
         const nv = nivelDeXp(p.xp), fichaP = fichaDoPokemon(p.pokemonId) || p.ficha;
         const ok = await anunciarPokemon({ pokemonId: p.pokemonId, nome: p.nome, nv, nota: p.nota, pot: p.pot, iv: p.iv, shiny: !!(p.shiny || fichaP?.shiny), custo: p.custo, moedaCompra: p.moedaCompra || 'gold', ficha: fichaP, fila: false });
@@ -1727,6 +1733,7 @@
       // pokémon seu do time, ou já acima do nível máximo das casas, nunca é adotado para venda: fica onde está
       const pkCasa = p?.pokemonId && !p.bot ? (M.pokemons || []).find((x) => x.id === p.pokemonId) : null;
       if (pkCasa && (pkCasa.slot != null || (pkCasa.level || 0) >= CFG.nivelMaxCasa)) continue;
+      if (p?.pokemonId && !p.bot && (!pkCasa || !p.nome || p.nome === '?')) continue;           // não sei quem é: não adoto
       if (p?.pokemonId && !p.bot) {
         if (CFG.casasOcupadas === 'manter') continue;                         // pokémon seu: não mexe
         if (CFG.casasOcupadas === 'adotar') { p.bot = true; p.custo = 0; p.adotado = true; persistir(); log(`🏠 casa ${cid}: ${p.nome} adotado — será vendido no Nv ${CFG.nivelAlvo}`); continue; }
@@ -2278,6 +2285,7 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
   function fichaDoPokemon(id) { const p = (M.pokemons || []).find((x) => x.id === id); return p ? fichaMin(p) : null; }
   async function anunciarPokemon({ pokemonId, nome, nv, nota, pot, iv, shiny, custo, alvo, moeda = 'gold', fila = true, lucro, ficha, moedaCompra = 'gold', moedaForcada = null }) {
     ficha = ficha || fichaDoPokemon(pokemonId);
+    if (!nome || nome === '?' || nome === 'pokémon') { avisoRaro('semNome' + pokemonId, `🪟 não anuncio o pokémon ${pokemonId}: espécie desconhecida (preço seria chute)`, 120); return false; }
     // 🏠 abaixo do Nv mínimo de venda (500) não vai para a vitrine: espera vaga nas casas e sobe até lá (vende bem mais rápido)
     if ((nv || ficha?.level || 0) < (CFG.nivelMinVenda || 0)) {
       E.filaCasa = E.filaCasa || [];
