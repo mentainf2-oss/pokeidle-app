@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.54
+// @version      5.55
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -31,13 +31,13 @@
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.54';
+  const VERSAO_APP = '5.55';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
     simulacao: true,
     mod: { analise: true, compras: false, sniperPk: false, sniperIt: false, casas: false, boss: false, prey: false, claude: false, hunt: true },
-    esconderPopups: true,
+    esconderPopups: true, passeAuto: true,
     huntGanhoMin: 0.15, huntRiscoMax: 40, huntCadaMin: 30,
 
     // orçamento em Coins (o Claude não mexe)
@@ -304,20 +304,23 @@
   }
   // 🔭 explorador: cataloga os tipos de mensagem do jogo (as que chegam e as que o jogo manda quando VOCÊ clica em algo),
   // com as chaves e um exemplo curto — é assim que o app descobre novas automações (resgatar passe, missões, eventos…)
-  const EXP = (() => { const x = ler('pkapp.explorar', null); return x && x.entrada && x.saida ? x : { entrada: {}, saida: {} }; })();
+  const EXP = (() => { const x = ler('pkapp.explorar', null); const o = x && x.entrada && x.saida ? x : { entrada: {}, saida: {} };
+    for (const lado of ['entrada', 'saida']) for (const [t, e] of Object.entries(o[lado])) if (/^(chat|comercio|mensagem|dm|hello|login|auth)/i.test(t) || /token|senha|password/i.test(e.ex || '')) { delete e.ex; delete e.chaves; }   // limpa o que a 5.47 guardou
+    return o; })();
   let expSujo = false;
   function explorar(lado, txt) {
     const t = String(txt).slice(0, 60).match(/"t":"([^"]{1,40})"/)?.[1]; if (!t) return;
     const e = (EXP[lado][t] ??= { n: 0, prim: Date.now() }); e.n++; e.ult = Date.now();
-    if (/^(chat|comercio|mensagem|dm)/i.test(t)) { expSujo = true; return; }       // conversa: só conta, não guarda o texto
-    if (!e.ex || (lado === 'saida' && Date.now() - (e.exEm || 0) > 3600_000)) { try { const o = JSON.parse(txt); e.chaves = Object.keys(o).slice(0, 20); e.ex = (lado === 'saida' ? JSON.stringify(o) : JSON.stringify(Object.fromEntries(Object.entries(o).map(([k, v]) => [k, typeof v === 'object' && v ? (Array.isArray(v) ? `[${v.length}]` : '{…}') : v])))).slice(0, 240); e.exEm = Date.now(); } catch {} }
+    if (/^(chat|comercio|mensagem|dm|hello|login|auth)/i.test(t)) { delete e.ex; delete e.chaves; expSujo = true; return; }   // conversa e login: só conta (nunca guarda texto nem token)
+    if (!e.ex || (lado === 'saida' && Date.now() - (e.exEm || 0) > 3600_000)) { try { const o = JSON.parse(txt); e.chaves = Object.keys(o).slice(0, 20); e.ex = (lado === 'saida' ? JSON.stringify(o, (k, v) => (/token|senha|password|auth|cookie|sess|segredo|secret/i.test(k) ? '•••' : v)) : JSON.stringify(Object.fromEntries(Object.entries(o).map(([k, v]) => [k, typeof v === 'object' && v ? (Array.isArray(v) ? `[${v.length}]` : '{…}') : v])))).slice(0, 240); e.exEm = Date.now(); } catch {} }
     expSujo = true;
   }
   setInterval(() => { if (expSujo) { expSujo = false; salvar('pkapp.explorar', EXP); } }, 120_000);
+  setTimeout(() => { try { salvar('pkapp.explorar', EXP); } catch {} }, 5000);
   function receber(txt) {
     try { explorar('entrada', txt); } catch {}
     const c = txt.slice(0, 22);
-    if (!/"t":"(market|estado|batalha|erro|csv|welcome|comercio)"/.test(c)) return;
+    if (!/"t":"(market|estado|batalha|erro|csv|welcome|comercio|passe)"/.test(c)) return;
     let m; try { m = JSON.parse(txt); } catch { return; }
     if (m.t === 'welcome') {
       aplicarEstado(m.estado); if (Array.isArray(m.bossesCatalogo)) M.bossCatalogo = m.bossesCatalogo;
@@ -333,6 +336,7 @@
       }
     }
     if (m.t === 'estado') aplicarEstado(m.estado);
+    if (m.t === 'passe' && Date.now() - (E.passeEm || 0) < 30_000) { try { const r = m.resgatados ?? m.recompensas ?? m.itens ?? m.resgatou; const n = Array.isArray(r) ? r.length : typeof r === 'number' ? r : null; log(`🎟️ passe: ${n != null ? `${n} recompensa(s) resgatada(s)` : 'resposta recebida'}${m.msg ? ' — ' + String(m.msg).slice(0, 80) : ''}`, 'ok'); } catch {} }
     if (m.t === 'comercio') { try { aoComercio(m); } catch (e) { log('🤝 ' + e.message, 'erro'); } }
     if (m.t === 'erro') {
       const txt = String(m.chave || m.msg || 'erro');
@@ -1700,6 +1704,9 @@
         p.naFila = true; persistir();
         log(`${sim()}🏠 casa ${cid}: ${p.nome} Nv ${nv} pronto e a vitrine está cheia → fila de venda; entra outro para não perder XP`, 'ok');
       }
+      // pokémon seu do time, ou já acima do nível máximo das casas, nunca é adotado para venda: fica onde está
+      const pkCasa = p?.pokemonId && !p.bot ? (M.pokemons || []).find((x) => x.id === p.pokemonId) : null;
+      if (pkCasa && (pkCasa.slot != null || (pkCasa.level || 0) >= CFG.nivelMaxCasa)) continue;
       if (p?.pokemonId && !p.bot) {
         if (CFG.casasOcupadas === 'manter') continue;                         // pokémon seu: não mexe
         if (CFG.casasOcupadas === 'adotar') { p.bot = true; p.custo = 0; p.adotado = true; persistir(); log(`🏠 casa ${cid}: ${p.nome} adotado — será vendido no Nv ${CFG.nivelAlvo}`); continue; }
@@ -1944,9 +1951,32 @@
   }
   // anúncio parado ocupa vaga: depois de X h baixa um pouco o preço, nunca abaixo do custo + pensão
   // custo do que está anunciado: o que o app registrou ou o que o histórico da conta mostra (convertido para a moeda do anúncio)
+  // ❤️ favoritos: alguém favoritou = quer comprar. Com favorito novo nas últimas 12 h o app não baixa o preço (pedido do jogador).
+  // O campo vem no anúncio (o nome exato o app descobre: qualquer campo numérico ou lista com "fav" no nome).
+  function favsDe(a) {
+    for (const [k, v] of Object.entries(a || {})) if (/fav/i.test(k)) { const n = Array.isArray(v) ? v.length : Number(v); if (isFinite(n)) { if (!M.favCampo) { M.favCampo = k; log(`❤️ favoritos: o jogo manda no campo "${k}" — o app passa a segurar o preço de anúncio favoritado`); } return n; } }
+    return 0;
+  }
+  function favoritosSeguram(a, ag = Date.now()) {
+    const n = favsDe(a); E.favs = E.favs || {};
+    const f = E.favs[a.id] || (E.favs[a.id] = { n: 0, em: 0 });
+    if (n > f.n) { f.n = n; f.em = ag; persistir(); }
+    if (n < f.n) f.n = n;
+    if (Object.keys(E.favs).length > 120) for (const k of Object.keys(E.favs)) if (!M.meus.some((x) => String(x.id) === k)) delete E.favs[k];
+    return n > 0 && ag - f.em < 12 * 3600_000 ? n : 0;
+  }
+  // compra no histórico do jogo pelo nome e nível (o histórico não traz o id do pokémon): pega compras feitas à mão
+  function compraPorNome(nome, nv, antesDe = Infinity) {
+    if (!nome) return null; const n0 = String(nome).replace(/^✨/, '').trim();
+    return (E.real?.compras || []).filter((x) => x.tipo === 'pokemon' && x.em < antesDe && Date.now() - x.em < 30 * 86400_000 && (() => { const m = String(x.desc || '').match(/^(.+?) Nv (\d+)/); return m && m[1].replace(/^✨/, '').trim() === n0 && Math.abs(Number(m[2]) - (nv || 0)) <= 2; })())
+      .sort((x, z) => z.em - x.em)[0] || null;
+  }
   function custoDoAnuncio(a) {
     const cb = cambioImplicito()?.taxa || 0, conv = (v, de) => (de === a.moeda ? v : !cb ? null : de === 'gold' ? v / cb : v * cb);
     if (a.tipo === 'pokemon') {
+      const pn = compraPorNome(a.ficha?.nome, a.ficha?.level, (a.criadoEm || Date.now()) + 60_000);
+      const reg0 = E.anunciosPk?.[a.pokemonId];
+      if (pn && !(reg0?.custo > 0) && !E.ops.some((x) => x.tipo === 'compra' && String(x.pokemonId) === String(a.pokemonId))) { const v = conv(pn.bruto, pn.moeda); if (v != null) return { custo: v, fonte: 'histórico (pelo nome)' }; }
       const reg = E.anunciosPk?.[a.pokemonId]; if (reg && reg.custo != null && reg.moeda === a.moeda && (reg.custo > 0 || reg.adotado || !E.ops.some((x) => x.tipo === 'compra' && String(x.pokemonId) === String(a.pokemonId)))) return { custo: reg.custo, fonte: reg.custo ? 'app' : 'seu (sem custo)' };
       const o = E.ops.find((x) => x.tipo === 'compra' && x.pokemonId != null && String(x.pokemonId) === String(a.pokemonId));
       if (o) { const v = conv(o.unit ?? o.preco, o.moeda); if (v != null) return { custo: v, fonte: 'compra do app' }; }
@@ -2046,6 +2076,7 @@
       if (a.tipo === 'item' && Date.now() - (M.listaItem?.[a.itemId + ':' + a.moeda]?.em || 0) > 10 * 60_000) await pedirM({ t: 'market.item', itemId: Number(a.itemId), moeda: a.moeda }, 'item', (m) => m.itemId === Number(a.itemId) && m.moeda === a.moeda);
       if (await trocarParaCoins(a, ag)) continue;
       let alvo = alvoRapidoAnuncio(a); if (!alvo) continue;
+      const favSegura = favoritosSeguram(a, ag);
       if (a.tipo === 'pokemon' && a.ficha && CFG.vendaRapida) {
         const cc = await menorConcorrentePk(a.ficha.nome, a.ficha.level, a.ficha.nota, a.ficha.potencia, a.moeda, a.ficha.shiny);
         if (cc?.preco && degrauAbaixo(cc.preco, a.moeda) < alvo.preco) alvo = { ...alvo, preco: degrauAbaixo(cc.preco, a.moeda), ref: `${alvo.ref}; abaixo do menor anúncio parecido (${curtoM(cc.preco, a.moeda)}, Nv ${cc.nv}, ${cc.n} à venda)` };
@@ -2053,12 +2084,15 @@
       const c = custoDoAnuncio(a), tipoV = a.tipo === 'pokemon' ? 'pokemon' : 'item';
       // lucro de pelo menos 3% sobre o custo; pokémon de custo desconhecido (pode ter sido comprado) não desce abaixo de 95% do preço justo
       const giro = emGiro() && a.tipo === 'pokemon';
-      const piso = c ? precoParaLiquido(a.tipo === 'pokemon' ? liquidoMinimo(a.pokemonId, c.custo, a.moeda, 1.03) : c.custo * 1.03, a.moeda, tipoV) : a.tipo === 'pokemon' && alvo.justo ? Math.round(alvo.justo * (giro ? 0.75 : 0.9)) : alvo.preco;
+      // custo 0 ("é seu") conta como desconhecido: pode ter sido comprado à mão (o Shedinja de 800 🔮 desceu a 648 achando que era de graça)
+      const semCusto = !c || (a.tipo === 'pokemon' && !(c.custo > 0));
+      const piso = !semCusto ? precoParaLiquido(a.tipo === 'pokemon' ? liquidoMinimo(a.pokemonId, c.custo, a.moeda, 1.03) : c.custo * 1.03, a.moeda, tipoV) : a.tipo === 'pokemon' && alvo.justo ? Math.round(alvo.justo * (giro ? 0.75 : 0.9)) : alvo.preco;
       // acima do preço rápido: baixa até ele (nunca abaixo do piso); bem abaixo dele: sobe até ele (está deixando dinheiro na mesa)
-      const desce = Math.max(alvo.preco, piso), sobe = c ? Math.max(alvo.preco, piso) : alvo.preco;
+      const desce = Math.max(alvo.preco, piso), sobe = !semCusto ? Math.max(alvo.preco, piso) : Math.max(alvo.preco, a.tipo === 'pokemon' ? piso : 0);
       let novo = a.preco > desce ? desce : a.preco < sobe * 0.97 ? sobe : a.preco;
+      if (favSegura && novo < a.preco) { avisoRaro('fav' + a.id, `❤️ ${a.ficha?.nome || E.nomesItens?.[a.itemId] || 'anúncio'}: ${favSegura} favorito(s) — seguro o preço (quem favorita quer comprar)`, 180); continue; }
       // giro: já está no preço rápido e não vendeu em 30+ min → desce mais um degrau, até o piso (sempre com lucro)
-      if (giro && novo >= a.preco * 0.97 && ag - desdeQuando(a) > 60 * 60_000) { const passo = Math.max(piso, Math.round(a.preco * (1 - CFG.giroPasso)), 1); if (passo < a.preco) novo = passo; }   // só desce
+      if (giro && !favSegura && novo >= a.preco * 0.97 && ag - desdeQuando(a) > 60 * 60_000) { const passo = Math.max(piso, Math.round(a.preco * (1 - CFG.giroPasso)), 1); if (passo < a.preco) novo = passo; }   // só desce
       if (Math.abs(novo - a.preco) / a.preco < 0.03 || (a.moeda === 'orb' && Math.abs(novo - a.preco) < 1)) continue;
       const nome = a.tipo === 'pokemon' && a.ficha ? `${a.ficha.nome} Nv ${a.ficha.level}` : E.nomesItens[a.itemId] || a.ficha?.nome || 'item ' + a.itemId;
       log(`${sim()}${novo < a.preco ? 'BAIXAR' : 'SUBIR'} ${nome}: ${curtoM(a.preco, a.moeda)} → ${curtoM(novo, a.moeda)} (vender rápido: ${alvo.ref}; ${c ? `custo ~${curtoM(Math.round(c.custo), a.moeda)} pelo ${c.fonte}` : a.tipo === 'pokemon' ? `custo desconhecido: não desce de ${giro ? 75 : 90}% do justo` : 'custo desconhecido: não desce do preço rápido'})`, 'venda');
@@ -2211,6 +2245,9 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
   function fichaDoPokemon(id) { const p = (M.pokemons || []).find((x) => x.id === id); return p ? fichaMin(p) : null; }
   async function anunciarPokemon({ pokemonId, nome, nv, nota, pot, iv, shiny, custo, alvo, moeda = 'gold', fila = true, lucro, ficha, moedaCompra = 'gold', moedaForcada = null }) {
     ficha = ficha || fichaDoPokemon(pokemonId);
+    if (!(custo > 0) && !E.ops.some((x) => x.tipo === 'compra' && String(x.pokemonId) === String(pokemonId))) {   // comprado à mão? o histórico diz pelo nome
+      const pn = compraPorNome(nome, nv); if (pn) { custo = pn.bruto; moedaCompra = pn.moeda; }
+    }
     let ref = null, porque = '';
     const esc2 = moedaVendaPokemon({ nome, nv, nota, pot, iv, shiny, ficha });
     if (moedaForcada && esc2.opc?.length) { const o = esc2.opc.find((x) => x.moeda === moedaForcada); if (o) esc2.melhor = o; }
@@ -3122,11 +3159,12 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
         if (CFG.mod.sniperIt && !CFG.vendaRapida) await reajustarItens();
         if (CFG.vendaRapida && (CFG.mod.casas || CFG.mod.sniperPk || CFG.mod.sniperIt)) await reajustarAnuncios();
         if (CFG.negociar) negociacoesAgendadas();
-        if (CFG.tokenAutoCompra && (CFG.mod.boss || CFG.mod.sniperIt || CFG.mod.compras)) await comprarTokens();
+        if (CFG.tokenAutoCompra && CFG.mod.boss) await comprarTokens();   // token só para quem faz boss (a Hrmfarm, sem boss, ficava tentando comprar)
         if (CFG.mod.boss) await cicloBoss();
         if (CFG.mod.prey) await cicloPrey();
         if (CFG.mod.claude) await cicloClaude();
         try { instalarFiltroPopups(); } catch {}
+        try { cicloPasse(); avisoXpShare(); } catch {}
         if (CFG.mod.hunt) await cicloHunt();
         if (CFG.mod.sniperPk) await carregarEvo();
       } catch (e) { log('erro: ' + e.message, 'erro'); }
@@ -3164,6 +3202,20 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
         }
       }).observe(document.body, { childList: true, subtree: true });
     } catch {}
+  }
+  // 🎟️ passe: o Explorador viu o jogo mandar {"t":"passe.resgatar"} (sem nada mais) quando você resgatou — de graça, pega tudo o que
+  // já está liberado. O app pede a cada 2 h; a resposta do jogo fica anotada.
+  // 🎒 XP Share segurado (item 70050, /shared/xp-share-held.mjs: +5% de XP): parado num pokémon que não vai ser vendido é XP jogado fora.
+  // Enquanto o app não sabe a ação de mover o item (o Explorador aprende quando você mover uma vez pelo jogo), ele avisa.
+  function avisoXpShare() {
+    const h = (M.pokemons || []).filter((p) => Number(p.heldItemId) === 70050);
+    for (const p of h) if ((p.level || 0) >= CFG.nivelMaxCasa || ((p.nota || 0) < 3.5 && !p.shiny))
+      avisoRaro('xpshare' + p.id, `🎒 XP Share (+5% de XP) está no ${p.nome} Nv ${fmt(p.level || 0)}, que o app não vai upar para vender. Mova o item pelo jogo uma vez para um pokémon que está subindo (ex.: o que está numa casa) — o app aprende a ação e passa a mover sozinho`, 360);
+  }
+  function cicloPasse() {
+    if (!CFG.passeAuto || CFG.simulacao || Date.now() - (E.passeEm || 0) < 2 * 3600_000) return;
+    E.passeEm = Date.now(); persistir();
+    if (enviar({ t: 'passe.resgatar' })) log('🎟️ passe: pedi o resgate das recompensas liberadas (de graça)');
   }
   async function cicloHunt() {
     if (Date.now() - (M.huntEm || 0) < CFG.huntCadaMin * 60_000) return;
