@@ -2112,7 +2112,7 @@ contextBridge.executeInMainWorld({
 });
 
 
-// ===================== PokeIdle App 5.62 (gerado por tools/montar-preload.js — não edite aqui) =====================
+// ===================== PokeIdle App 5.63 (gerado por tools/montar-preload.js — não edite aqui) =====================
 ;(() => {
   const { contextBridge: pontePk, ipcRenderer: ipcPk } = require('electron');
   // o que o script pede ao app: rede só para os sites liberados (API do Claude e precificador) e avisos
@@ -2138,7 +2138,7 @@ contextBridge.executeInMainWorld({
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.62
+// @version      5.63
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -2168,7 +2168,7 @@ contextBridge.executeInMainWorld({
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.62';
+  const VERSAO_APP = '5.63';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -2493,6 +2493,23 @@ contextBridge.executeInMainWorld({
     }
   }
 
+  // 5.63: na venda, mostra por quanto foi comprado e o lucro (já sem a comissão de 15%)
+  function detalheVenda(e) {
+    try {
+      const d = norm2(e.descricao), nomeA = (a) => a.tipo === 'pokemon' ? a.ficha?.nome : E.nomesItens[a.itemId];
+      const a = (M.meus || []).find((x) => [e.id, e.anuncioId, e.anuncio].some((k) => k != null && String(k) === String(x.id)))
+        || (M.meus || []).filter((x) => (e.tipo == null || x.tipo === e.tipo) && nomeA(x) && d.includes(norm2(nomeA(x))))
+          .sort((x, z) => (x.tipo === 'pokemon' && d.includes(String(x.ficha?.level)) ? -1 : 0) - (z.tipo === 'pokemon' && d.includes(String(z.ficha?.level)) ? -1 : 0))[0];
+      if (!a) return ' · compra: não achei o anúncio';
+      const qtd = Number(e.qtd) || (a.tipo === 'item' ? Number((String(e.descricao || '').match(/^(\d+)\s*×/) || [])[1]) || Number(a.qtd) || 1 : 1), moeda = a.moeda;
+      const bruto = Number(e.preco ?? e.valor ?? e.total) || a.preco * qtd, recebe = Math.round(bruto * (1 - COMISSAO));
+      const c = custoDoAnuncio(a);
+      if (!c || c.custo == null) return ` · recebi ${curtoM(recebe, moeda)} · compra: custo desconhecido`;
+      const custo = Math.round(c.unit ? c.custo * qtd : c.custo), lucro = recebe - custo;
+      if (!(custo > 0)) return ` · recebi ${curtoM(recebe, moeda)} · era seu (sem custo)`;
+      return ` · comprado por ${curtoM(custo, moeda)} · recebi ${curtoM(recebe, moeda)} · lucro ${lucro >= 0 ? '+' : '−'}${curtoM(Math.abs(lucro), moeda)} (${lucro >= 0 ? '+' : ''}${Math.round(lucro / custo * 100)}%)`;
+    } catch { return ''; }
+  }
   // o jogo confirma a compra com outro id: acha a compra pelo id do anúncio, pelo item ou pelo nome do pokémon
   function acharPendente(e) {
     for (const k of [e.id, e.pedido, e.anuncioId, e.anuncio]) if (k != null && E.pendentes[k]) return { ...E.pendentes[k], _k: String(k) };
@@ -2527,7 +2544,7 @@ contextBridge.executeInMainWorld({
         else { (E.semPar = E.semPar || []).unshift({ em: Date.now(), id: e.id, pedido: e.pedido, tipo: e.tipo, itemId: e.itemId, descricao: e.descricao }); E.semPar.length = Math.min(E.semPar.length, 20); persistir(); }
         break;
       }
-      case 'marketVendido': M.meusEm = 0; log('💰 vendido: ' + (e.descricao || ''), 'ok'); try { const d = String(e.descricao || ''); for (const [id, n] of Object.entries(E.nomesItens || {})) if (n && d.includes(n)) (E.vendaItemEm ??= {})[id] = Date.now(); } catch {} op({ tipo: 'venda', desc: e.descricao }); break;
+      case 'marketVendido': M.meusEm = 0; log('💰 vendido: ' + (e.descricao || '') + detalheVenda(e), 'ok'); try { const d = String(e.descricao || ''); for (const [id, n] of Object.entries(E.nomesItens || {})) if (n && d.includes(n)) (E.vendaItemEm ??= {})[id] = Date.now(); } catch {} op({ tipo: 'venda', desc: e.descricao }); break;
       case 'marketCriado': M.meusEm = 0; log('📢 anunciado: ' + (e.descricao || '')); break;
       case 'mktSorteio': if (e.perdeu) log('🎲 perdeu o sorteio'); break;
       case 'bossMorto': {

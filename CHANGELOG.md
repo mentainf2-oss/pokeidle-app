@@ -2,6 +2,7 @@
 
 | Versão | Data | O que mudou |
 | --- | --- | --- |
+| 5.63 | 25/11/2026 | Toda venda no log mostra por quanto foi comprado, quanto recebeu (sem a comissão de 15%) e o lucro em valor e %. |
 | 5.62 | 25/11/2026 | Casas: pokémon comprado abaixo do Nv 500 não some mais da fila de casa quando ainda não apareceu na coleção (deixava casa vazia na HrnFarm); recupera os que a versão anterior perdeu nas últimas 24 h. |
 | 5.61 | 2026-11-25 | 👑 Popup do boss só quando cai item (pedido do jogador): a vitória com drop volta a aparecer; continuam escondidas a vitória sem drop, a derrota e o sorteio das compras do app. |
 | 5.60 | 2026-11-25 | 🧬 Evoluir antes de vender (explicação do jogador sobre a HrnFarm: pokémon fora da forma final têm nota baixa e vendem mal): quando um pokémon da casa chega ao alvo e já pode evoluir (tabela de evoluções do jogo), o app evolui antes de anunciar — usando a ação de evoluir que o Explorador aprende quando você evolui um pokémon pelo jogo uma vez; até aprender, ele não vende o pokémon e avisa em Decisões. Evolui em cadeia (ex.: Mudkip → Marshtomp → Swampert) se o nível permitir. |
