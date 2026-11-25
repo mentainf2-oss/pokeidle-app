@@ -25,7 +25,7 @@ contextBridge.executeInMainWorld({
     let sock = null;
     // ENCAIXE para ferramentas que só existem num PC (ex.: o Trader do dono, que não vai no app público): quem se
     // encaixa recebe as peças do núcleo e pode ouvir o socket e esconder do jogo as respostas das consultas dele.
-    const extras = { filtros: [], ouvintes: [], api: {}, instalados: new Set() };
+    const extras = { filtros: [], ouvintes: [], api: {}, instalados: new Set(), transformadores: [] };
     const ABAS = { meus: 1, historico: 1, historicoGlobal: 1 };
     const SEQ = 987654321;
     const SEQ_SHINY = 987654555; // consultas da aba Procurar shiny na Tabela de preços (o jogo descarta seq que não é dele)
@@ -207,7 +207,15 @@ contextBridge.executeInMainWorld({
             Object.defineProperty(ws, 'onmessage', {
               configurable: true,
               get() { return desc.get.call(ws); },
-              set(fn) { desc.set.call(ws, typeof fn === 'function' ? function (ev) { if (ehNosso(ev.data, ev)) return undefined; return fn.call(this, ev); } : fn); },
+              set(fn) { desc.set.call(ws, typeof fn === 'function' ? function (ev) {
+                if (ehNosso(ev.data, ev)) return undefined;
+                // PokeIdle App: tira da mensagem os avisos que o jogo viraria popup (sorteio das compras do app, resultado do boss automático)
+                if (extras.transformadores.length && typeof ev.data === 'string') {
+                  let d = ev.data; for (const f of extras.transformadores) { try { const r = f(d); if (r === null) return undefined; if (typeof r === 'string') d = r; } catch {} }
+                  if (d !== ev.data) { try { ev = new MessageEvent('message', { data: d, origin: ev.origin }); } catch {} }
+                }
+                return fn.call(this, ev);
+              } : fn); },
             });
           }
           ws.addEventListener('message', (e) => {
@@ -2083,6 +2091,8 @@ contextBridge.executeInMainWorld({
           try { fn(I); return true; } catch (e) { extras.instalados.delete(nome); return String(e && e.message || e); }
         },
         bonusXp() { return bonusXp ? JSON.parse(JSON.stringify(bonusXp)) : null; },
+        // PokeIdle App: filtro do que o jogo desenha (devolve o texto, outro texto, ou null para o jogo nem ver a mensagem)
+        filtrarJogo(fn) { if (typeof fn === 'function' && extras.transformadores.length < 5) extras.transformadores.push(fn); return extras.transformadores.length; },
         huntRank(o) { return huntRank(o && o.testeAoe ? { testeAoe: true } : undefined).then((r) => JSON.parse(JSON.stringify(r))).catch((e) => ({ pronto: false, erro: String(e) })); },
         pvpColetar(n, passo) { return pvpColetar(n, passo).catch((e) => ({ ok: false, motivo: String(e) })); },
         treinador() { const t = treinador(); return t ? { ...t } : null; },

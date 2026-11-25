@@ -25,7 +25,7 @@ contextBridge.executeInMainWorld({
     let sock = null;
     // ENCAIXE para ferramentas que só existem num PC (ex.: o Trader do dono, que não vai no app público): quem se
     // encaixa recebe as peças do núcleo e pode ouvir o socket e esconder do jogo as respostas das consultas dele.
-    const extras = { filtros: [], ouvintes: [], api: {}, instalados: new Set() };
+    const extras = { filtros: [], ouvintes: [], api: {}, instalados: new Set(), transformadores: [] };
     const ABAS = { meus: 1, historico: 1, historicoGlobal: 1 };
     const SEQ = 987654321;
     const SEQ_SHINY = 987654555; // consultas da aba Procurar shiny na Tabela de preços (o jogo descarta seq que não é dele)
@@ -207,7 +207,15 @@ contextBridge.executeInMainWorld({
             Object.defineProperty(ws, 'onmessage', {
               configurable: true,
               get() { return desc.get.call(ws); },
-              set(fn) { desc.set.call(ws, typeof fn === 'function' ? function (ev) { if (ehNosso(ev.data, ev)) return undefined; return fn.call(this, ev); } : fn); },
+              set(fn) { desc.set.call(ws, typeof fn === 'function' ? function (ev) {
+                if (ehNosso(ev.data, ev)) return undefined;
+                // PokeIdle App: tira da mensagem os avisos que o jogo viraria popup (sorteio das compras do app, resultado do boss automático)
+                if (extras.transformadores.length && typeof ev.data === 'string') {
+                  let d = ev.data; for (const f of extras.transformadores) { try { const r = f(d); if (r === null) return undefined; if (typeof r === 'string') d = r; } catch {} }
+                  if (d !== ev.data) { try { ev = new MessageEvent('message', { data: d, origin: ev.origin }); } catch {} }
+                }
+                return fn.call(this, ev);
+              } : fn); },
             });
           }
           ws.addEventListener('message', (e) => {
@@ -2083,6 +2091,8 @@ contextBridge.executeInMainWorld({
           try { fn(I); return true; } catch (e) { extras.instalados.delete(nome); return String(e && e.message || e); }
         },
         bonusXp() { return bonusXp ? JSON.parse(JSON.stringify(bonusXp)) : null; },
+        // PokeIdle App: filtro do que o jogo desenha (devolve o texto, outro texto, ou null para o jogo nem ver a mensagem)
+        filtrarJogo(fn) { if (typeof fn === 'function' && extras.transformadores.length < 5) extras.transformadores.push(fn); return extras.transformadores.length; },
         huntRank(o) { return huntRank(o && o.testeAoe ? { testeAoe: true } : undefined).then((r) => JSON.parse(JSON.stringify(r))).catch((e) => ({ pronto: false, erro: String(e) })); },
         pvpColetar(n, passo) { return pvpColetar(n, passo).catch((e) => ({ ok: false, motivo: String(e) })); },
         treinador() { const t = treinador(); return t ? { ...t } : null; },
@@ -2102,7 +2112,7 @@ contextBridge.executeInMainWorld({
 });
 
 
-// ===================== PokeIdle App 5.52 (gerado por tools/montar-preload.js — não edite aqui) =====================
+// ===================== PokeIdle App 5.53 (gerado por tools/montar-preload.js — não edite aqui) =====================
 ;(() => {
   const { contextBridge: pontePk, ipcRenderer: ipcPk } = require('electron');
   // o que o script pede ao app: rede só para os sites liberados (API do Claude e precificador) e avisos
@@ -2128,7 +2138,7 @@ contextBridge.executeInMainWorld({
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.52
+// @version      5.53
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -2158,12 +2168,13 @@ contextBridge.executeInMainWorld({
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.52';
+  const VERSAO_APP = '5.53';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
     simulacao: true,
     mod: { analise: true, compras: false, sniperPk: false, sniperIt: false, casas: false, boss: false, prey: false, claude: false, hunt: true },
+    esconderPopups: true,
     huntGanhoMin: 0.15, huntRiscoMax: 40, huntCadaMin: 30,
 
     // orçamento em Coins (o Claude não mexe)
@@ -3479,6 +3490,7 @@ contextBridge.executeInMainWorld({
       if (espera > 0) await dormir(espera + 200 + Math.random() * 2300); // dentro da janela de 3 s do sorteio
       if (moeda === 'orb' && !CFG.gemasAtivas) { E[gasto] -= total; if (regraQ) regraQ.reservadas = Math.max(0, (regraQ.reservadas || 0) - qtd); persistir(); return; } // desligou Gemas no meio
       E.pendentes[a.id] = { ...ctx, qtd, preco: a.preco, em: Date.now(), nomeBase: a.ficha?.nome || String(ctx.nome || '').replace(/^✨/, '').replace(/ Nv .*$/, '') }; persistir();
+      M.compraAppEm = Date.now();
       if (enviar({ t: 'market.comprar', id: a.id, qtd, preco: a.preco, moeda, sorteioUi: 1 })) {
         M.snipeStats.compras++;
         op({ tipo: 'compra', nome: ctx.nome, preco: total, qtd, unit: a.preco, moeda, lucro: ctx.lucro, motivo: ctx.motivo, pokemonId: ctx.pokemonId, casaKey: ctx.casaKey, ctx: ctx.tipo === 'pokemon' ? { ...ctx, preco: a.preco } : undefined });
@@ -5251,6 +5263,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
         if (CFG.mod.boss) await cicloBoss();
         if (CFG.mod.prey) await cicloPrey();
         if (CFG.mod.claude) await cicloClaude();
+        try { instalarFiltroPopups(); } catch {}
         if (CFG.mod.hunt) await cicloHunt();
         if (CFG.mod.sniperPk) await carregarEvo();
       } catch (e) { log('erro: ' + e.message, 'erro'); }
@@ -5262,6 +5275,33 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
   // A cada 30 min pergunta ao "Melhor hunt" do app de PC (o motor do /hunt: pokémon em campo, bônus, Dia Sazonal, AoE,
   // bicicleta e o ritmo medido) qual hunt rende mais XP agora. Troca só se ganhar 15%+ de XP/h, com risco de poção
   // aceitável, fora do boss e sem Prey ligado (o Prey escolhe o pokémon da hunt atual).
+  // 🙈 popups que o app causa: o sorteio das compras dele e o resultado de cada luta do boss automático não viram janela no jogo
+  // (o app continua vendo tudo; quem compra ou luta à mão vê normalmente). No app de PC, pelo filtro do Idleterino; e a
+  // mensagem do sorteio, se ainda aparecer, some da tela.
+  function instalarFiltroPopups() {
+    if (M.filtroPopups || !CFG.esconderPopups) return;
+    const I = PAGINA.__idleterinoMercado; if (!I || typeof I.filtrarJogo !== 'function') return;
+    M.filtroPopups = true;
+    const CHAVES = ['"mktSorteio"', '"bossMorto"', '"bossPerdeu"'];
+    I.filtrarJogo((d) => {
+      if (!CFG.esconderPopups || d.indexOf('"batalha"') < 0 || !CHAVES.some((k) => d.indexOf(k) >= 0)) return d;
+      const m = JSON.parse(d); if (m.t !== 'batalha' || !Array.isArray(m.ev)) return d;
+      const doApp = Date.now() - (M.compraAppEm || 0) < 20_000, bossApp = !!M.bossAuto;
+      const ev = m.ev.filter((e) => !((e?.k === 'mktSorteio' && doApp) || ((e?.k === 'bossMorto' || e?.k === 'bossPerdeu') && bossApp)));
+      if (ev.length === m.ev.length) return d;
+      m.ev = ev; return JSON.stringify(m);
+    });
+    try {
+      new MutationObserver((muts) => {
+        if (!CFG.esconderPopups || Date.now() - (M.compraAppEm || 0) > 30_000) return;
+        for (const mu of muts) for (const n of mu.addedNodes) {
+          if (n.nodeType !== 1 || !/sorteio da libera|levou este an[uú]ncio/i.test(n.textContent || '') || (n.textContent || '').length > 400) continue;
+          let alvo = n, fixo = null; for (let i = 0; i < 5 && alvo && alvo !== document.body; i++) { if (getComputedStyle(alvo).position === 'fixed') { fixo = alvo; break; } alvo = alvo.parentElement; }
+          const esc = fixo || n; if (!esc.closest('#pka') && (esc.textContent || '').length <= 400) esc.style.display = 'none';   // só o aviso, nunca um painel inteiro
+        }
+      }).observe(document.body, { childList: true, subtree: true });
+    } catch {}
+  }
   async function cicloHunt() {
     if (Date.now() - (M.huntEm || 0) < CFG.huntCadaMin * 60_000) return;
     M.huntEm = Date.now();
@@ -6403,7 +6443,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     papeis: () => Object.keys(PAPEIS),
   };
   try { Object.defineProperty(PAGINA, '__PKAPP_PONTE', { value: ponteDesktop, configurable: true }); } catch {}
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, estudoToken, resultadoBossDia, exportarCfg, importarCfg, compilarParecer, fecharDia, aprender, DEC, bossDaConta, cicloHunt, abrirVagaParaShiny, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: VERSAO_APP }, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, estudoToken, resultadoBossDia, exportarCfg, importarCfg, compilarParecer, fecharDia, aprender, DEC, bossDaConta, cicloHunt, abrirVagaParaShiny, instalarFiltroPopups, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: VERSAO_APP }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));

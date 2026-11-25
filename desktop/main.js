@@ -59,7 +59,18 @@ app.on('web-contents-created', (_e, wc) => {
   if (app.isPackaged) wc.on('devtools-opened', () => wc.closeDevTools());
   // Nenhuma página baixa programa (exe, scripts, instaladores) pelo app.
   wc.session.on('will-download', (event, item) => {
-    if (/\.(exe|msi|bat|cmd|com|scr|ps1|vbs|js|jar|dll|appimage|deb|sh|apk|dmg|pkg)$/i.test(item.getFilename())) event.preventDefault();
+    if (/\.(exe|msi|bat|cmd|com|scr|ps1|vbs|js|jar|dll|appimage|deb|sh|apk|dmg|pkg)$/i.test(item.getFilename())) return event.preventDefault();
+    // PokeIdle App: a planilha de vendas da hora vai calada para Documentos\PokeIdle App\planilhas (sem janela de salvar);
+    // guarda 14 dias e apaga as mais velhas
+    if (/^pokeidle-vendas-.*\.csv$/i.test(item.getFilename())) {
+      try {
+        const pasta = path.join(app.getPath('documents'), 'PokeIdle App', 'planilhas');
+        fs.mkdirSync(pasta, { recursive: true });
+        item.setSavePath(path.join(pasta, item.getFilename()));
+        const lim = Date.now() - 14 * 86400_000;
+        for (const f of fs.readdirSync(pasta)) { const fp = path.join(pasta, f); try { if (/\.csv$/i.test(f) && fs.statSync(fp).mtimeMs < lim) fs.unlinkSync(fp); } catch {} }
+      } catch {}
+    }
   });
   // Páginas não podem trocar de janela para endereços estranhos (file://, javascript:, etc.).
   wc.on('will-attach-webview', (event) => event.preventDefault());

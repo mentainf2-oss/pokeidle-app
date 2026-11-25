@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.52
+// @version      5.53
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -31,12 +31,13 @@
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.52';
+  const VERSAO_APP = '5.53';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
     simulacao: true,
     mod: { analise: true, compras: false, sniperPk: false, sniperIt: false, casas: false, boss: false, prey: false, claude: false, hunt: true },
+    esconderPopups: true,
     huntGanhoMin: 0.15, huntRiscoMax: 40, huntCadaMin: 30,
 
     // orçamento em Coins (o Claude não mexe)
@@ -1352,6 +1353,7 @@
       if (espera > 0) await dormir(espera + 200 + Math.random() * 2300); // dentro da janela de 3 s do sorteio
       if (moeda === 'orb' && !CFG.gemasAtivas) { E[gasto] -= total; if (regraQ) regraQ.reservadas = Math.max(0, (regraQ.reservadas || 0) - qtd); persistir(); return; } // desligou Gemas no meio
       E.pendentes[a.id] = { ...ctx, qtd, preco: a.preco, em: Date.now(), nomeBase: a.ficha?.nome || String(ctx.nome || '').replace(/^✨/, '').replace(/ Nv .*$/, '') }; persistir();
+      M.compraAppEm = Date.now();
       if (enviar({ t: 'market.comprar', id: a.id, qtd, preco: a.preco, moeda, sorteioUi: 1 })) {
         M.snipeStats.compras++;
         op({ tipo: 'compra', nome: ctx.nome, preco: total, qtd, unit: a.preco, moeda, lucro: ctx.lucro, motivo: ctx.motivo, pokemonId: ctx.pokemonId, casaKey: ctx.casaKey, ctx: ctx.tipo === 'pokemon' ? { ...ctx, preco: a.preco } : undefined });
@@ -3124,6 +3126,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
         if (CFG.mod.boss) await cicloBoss();
         if (CFG.mod.prey) await cicloPrey();
         if (CFG.mod.claude) await cicloClaude();
+        try { instalarFiltroPopups(); } catch {}
         if (CFG.mod.hunt) await cicloHunt();
         if (CFG.mod.sniperPk) await carregarEvo();
       } catch (e) { log('erro: ' + e.message, 'erro'); }
@@ -3135,6 +3138,33 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
   // A cada 30 min pergunta ao "Melhor hunt" do app de PC (o motor do /hunt: pokémon em campo, bônus, Dia Sazonal, AoE,
   // bicicleta e o ritmo medido) qual hunt rende mais XP agora. Troca só se ganhar 15%+ de XP/h, com risco de poção
   // aceitável, fora do boss e sem Prey ligado (o Prey escolhe o pokémon da hunt atual).
+  // 🙈 popups que o app causa: o sorteio das compras dele e o resultado de cada luta do boss automático não viram janela no jogo
+  // (o app continua vendo tudo; quem compra ou luta à mão vê normalmente). No app de PC, pelo filtro do Idleterino; e a
+  // mensagem do sorteio, se ainda aparecer, some da tela.
+  function instalarFiltroPopups() {
+    if (M.filtroPopups || !CFG.esconderPopups) return;
+    const I = PAGINA.__idleterinoMercado; if (!I || typeof I.filtrarJogo !== 'function') return;
+    M.filtroPopups = true;
+    const CHAVES = ['"mktSorteio"', '"bossMorto"', '"bossPerdeu"'];
+    I.filtrarJogo((d) => {
+      if (!CFG.esconderPopups || d.indexOf('"batalha"') < 0 || !CHAVES.some((k) => d.indexOf(k) >= 0)) return d;
+      const m = JSON.parse(d); if (m.t !== 'batalha' || !Array.isArray(m.ev)) return d;
+      const doApp = Date.now() - (M.compraAppEm || 0) < 20_000, bossApp = !!M.bossAuto;
+      const ev = m.ev.filter((e) => !((e?.k === 'mktSorteio' && doApp) || ((e?.k === 'bossMorto' || e?.k === 'bossPerdeu') && bossApp)));
+      if (ev.length === m.ev.length) return d;
+      m.ev = ev; return JSON.stringify(m);
+    });
+    try {
+      new MutationObserver((muts) => {
+        if (!CFG.esconderPopups || Date.now() - (M.compraAppEm || 0) > 30_000) return;
+        for (const mu of muts) for (const n of mu.addedNodes) {
+          if (n.nodeType !== 1 || !/sorteio da libera|levou este an[uú]ncio/i.test(n.textContent || '') || (n.textContent || '').length > 400) continue;
+          let alvo = n, fixo = null; for (let i = 0; i < 5 && alvo && alvo !== document.body; i++) { if (getComputedStyle(alvo).position === 'fixed') { fixo = alvo; break; } alvo = alvo.parentElement; }
+          const esc = fixo || n; if (!esc.closest('#pka') && (esc.textContent || '').length <= 400) esc.style.display = 'none';   // só o aviso, nunca um painel inteiro
+        }
+      }).observe(document.body, { childList: true, subtree: true });
+    } catch {}
+  }
   async function cicloHunt() {
     if (Date.now() - (M.huntEm || 0) < CFG.huntCadaMin * 60_000) return;
     M.huntEm = Date.now();
@@ -4276,7 +4306,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     papeis: () => Object.keys(PAPEIS),
   };
   try { Object.defineProperty(PAGINA, '__PKAPP_PONTE', { value: ponteDesktop, configurable: true }); } catch {}
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, estudoToken, resultadoBossDia, exportarCfg, importarCfg, compilarParecer, fecharDia, aprender, DEC, bossDaConta, cicloHunt, abrirVagaParaShiny, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: VERSAO_APP }, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, estudoToken, resultadoBossDia, exportarCfg, importarCfg, compilarParecer, fecharDia, aprender, DEC, bossDaConta, cicloHunt, abrirVagaParaShiny, instalarFiltroPopups, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: VERSAO_APP }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));
