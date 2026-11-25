@@ -2102,7 +2102,7 @@ contextBridge.executeInMainWorld({
 });
 
 
-// ===================== PokeIdle App 5.51 (gerado por tools/montar-preload.js — não edite aqui) =====================
+// ===================== PokeIdle App 5.52 (gerado por tools/montar-preload.js — não edite aqui) =====================
 ;(() => {
   const { contextBridge: pontePk, ipcRenderer: ipcPk } = require('electron');
   // o que o script pede ao app: rede só para os sites liberados (API do Claude e precificador) e avisos
@@ -2128,7 +2128,7 @@ contextBridge.executeInMainWorld({
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.51
+// @version      5.52
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -2158,7 +2158,7 @@ contextBridge.executeInMainWorld({
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.51';
+  const VERSAO_APP = '5.52';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -4023,6 +4023,23 @@ contextBridge.executeInMainWorld({
     }
     if (n) { persistir(); log(`🪟 fila recuperada: ${n} pokémon comprado(s) estava(m) parado(s) na coleção — vão para a venda`, 'ok'); }
   }
+  // ✨ vitrine cheia com shiny na fila: retira o anúncio comum de menor valor (há 30 min ou mais) para o shiny entrar.
+  // O retirado volta para a fila e é reanunciado depois dos 30 min que o jogo pede. No máximo uma troca a cada 10 min.
+  async function abrirVagaParaShiny() {
+    const sh = (E.filaVenda || []).find((x) => x.shiny && !((x.naoAntes || 0) > Date.now())); if (!sh) return false;
+    if (Date.now() - (M.vagaShinyEm || 0) < 10 * 60_000) return false;
+    const cb = cambioImplicito()?.taxa || 0, emG = (a) => (a.moeda === 'orb' ? a.preco : cb ? a.preco / cb : Infinity);
+    const valorSh = (() => { try { return precoGemas(sh.nome, sh.nv, true, sh.pot, sh.nota, sh.iv)?.prc?.justo || 0; } catch { return 0; } })();
+    const cands = M.meus.filter((a) => a.tipo === 'pokemon' && !a.ficha?.shiny && Date.now() - desdeQuando(a) > 30 * 60_000).sort((a, z) => emG(a) - emG(z));
+    const a = cands[0]; if (!a || (valorSh && emG(a) >= valorSh)) return false;
+    M.vagaShinyEm = Date.now();
+    const c = custoDoAnuncio(a), f = a.ficha || {};
+    log(`${sim()}✨ vitrine cheia: retirei ${f.nome || 'pokémon'} Nv ${fmt(f.level || 0)} (${a.moeda === 'orb' ? fmt(a.preco) + ' 🔮' : curto(a.preco)}) para anunciar o shiny ${sh.nome} Nv ${fmt(sh.nv || 0)}${valorSh ? ` (~${fmt(Math.round(valorSh))} 🔮)` : ''} — o retirado volta em 30 min`, 'venda');
+    E.filaVenda.push({ pokemonId: a.pokemonId, nome: f.nome || 'pokémon', nv: f.level, nota: f.nota, pot: f.potencia, iv: f.ivTotal, shiny: false, custo: c?.custo || 0, moeda: a.moeda, moedaCompra: a.moeda, naoAntes: Date.now() + 31 * 60_000 });
+    persistir();
+    if (!CFG.simulacao) { enviar({ t: 'market.cancelar', id: a.id }); M.meusEm = 0; await dormir(1500); await atualizarMeus(0); }
+    return true;
+  }
   async function processarFilaVenda() {
     for (const x of E.filaVenda || []) if (!x.moedaCompra) { x.moedaCompra = x.moeda === 'orb' && x.custo && x.custo < 1 ? 'gold' : x.moeda || 'gold'; if (x.custo && x.custo < 1) x.custo = x.custo * (cambioImplicito()?.taxa || 0); }
     for (const o of E.ops) {
@@ -4040,7 +4057,9 @@ contextBridge.executeInMainWorld({
     if (E.filaVenda.length !== antes) { log(`🪟 fila de venda: ${antes - E.filaVenda.length} já estava(m) anunciado(s) — tirei da fila`); persistir(); }
     for (const x of E.filaVenda) if (!x.custo) { const c = custoConhecido(x.pokemonId); if (c) { x.custo = c; x.moedaCompra = 'gold'; } }   // custo esquecido: o piso de venda volta a valer
     let livres = vagasPk().livres - casasProntasEm(0.5);            // casa pronta tem prioridade (senão ela para de upar)
-    E.filaVenda.sort((a, z) => (a.naoAntes || 0) > Date.now() ? 1 : (z.naoAntes || 0) > Date.now() ? -1 : (z.lucro || 0) - (a.lucro || 0));
+    // ordem: shiny primeiro (são os que valem mais — pedido do jogador), depois o maior lucro; retirado há pouco vai para o fim
+    E.filaVenda.sort((a, z) => (a.naoAntes || 0) > Date.now() ? 1 : (z.naoAntes || 0) > Date.now() ? -1 : (!!z.shiny - !!a.shiny) || (z.lucro || 0) - (a.lucro || 0));
+    if (livres <= 0 && await abrirVagaParaShiny()) livres = Math.max(1, vagasPk().livres);   // a vaga aberta é do shiny (passa na frente da casa pronta)
     while (livres > 0 && E.filaVenda.length) {
       if ((E.filaVenda[0].naoAntes || 0) > Date.now()) break;                   // retirado há pouco: o jogo pede 30 min para anunciar de novo
       const x = E.filaVenda.shift(); persistir();
@@ -6384,7 +6403,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     papeis: () => Object.keys(PAPEIS),
   };
   try { Object.defineProperty(PAGINA, '__PKAPP_PONTE', { value: ponteDesktop, configurable: true }); } catch {}
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, estudoToken, resultadoBossDia, exportarCfg, importarCfg, compilarParecer, fecharDia, aprender, DEC, bossDaConta, cicloHunt, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: VERSAO_APP }, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, estudoToken, resultadoBossDia, exportarCfg, importarCfg, compilarParecer, fecharDia, aprender, DEC, bossDaConta, cicloHunt, abrirVagaParaShiny, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: VERSAO_APP }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));
