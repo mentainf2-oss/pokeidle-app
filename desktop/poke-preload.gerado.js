@@ -2112,7 +2112,7 @@ contextBridge.executeInMainWorld({
 });
 
 
-// ===================== PokeIdle App 5.64 (gerado por tools/montar-preload.js — não edite aqui) =====================
+// ===================== PokeIdle App 5.65 (gerado por tools/montar-preload.js — não edite aqui) =====================
 ;(() => {
   const { contextBridge: pontePk, ipcRenderer: ipcPk } = require('electron');
   // o que o script pede ao app: rede só para os sites liberados (API do Claude e precificador) e avisos
@@ -2138,7 +2138,7 @@ contextBridge.executeInMainWorld({
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.64
+// @version      5.65
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -2168,7 +2168,7 @@ contextBridge.executeInMainWorld({
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.64';
+  const VERSAO_APP = '5.65';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -4270,8 +4270,20 @@ contextBridge.executeInMainWorld({
     if (!v || c < v) { E.vistoEm[a.id] = c; if (Object.keys(E.vistoEm).length > 200) for (const k of Object.keys(E.vistoEm)) if (!M.meus.some((x) => String(x.id) === k)) delete E.vistoEm[k]; }
     return E.vistoEm[a.id];
   }
+  function compradoEmGemas(pokemonId, nome, nv) {
+    const id = pokemonId != null ? String(pokemonId) : null;
+    if (id) {
+      const o = E.ops.find((x) => x.tipo === 'compra' && x.pokemonId != null && String(x.pokemonId) === id); if (o) return o.moeda === 'orb';
+      const c = (E.real?.compras || []).find((x) => x.pokemonId != null && String(x.pokemonId) === id); if (c) return c.moeda === 'orb';
+      const fc = [...(E.filaCasa || []), ...(E.filaVenda || [])].find((x) => String(x.pokemonId) === id && x.custo > 0); if (fc) return fc.moedaCompra === 'orb';
+      const p = Object.values(E.postos || {}).find((x) => x && String(x.pokemonId) === id && x.custo > 0); if (p) return p.moedaCompra === 'orb';
+    }
+    if (nome) { const pn = compraPorNome(nome, nv); if (pn) return pn.moeda === 'orb'; }
+    return false;
+  }
   async function trocarParaCoins(a, ag) {
     if (!(CFG.trocarParaCoinsH > 0) || a.tipo !== 'pokemon' || a.moeda !== 'orb' || a.ficha?.shiny || CFG.venderEmGemas === 'sempre') return false;
+    if (compradoEmGemas(a.pokemonId, a.ficha?.nome, a.ficha?.level)) return false;   // 5.65: comprado em Gemas não vira Coins
     E.trocas = E.trocas || {};
     const t = E.trocas[a.id], nome = a.ficha ? `${a.ficha.nome} Nv ${a.ficha.level}` : 'pokémon';
     if (t && ag - t.em > 3 * 60_000) {                                       // o jogo não mudou a moeda: retira e reanuncia em Coins
@@ -4495,7 +4507,15 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
     if (esc2.melhor) { moeda = esc2.melhor.moeda; ref = esc2.melhor.ref; if (esc2.opc.length > 1) { const o2 = esc2.opc[1]; porque = ` (rende ~${curto(esc2.melhor.eq)} vs ~${curto(o2.eq)} em ${o2.moeda === 'orb' ? 'Gemas' : 'Coins'})`; } }
     else if (alvo) ref = { preco: alvo / CFG.vendaFatorMediana, n: 0, como: 'sniper' };
     if (shiny) moeda = 'orb';                                      // shiny só se vende em Gemas
-    if (moeda === 'orb' && CFG.venderEmGemas === 'nunca' && !shiny) moeda = 'gold';
+    // 5.65: comprado em Gemas só se revende em Gemas (pedido do jogador) — com a referência de preço em Gemas
+    const emGemas = moedaCompra === 'orb' || compradoEmGemas(pokemonId, nome, nv);
+    if (emGemas) {
+      const o = (esc2.opc || []).find((x) => x.moeda === 'orb');
+      if (o) { ref = o.ref; porque = ' (comprado em Gemas: revende em Gemas)'; }
+      else if (!(ref?.como === 'sniper' && moeda === 'orb') && esc2.melhor?.moeda !== 'orb') { avisoRaro('semRefOrb' + pokemonId, `🪟 ${nome} Nv ${nv}: comprado em Gemas e sem preço de referência em Gemas — não anuncio em Coins, espera`, 120); return false; }
+      moeda = 'orb';
+    }
+    if (moeda === 'orb' && CFG.venderEmGemas === 'nunca' && !shiny && !emGemas) moeda = 'gold';
     if (!ref) { log(`sem preço de referência para ${nome}`); return false; }
     if (pkAnunciados() >= CFG.vagasPk) {
       if (fila) { E.filaVenda = E.filaVenda || []; if (!E.filaVenda.some((x) => x.pokemonId === pokemonId)) { E.filaVenda.push({ pokemonId, nome, nv, nota, pot, iv, shiny, custo, moedaCompra, alvo, moeda, lucro, ficha, em: Date.now() }); persistir(); log(`🪟 vitrine cheia (${CFG.vagasPk}): ${nome} entrou na fila de venda`); } }

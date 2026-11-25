@@ -525,7 +525,9 @@ async function renderSettings() {
   box.append(rowOpt('Twitch', 'Lives, pontos, baú e chat da Twitch.', sw(a.platforms.twitch, (v) => setPlatform('twitch', v))));
   box.append(rowOpt('Kick', 'Lives, pontos e chat da Kick.', sw(a.platforms.kick, (v) => setPlatform('kick', v))));
   box.append(rowOpt(a.platform === 'linux' ? 'Iniciar com o sistema' : 'Iniciar com o Windows', 'Abre direto na bandeja, perto do relógio.', sw(a.openAtLogin, async (v) => { S.app = await call('app:autostart', v); renderSettings(); })));
-  box.append(rowOpt('Versão', `Idleterino ${a.version}`, button('Sair do app', null, () => call('app:quit'))));
+  { const bts = el('div'); bts.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap';
+    bts.append(button('Procurar atualização', null, procurarAtualizacao), button('Sair do app', null, () => call('app:quit')));
+    box.append(rowOpt('Versão', `Idleterino ${a.version}`, bts)); }
   const cel = el('div', 'card');
   cel.append(el('h3', null, '📱 Idleterino no celular'), el('p', 'sub', 'Leve as suas contas do PokeIdle para o Idleterino Android com um QR Code: o celular abre já logado, sem senha.'), button('Levar contas para o celular', 'primary', () => abrirLevarCelular()));
   box.append(cel);
@@ -1361,6 +1363,20 @@ function openHelp(term) { helpQuery = term || ''; go('help'); }
 
 // ---------- Atualizações ----------
 function apply(ns, snap) { if (!snap) return; S[ns] = snap; refreshAll(); }
+// botão "Procurar atualização": confere agora no GitHub; se tiver versão nova, baixa e o Início mostra "Atualizar agora"
+async function procurarAtualizacao(ev) {
+  const b = ev && ev.currentTarget; if (b) { b.disabled = true; b.textContent = 'Procurando…'; }
+  try {
+    const r = await call('app:checkUpdate');
+    if (r.status === 'pronta') { toast(`Versão ${r.version} pronta — instalando agora (o app fecha e reabre sozinho).`); call('app:update:install'); }
+    else if (r.status === 'nova') toast(`Versão ${r.version} encontrada — baixando. Quando terminar, aparece "Atualizar agora" no Início (ou instala sozinho em até 30 min).`);
+    else if (r.status === 'baixando') toast(`Baixando a versão ${r.version} (${r.percent}%) — já já fica pronta.`);
+    else if (r.status === 'atual') toast('Você já está na versão mais nova.');
+    else if (r.status === 'dev') toast('Modo de desenvolvimento: sem atualização automática.');
+    else toast('Não consegui conferir agora: ' + (r.erro || 'erro desconhecido'));
+  } catch (e) { toast('Não consegui conferir agora.'); }
+  finally { if (b) { b.disabled = false; b.textContent = 'Procurar atualização'; } }
+}
 function toast(text) { const t = el('div', 'toast', text); $('#toasts').append(t); setTimeout(() => t.remove(), 4500); }
 function refreshDots() {
   for (const ns of ['twitch', 'kick']) {
@@ -1414,3 +1430,4 @@ setInterval(() => { if (page === 'home') renderHome(); }, 20000);
   go('home');
   refreshAll();
 })();
+{ const bpu = document.getElementById('bt-procurar-update'); if (bpu) bpu.onclick = async (ev) => { await procurarAtualizacao(ev); bpu.textContent = '⟳ Procurar atualização'; }; }

@@ -235,6 +235,7 @@ function appState() {
 // Portátil e .deb não se atualizam sozinhos: a faixa leva ao site para baixar.
 const SITE = 'https://github.com/mentainf2-oss/pokeidle-app/releases';
 let update = null; // { state: 'downloading' | 'ready' | 'manual', version, percent }
+let procurarAgora = null; // botão "Procurar atualização" (Ajustes e Início)
 function setUpdate(u) { update = u; send('app:state', appState()); updateTray(); }
 const newer = (a, b) => { const x = String(a).split('.').map(Number); const y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };
 function installUpdate() {
@@ -265,6 +266,7 @@ function setupAutoUpdate() {
       }).catch(() => {}); };
     check();
     setInterval(check, 15 * 60 * 1000);
+    procurarAgora = async () => { await check(); return update ? { status: 'nova', version: update.version } : { status: 'atual' }; };
     return;
   }
   // Repositório público: atualiza sem token. Privado: com o token salvo. Confere a cada 15 min.
@@ -298,6 +300,17 @@ function setupAutoUpdate() {
   const check = () => { configurarFeed(); autoUpdater.checkForUpdates().catch(() => {}); };
   check();
   setInterval(check, 15 * 60 * 1000);
+  procurarAgora = async () => {
+    if (update && update.state === 'ready') return { status: 'pronta', version: update.version };
+    if (update && update.state === 'downloading') return { status: 'baixando', version: update.version, percent: update.percent || 0 };
+    configurarFeed();
+    try {
+      const r = await autoUpdater.checkForUpdates();
+      const v = r && r.updateInfo && r.updateInfo.version;
+      if (v && newer(v, app.getVersion())) return { status: 'nova', version: v };
+      return { status: 'atual', version: app.getVersion() };
+    } catch (e) { return { status: 'erro', erro: String((e && e.message) || e).slice(0, 160) }; }
+  };
 }
 
 // ---------- IPC da casca ----------
@@ -306,6 +319,7 @@ ipcMain.handle('app:platform', (_e, ns, on) => { if (modules[ns]) setPlatform(ns
 ipcMain.handle('app:autostart', (_e, on) => { try { setOpenAtLogin(!!on); } catch {} return appState(); });
 ipcMain.handle('app:introDone', () => { config.lastSeenVersion = app.getVersion(); firstRun = false; saveConfig(); return appState(); });
 ipcMain.handle('app:quit', quitApp);
+ipcMain.handle('app:checkUpdate', async () => (procurarAgora ? procurarAgora() : { status: 'dev' }));
 // Tela cheia da janela (modo foco do PokeIdle): F11 em qualquer tela do app ou o botão da faixa.
 function toggleFullscreen() { if (mainWin && !mainWin.isDestroyed()) mainWin.setFullScreen(!mainWin.isFullScreen()); }
 ipcMain.handle('app:fullscreen', () => { toggleFullscreen(); return appState(); });
