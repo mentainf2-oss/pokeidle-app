@@ -1,6 +1,5 @@
 // PokeIdle App — a página do nosso app dentro do layout do Idleterino.
-// Quatro abas, poucos números e precisos: Hoje (o resultado do dia), Parecer (o fechamento de cada dia e o que o app aprendeu),
-// Decisões (o catálogo de tudo o que o app fez, com o motivo) e Controle (ligar, modo, módulos, papel de cada conta).
+// Uma conta por vez (troca no topo): estado e controles grandes, os 4 números do dia e as abas Resumo, Decisões, Parecer, Farm e Ajustes.
 // Os números vêm do app que roda dentro de cada conta (lido a cada 30 s pelo pkapp-main.js).
 let pkEstado = null;
 let pkTab = (() => { try { const t = localStorage.getItem('pkTab'); return ['hoje', 'parecer', 'decisoes', 'farm', 'controle'].includes(t) ? t : 'hoje'; } catch { return 'hoje'; } })();
@@ -41,7 +40,7 @@ const pkNomePapel = { tudo: 'Tudo', boss: 'Boss', casas: 'Casas', mercado: 'Merc
 const pkDicaPapel = { tudo: 'todos os módulos', boss: 'boss e tokens', casas: 'casas + sniper de pokémon', mercado: 'sniper de pokémon e itens' };
 const pkMods = [['compras', 'Lista de compras'], ['sniperPk', 'Sniper de pokémon'], ['sniperIt', 'Sniper de itens'], ['casas', 'Casas'], ['boss', 'Boss'], ['hunt', 'Hunt automática'], ['claude', 'Claude']];
 const pkCats = { compra: 'Compra', venda: 'Venda', 'preço': 'Preço', casa: 'Casa', boss: 'Boss', 'negociação': 'Negociação', pulou: 'Não comprou', hunt: 'Hunt', 'evolução': 'Evolução', claude: 'Claude', auditoria: 'Auditoria', aprendizado: 'Aprendizado', ajuste: 'Ajuste', erro: 'Erro' };
-window.idle.on('poke:pkapp:estado', (s) => { pkEstado = s; if (page === 'trader' && pkTab === 'hoje') renderTrader(); });
+window.idle.on('poke:pkapp:estado', (s) => { pkEstado = s; if (page === 'trader' && pkTab === 'hoje' && !document.querySelector('#page-trader select:focus')) renderTrader(); });
 
 function pkKpi(rot, val, sub, cls) {
   const b = el('div', 'stat'); b.append(el('span', null, rot), el('b', cls || null, val)); if (sub) b.append(el('small', 'muted', sub)); return b;
@@ -55,228 +54,229 @@ function pkSwitch(on, rot, onchange, dica) {
   l.append(i, el('i'), el('span', null, rot)); if (dica) l.title = dica; return l;
 }
 
+let pkConta = (() => { try { return localStorage.getItem('pkConta') || null; } catch { return null; } })();
+const PK_ABAS = [['hoje', 'Resumo'], ['decisoes', 'Decisões'], ['parecer', 'Parecer'], ['farm', 'Farm'], ['controle', 'Ajustes']];
+function pkIr(k) { pkTab = k; try { localStorage.setItem('pkTab', k); } catch {} if (k === 'parecer') pkRel = null; if (k === 'decisoes') pkDec = null; if (k === 'farm') pkFarm = null; renderTrader(); }
+
+// Uma página só, de uma conta por vez: troca de conta no topo; embaixo, o estado, os números do dia e as abas.
 async function renderTrader() {
   const root = $('#page-trader');
   if (!pkEstado) pkEstado = await window.idle.invoke('poke:pkapp:estado').catch(() => null);
   const rolagem = root.scrollTop;
   root.replaceChildren();
-  const head = el('header', 'page-head');
-  const t = el('div');
-  t.append(el('h1', null, 'PokeIdle App'), el('p', 'sub', 'O resultado do dia, o parecer de cada dia fechado, tudo o que o app decidiu e os controles de cada conta.'));
-  head.append(t);
-  const tabs = el('div', 'pvp-tabs');
-  tabs.classList.add('pk-tabs');
-  for (const [k, l] of [['hoje', 'Hoje'], ['parecer', 'Parecer'], ['decisoes', 'Decisões'], ['farm', 'Farm'], ['controle', 'Controle']]) {
-    tabs.append(pkBotao(k, l, pkTab === k ? 'on' : '', () => { pkTab = k; try { localStorage.setItem('pkTab', k); } catch {} if (k === 'parecer') pkRel = null; if (k === 'decisoes') pkDec = null; if (k === 'farm') pkFarm = null; renderTrader(); }));
-  }
-  root.append(head, tabs);
+  root.classList.add('pk-pagina');
   const s = pkEstado;
-  if (!s || !s.contas.length) { root.append(emptyBox('PokeIdle App', 'Adicione uma conta do PokeIdle na aba PokeIdle. O app entra sozinho em cada conta.')); return; }
-  if (pkTab === 'hoje') pkHoje(root, s);
-  if (pkTab === 'parecer') await pkParecer(root, s);
-  if (pkTab === 'decisoes') await pkDecisoes(root, s);
+  if (!s || !s.contas.length) { root.append(el('h1', null, 'PokeIdle App'), emptyBox('PokeIdle App', 'Adicione uma conta do PokeIdle na aba PokeIdle. O app entra sozinho em cada conta.')); return; }
+  if (!pkConta || !s.contas.some((c) => c.id === pkConta)) pkConta = s.contas[0].id;
+  const c = s.contas.find((x) => x.id === pkConta), r = c.r;
+  pkFarmConta = c.id;
+
+  // ---- topo: título + troca de conta ----
+  const topo = el('div', 'pk-topo');
+  topo.append(el('h1', null, 'PokeIdle App'));
+  const trocar = el('div', 'pk-contas-sel');
+  for (const x of s.contas) {
+    const b = el('button', 'pk-conta-bt' + (x.id === c.id ? ' on' : ''));
+    const ponto = el('i', 'pk-ponto ' + (!x.r ? 'off' : x.r.ligado ? (x.r.simulacao ? 'sim' : 'ok') : 'off'));
+    b.append(ponto, el('span', null, pkNome(x)));
+    if (x.r && x.r.hoje) b.append(el('small', pkCls(x.r.hoje.lucroG), pkSG(x.r.hoje.lucroG)));
+    b.title = !x.r ? 'carregando' : `${x.r.ligado ? 'ligado' : 'parado'} · ${x.r.simulacao ? 'simulação' : 'modo real'}`;
+    b.onclick = () => { pkConta = x.id; try { localStorage.setItem('pkConta', x.id); } catch {} pkFarm = null; pkRel = null; renderTrader(); };
+    trocar.append(b);
+  }
+  topo.append(trocar);
+  root.append(topo);
+
+  if (!r) { root.append(emptyBox(pkNome(c), 'O app está entrando nesta conta. Se demorar, abra a conta na aba PokeIdle para ela logar.')); return; }
+  const ctl = async (acao, valor, msg) => { pkEstado = await window.idle.invoke('poke:pkapp:controle', c.id, acao, valor); if (msg) toast(msg); renderTrader(); };
+
+  // ---- cartão da conta: estado e os dois controles que importam ----
+  const cab = el('div', 'card pk-cab');
+  const id = el('div', 'pk-id');
+  id.append(el('b', null, pkNome(c)), el('span', 'muted', `app ${r.versao || '?'} · papel ${pkNomePapel[c.papel] || 'Tudo'}${r.emBoss || r.bossAuto ? ' · no boss agora' : ''}`));
+  const bts = el('div', 'pk-cab-bts');
+  const bLig = el('button', 'pk-grande-bt ' + (r.ligado ? 'on' : 'off'));
+  bLig.append(el('i', 'pk-ponto ' + (r.ligado ? 'ok' : 'off')), el('span', null, r.ligado ? 'Ligado' : 'Parado'), el('small', null, r.ligado ? 'clique para parar' : 'clique para ligar'));
+  bLig.onclick = () => ctl('ligar', !r.ligado, `${pkNome(c)}: ${!r.ligado ? 'ligado' : 'parado'}`);
+  const bModo = el('button', 'pk-grande-bt ' + (r.simulacao ? 'sim' : 'real'));
+  bModo.append(el('span', null, r.simulacao ? 'Simulação' : 'Modo real'), el('small', null, r.simulacao ? 'não gasta nada' : 'compra e vende de verdade'));
+  bModo.onclick = () => {
+    if (r.simulacao && !confirm(`Modo real em ${pkNome(c)}: o app passa a comprar e vender de verdade, com os limites de Coins e Gemas da conta. Continuar?`)) return;
+    ctl('simulacao', !r.simulacao, `${pkNome(c)}: ${r.simulacao ? 'modo real' : 'simulação'}`);
+  };
+  const bJogo = el('button', 'ghost'); bJogo.textContent = 'Abrir no jogo'; bJogo.onclick = async () => { await window.idle.invoke('poke:select', c.id).catch(() => {}); go('poke'); };
+  bts.append(bLig, bModo, bJogo);
+  cab.append(id, bts);
+  root.append(cab);
+
+  // ---- os números do dia: quatro, grandes ----
+  const h = r.hoje || {};
+  const kp = el('div', 'pk-kpis');
+  const kpi = (rot, val, sub, cls) => { const b = el('div', 'pk-kpi'); b.append(el('span', null, rot), el('b', cls || null, val)); if (sub) b.append(el('small', null, sub)); return b; };
+  kp.append(
+    kpi('Lucro de hoje', pkSG(h.lucroG), `${h.revendas || 0} revendas${h.prejuizos ? ` · ${h.prejuizos} com prejuízo` : ''} · boss ${pkSG(h.partes && h.partes.boss)}`, pkCls(h.lucroG)),
+    kpi('Gemas', pkG(r.gemas), `gastas hoje ${pkG(r.gemasHoje)} de ${pkG(r.limiteGemasDia)}`),
+    kpi('Coins', pkFmt(r.coins), `gastos hoje ${pkFmt(r.gastoHoje)}`),
+    kpi('Boss hoje', r.boss ? pkSG(r.boss.lucro) : '—', r.boss ? `${r.boss.lutas} lutas · ${Math.round(r.boss.porHora || 0)}/h · ${r.tokens ?? '—'} tokens` : `${r.tokens ?? '—'} tokens`, r.boss ? pkCls(r.boss.lucro) : ''),
+  );
+  root.append(kp);
+
+  // ---- abas ----
+  const tabs = el('div', 'pvp-tabs pk-tabs');
+  for (const [k, l] of PK_ABAS) tabs.append(pkBotao(k === 'controle' ? 'ajuste' : k, l, pkTab === k ? 'on' : '', () => pkIr(k)));
+  root.append(tabs);
+  if (pkTab === 'hoje') pkHoje(root, s, c);
+  if (pkTab === 'parecer') await pkParecer(root, s, c);
+  if (pkTab === 'decisoes') await pkDecisoes(root, s, c);
   if (pkTab === 'farm') await pkFarmTela(root, s);
-  if (pkTab === 'controle') pkControle(root, s);
+  if (pkTab === 'controle') await pkControle(root, s, c);
   root.scrollTop = rolagem;
 }
 
-// ---------- Hoje: um número que importa, três de apoio e uma linha por conta ----------
-function pkHoje(root, s) {
-  const h = s.total.hoje || {};
-  const hero = el('div', 'card pk-hero');
-  const esq = el('div');
-  esq.append(el('span', 'pk-rot', 'Lucro realizado hoje · todas as contas'), el('b', 'pk-grande ' + pkCls(h.lucroG), pkSG(h.lucroG)),
-    el('small', 'muted', 'revendas fechadas + itens vendidos + boss (drops vendidos e à venda − tokens). Estoque ainda não vendido não entra.'));
-  const dir = el('div', 'pk-apoio');
-  dir.append(
-    pkKpi('Caixa do dia', pkSG(h.caixaG), 'vendido − comprado', pkCls(h.caixaG)),
-    pkKpi('Vendas · compras', `${h.vendas || 0} · ${h.compras || 0}`, `${h.revendas || 0} revendas fechadas${h.prejuizos ? ` · ${h.prejuizos} com prejuízo` : ''}`),
-    pkKpi('Boss hoje', pkSG(s.total.bossG), null, pkCls(s.total.bossG)),
-    pkKpi('API do Claude', `US$ ${(h.apiUsd || 0).toFixed(2)}`, `${h.decisoes || 0} decisões · ${h.erros || 0} erros`),
+// ---------- Resumo: vitrine, casas, alertas e o que o app acabou de fazer ----------
+function pkHoje(root, s, c) {
+  const r = c.r, h = r.hoje || {};
+  const grade = el('div', 'pk-grade');
+  // vitrine e casas
+  const v = el('div', 'card');
+  v.append(el('h2', 'section first', 'Vitrine e casas'));
+  const vit = el('div', 'pk-linhas');
+  const lin = (rot, val, cls) => { const d = el('div', 'pk-lin'); d.append(el('span', null, rot), el('b', cls || null, val)); return d; };
+  vit.append(
+    lin('Pokémon anunciados', `${r.vitrine.usadas} de 10`),
+    lin('Esperando vaga', r.vitrine.fila ? `${r.vitrine.fila} na fila` : 'ninguém', r.vitrine.fila >= 8 ? 'bad' : ''),
+    lin('Parados há mais de 48 h', String(h.parados || 0), h.parados ? 'bad' : ''),
+    lin('Vendas · compras hoje', `${h.vendas || 0} · ${h.compras || 0}`),
+    lin('Giro do evento', r.giro ? 'ligado (vende mais rápido)' : 'desligado'),
   );
-  hero.append(esq, dir);
-  root.append(hero);
-  if (s.total.base && s.total.base.lider) root.append(el('p', 'tip pk-base', `Banco de dados único: ${Number(s.total.base.vendas).toLocaleString('pt-BR')} vendas de pokémon e ${Number(s.total.base.itens).toLocaleString('pt-BR')} de itens (30 dias), coletadas por ${s.total.base.lider} e repassadas às outras contas — só ela baixa planilhas.`));
-
-  const lista = el('div', 'card'); lista.append(el('h2', 'section first', 'Contas'));
-  const t = el('table', 'pk-tab pk-contas');
-  const cab = el('tr'); for (const c of ['Conta', 'Estado', 'Lucro hoje', 'Vitrine', 'Boss', 'Último aviso']) cab.append(el('th', null, c)); t.append(cab);
-  for (const c of s.contas) {
-    const r = c.r, tr = el('tr');
-    const nome = el('td'); nome.append(el('b', null, pkNome(c)), el('small', 'muted', ` ${pkNomePapel[c.papel] || ''}`));
-    const est = el('td');
-    if (!r) est.append(pkPill('carregando', 'off'));
-    else est.append(pkPill(r.ligado ? 'ligado' : 'parado', r.ligado ? 'ok' : 'off'), ' ', pkPill(r.simulacao ? 'simulação' : 'real', r.simulacao ? 'sim' : 'real'));
-    const luc = el('td', 'num ' + pkCls(r && r.hoje && r.hoje.lucroG), r && r.hoje ? pkSG(r.hoje.lucroG) : '—');
-    const vit = el('td', 'num', r ? `${r.vitrine.usadas}/10${r.vitrine.fila ? ` · fila ${r.vitrine.fila}` : ''}${r.hoje && r.hoje.parados ? ` · ${r.hoje.parados} parados` : ''}` : '—');
-    const boss = el('td', 'num', r && r.boss ? `${pkSG(r.boss.lucro)} · ${r.boss.lutas} lutas` : '—');
-    const imp = r && (r.decisoes || []).find((d) => ['venda', 'compra', 'erro', 'auditoria', 'aprendizado'].includes(d.cat));
-    const ult = el('td', 'pk-msg'); if (imp) ult.append(el('small', 'muted', pkHora(imp.em) + ' '), el('span', imp.cat === 'erro' ? 'bad' : null, imp.msg)); else ult.textContent = '—';
-    tr.append(nome, est, luc, vit, boss, ult); t.append(tr);
-    if (r && r.auditoria && r.auditoria.length) { const a = el('tr', 'pk-alerta'); const td = el('td'); td.colSpan = 6; td.append(el('span', 'tip bad', '🔎 ' + r.auditoria.join(' · '))); a.append(td); t.append(a); }
+  v.append(vit);
+  const cs = r.casasDet || [];
+  if (cs.length) {
+    v.append(el('h3', 'pk-sub', 'Casas'));
+    const L = el('div', 'pk-linhas');
+    for (const x of cs) L.append(lin(`Casa ${x.id}${x.pct ? ` · ${x.pct}%` : ''}`, x.nome ? `${x.shiny ? '✨ ' : ''}${x.nome} Nv ${x.nv ?? '?'}${x.alvo && x.bot ? ` → ${x.alvo}` : ''}${x.bot ? '' : ' (seu)'}` : 'vazia', x.nome ? '' : 'bad'));
+    v.append(L);
   }
-  lista.append(t);
-  root.append(lista);
-
-  // o último parecer, curto
-  const ult = s.contas.map((c) => c.r && c.r.parecer && { conta: pkNome(c), ...c.r.parecer }).filter(Boolean).sort((a, z) => (a.dia < z.dia ? 1 : -1));
-  if (ult.length) {
-    const dia = ult[0].dia, doDia = ult.filter((x) => x.dia === dia);
-    const card = el('div', 'card'); card.append(el('h2', 'section first', `Último parecer · ${pkDia(dia)}`));
-    for (const p of doDia) { const b = el('div', 'pk-par'); b.append(el('b', null, `${p.conta} ${pkSG(p.lucroG)}`), el('p', null, (p.linhas || [])[0] || '')); if (p.ajustes && p.ajustes.length) b.append(el('small', 'muted', `Ajustes: ${p.ajustes.map((a) => `${a.rot} ${a.de} → ${a.para}`).join('; ')}`)); card.append(b); }
-    const act = el('div', 'actions'); act.append(button('Ver o parecer completo', 'ghost', () => { pkTab = 'parecer'; pkRel = null; try { localStorage.setItem('pkTab', 'parecer'); } catch {} renderTrader(); }));
-    card.append(act); root.append(card);
+  grade.append(v);
+  // alertas + agora
+  const a = el('div', 'card');
+  a.append(el('h2', 'section first', 'Agora'));
+  if (r.auditoria && r.auditoria.length) { const al = el('div', 'pk-alertas'); for (const x of r.auditoria) al.append(el('p', 'tip bad', x)); a.append(al); }
+  const imp = (r.decisoes || []).filter((d) => ['venda', 'compra', 'preço', 'boss', 'casa', 'erro', 'hunt', 'aprendizado', 'evolução'].includes(d.cat)).slice(0, 12);
+  if (!imp.length) a.append(el('p', 'muted', 'Nada ainda.'));
+  const lista = el('div', 'pk-feed');
+  for (const d of imp) { const row = el('div', 'pk-feed-l'); const t = el('span', 'pk-cat'); t.dataset.cat = d.cat; t.append(pkIco(d.cat)); row.append(el('small', 'muted', pkHora(d.em)), t, el('span', d.cat === 'erro' ? 'bad' : null, d.msg)); lista.append(row); }
+  a.append(lista);
+  const ver = el('div', 'actions'); ver.append(button('Ver todas as decisões', 'ghost', () => pkIr('decisoes'))); a.append(ver);
+  grade.append(a);
+  root.append(grade);
+  // último parecer
+  if (r.parecer) {
+    const p = r.parecer, card = el('div', 'card');
+    const hh = el('div', 'pcard-head'); hh.append(el('b', null, `Parecer de ${pkDia(p.dia)}`), el('span', 'state ' + pkCls(p.lucroG), pkSG(p.lucroG))); card.append(hh);
+    for (const l of (p.linhas || []).slice(0, 4)) card.append(el('p', 'pk-par-l', l));
+    const act = el('div', 'actions'); act.append(button('Parecer completo', 'ghost', () => pkIr('parecer'))); card.append(act);
+    root.append(card);
   }
+  if (s.total.base && s.total.base.lider) root.append(el('p', 'tip pk-base', `Banco de dados único: ${Number(s.total.base.vendas).toLocaleString('pt-BR')} vendas guardadas, coletadas por ${s.total.base.lider} e repassadas às outras contas.`));
 }
 
-// ---------- Parecer: o fechamento de cada dia (perto da meia-noite) e o dia de hoje até agora ----------
-async function pkParecer(root, s) {
+// ---------- Parecer: o fechamento de cada dia desta conta e o que o app aprendeu ----------
+async function pkParecer(root, s, c) {
   if (pkRel && Date.now() - (pkRel.em || 0) > 5 * 60_000) pkRel = null;
   if (!pkRel && !pkRelCarregando) { pkRelCarregando = true; pkRel = await window.idle.invoke('poke:pkapp:relatorios').catch(() => []); pkRel.em = Date.now(); pkRelCarregando = false; }
-  const R = pkRel || [];
-  const intro = el('div', 'pk-barra');
-  intro.append(el('p', 'sub', 'Perto da meia-noite (Brasília) cada conta fecha o dia. Com o parecer, o app ajusta os próprios limites dentro de faixas seguras — nunca afrouxa além do que você configurou.'),
-    button('Atualizar', 'ghost', () => { pkRel = null; renderTrader(); }));
-  root.append(intro);
-
-  // hoje até agora, por conta
-  const hoje = R.filter((x) => x.hoje);
-  if (hoje.length) {
-    const card = el('div', 'card'); card.append(el('h2', 'section first', 'Hoje até agora'));
-    for (const x of hoje) { const b = el('div', 'pk-par'); b.append(el('b', null, `${x.nome} ${pkSG(x.hoje.lucroG)}`)); for (const l of x.hoje.linhas || []) b.append(el('p', null, l)); card.append(b); }
-    root.append(card);
-  }
-  // dias fechados (todas as contas juntas por dia)
-  const dias = {};
-  for (const x of R) for (const r of x.relatorios || []) (dias[r.dia] ??= []).push({ conta: x.nome, ...r });
-  const ordem = Object.keys(dias).sort().reverse();
-  if (!ordem.length) { root.append(emptyBox('Parecer', 'O primeiro parecer sai quando o app fechar o dia (perto da meia-noite) ou, se houver histórico de ontem, alguns minutos depois de abrir.')); }
-  for (const d of ordem) {
-    const L = dias[d], tot = L.reduce((t, r) => t + (r.lucroG || 0), 0);
+  const x = (Array.isArray(pkRel) ? pkRel : []).find((y) => y.id === c.id);
+  root.append(el('p', 'sub pk-intro', 'Perto da meia-noite (Brasília) a conta fecha o dia. Com o parecer, o app ajusta os próprios limites dentro de faixas seguras — nunca afrouxa além do que você configurou.'));
+  if (!x) { root.append(emptyBox('Parecer', 'Carregando…')); return; }
+  if (x.hoje) { const card = el('div', 'card'); const hh = el('div', 'pcard-head'); hh.append(el('b', null, 'Hoje até agora'), el('span', 'state ' + pkCls(x.hoje.lucroG), pkSG(x.hoje.lucroG))); card.append(hh); for (const l of x.hoje.linhas || []) card.append(el('p', 'pk-par-l', l)); root.append(card); }
+  for (const rel of x.relatorios || []) {
     const card = el('div', 'card');
-    const h = el('div', 'pcard-head'); h.append(el('b', null, pkDia(d)), el('span', 'state ' + pkCls(tot), `${pkSG(tot)}${L.some((r) => r.simulacao) ? ' · simulação' : ''}`)); card.append(h);
-    for (const r of L) {
-      const b = el('div', 'pk-par');
-      b.append(el('b', null, `${r.conta} ${pkSG(r.lucroG)}${r.atrasado ? ' (fechado depois)' : ''}`));
-      for (const l of r.linhas || []) b.append(el('p', null, l));
-      if (r.ajustesAnteriores && r.ajustesAnteriores.length) b.append(el('small', 'muted', `Vindo de ontem: ${r.ajustesAnteriores.map((a) => `${a.rot} ${a.de} → ${a.para}`).join('; ')}`));
-      card.append(b);
-    }
+    const hh = el('div', 'pcard-head'); hh.append(el('b', null, `${pkDia(rel.dia)}${rel.atrasado ? ' (fechado depois)' : ''}`), el('span', 'state ' + pkCls(rel.lucroG), `${pkSG(rel.lucroG)}${rel.simulacao ? ' · simulação' : ''}`)); card.append(hh);
+    for (const l of rel.linhas || []) card.append(el('p', 'pk-par-l', l));
+    if (rel.ajustesAnteriores && rel.ajustesAnteriores.length) card.append(el('small', 'muted', `Vindo de ontem: ${rel.ajustesAnteriores.map((a) => `${a.rot} ${a.de} → ${a.para}`).join('; ')}`));
     root.append(card);
   }
-  // explorador: os tipos de mensagem do jogo que o app já viu (base para novas automações)
-  const ex = await window.idle.invoke('poke:pkapp:explorador').catch(() => []);
-  if (ex && ex.length) {
-    const card = el('div', 'card'); card.append(el('h2', 'section first', 'O que o app já viu no jogo'));
-    card.append(el('p', 'sub', 'Cada ação que o jogo manda quando você clica (resgatar, abrir, trocar…) fica anotada aqui com um exemplo. É daqui que saem as próximas automações.'));
-    const saida = new Map(); for (const c of ex) for (const x of c.saida || []) { const y = saida.get(x.t); if (!y || x.ult > y.ult) saida.set(x.t, { ...x, n: (y ? y.n : 0) + x.n }); }
-    const L = [...saida.values()].sort((a2, z) => z.ult - a2.ult).slice(0, 40);
-    card.append(pkTabela(['Ação do jogo', 'Vezes', 'Última', 'Exemplo'], L.map((x) => pkLinha(x.t, String(x.n), new Date(x.ult).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }), el('code', 'pk-ex', x.ex || '')))));
-    const ent = new Set(); for (const c of ex) for (const x of c.entrada || []) ent.add(x.t);
-    card.append(el('p', 'tip', `Mensagens que o jogo envia: ${[...ent].sort().join(', ')}`));
-    root.append(card);
-  }
-  // o que o app aprendeu (vale para todas as contas)
-  const ap = R.flatMap((x) => ((x.aprendizado && x.aprendizado.hist) || []).map((a) => ({ conta: x.nome, ...a }))).sort((a, z) => z.em - a.em).slice(0, 15);
-  const ev = R.flatMap((x) => ((x.aprendizado && x.aprendizado.itensEvitar) || []).map((a) => ({ conta: x.nome, ...a })));
+  if (!(x.relatorios || []).length) root.append(emptyBox('Parecer', 'O primeiro parecer sai quando o app fechar o dia, perto da meia-noite.'));
+  const ap = (x.aprendizado && x.aprendizado.hist) || [], ev = (x.aprendizado && x.aprendizado.itensEvitar) || [];
   if (ap.length || ev.length) {
     const card = el('div', 'card'); card.append(el('h2', 'section first', 'O que o app aprendeu'));
-    if (ap.length) card.append(pkTabela(['Quando', 'Conta', 'Mudança', 'Por quê'], ap.map((a) => pkLinha(new Date(a.em).toLocaleDateString('pt-BR'), a.conta, `${a.rot}: ${a.de} → ${a.para}`, a.porque))));
-    if (ev.length) card.append(el('p', 'tip', `Itens fora do flip por prejuízo: ${ev.map((x) => `${x.nome} (até ${new Date(x.ate).toLocaleDateString('pt-BR')})`).join(' · ')}`));
+    if (ap.length) card.append(pkTabela(['Quando', 'Mudança', 'Por quê'], ap.map((a) => pkLinha(new Date(a.em).toLocaleDateString('pt-BR'), `${a.rot}: ${a.de} → ${a.para}`, a.porque))));
+    if (ev.length) card.append(el('p', 'tip', `Itens fora do flip por prejuízo: ${ev.map((y) => `${y.nome} (até ${new Date(y.ate).toLocaleDateString('pt-BR')})`).join(' · ')}`));
     root.append(card);
   }
 }
 
-// ---------- Decisões: o catálogo, com filtro por tipo e conta ----------
-async function pkDecisoes(root, s) {
+// ---------- Decisões desta conta, com filtro por tipo ----------
+async function pkDecisoes(root, s, c) {
   if (!pkDec || Date.now() - pkDecEm > 60_000) { pkDec = await window.idle.invoke('poke:pkapp:decisoes', null).catch(() => []); pkDecEm = Date.now(); }
-  const L = pkDec || [];
+  const L = (pkDec || []).filter((d) => d.conta === pkNome(c));
   const card = el('div', 'card');
   const filtros = el('div', 'pk-chips');
   const cont = {}; for (const d of L) cont[d.cat] = (cont[d.cat] || 0) + 1;
   const chip = (k, rot, n) => { const b = pkBotao(k || 'decisoes', `${rot}${n != null ? ` · ${n}` : ''}`, 'pk-chip' + (pkDecCat === k ? ' on' : ''), () => { pkDecCat = k; renderTrader(); }); b.dataset.cat = k; return b; };
   filtros.append(chip('', 'Todas', L.length));
   for (const [k, rot] of Object.entries(pkCats)) if (cont[k]) filtros.append(chip(k, rot, cont[k]));
-  const contas = [...new Set(L.map((d) => d.conta))];
-  const sel = el('select'); const o0 = el('option', null, 'Todas as contas'); o0.value = ''; sel.append(o0);
-  for (const c of contas) { const o = el('option', null, c); o.value = c; sel.append(o); }
-  sel.value = pkDecConta; sel.onchange = () => { pkDecConta = sel.value; renderTrader(); };
-  const top = el('div', 'pk-barra');
-  const dir = el('div', 'pk-chips'); dir.append(sel, button('Atualizar', 'ghost', () => { pkDec = null; renderTrader(); }));
-  top.append(filtros, dir);
+  const top = el('div', 'pk-barra'); top.append(filtros, button('Atualizar', 'ghost', () => { pkDec = null; renderTrader(); }));
   card.append(top);
-  const F = L.filter((d) => (!pkDecCat || d.cat === pkDecCat) && (!pkDecConta || d.conta === pkDecConta)).slice(0, 250);
-  card.append(F.length ? pkTabela(['Quando', 'Conta', 'Tipo', 'Decisão e motivo'], F.map((d) => {
+  const F = L.filter((d) => !pkDecCat || d.cat === pkDecCat).slice(0, 250);
+  card.append(F.length ? pkTabela(['Quando', 'Tipo', 'Decisão e motivo'], F.map((d) => {
     const msg = el('span', d.cat === 'erro' ? 'bad' : null, d.msg + (d.sim ? '  (simulação)' : ''));
     const tipo = el('span', 'pk-cat'); tipo.dataset.cat = d.cat; tipo.append(pkIco(d.cat), el('span', null, pkCats[d.cat] || d.cat));
-    return pkLinha(`${new Date(d.em).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} ${pkHora(d.em)}`, d.conta, tipo, msg);
-  })) : el('p', 'tip', 'Nada nesse filtro ainda. O catálogo guarda 4 dias de decisões de cada conta.'));
+    return pkLinha(`${new Date(d.em).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} ${pkHora(d.em)}`, tipo, msg);
+  })) : el('p', 'tip', 'Nada nesse filtro ainda. O catálogo guarda 4 dias de decisões.'));
   root.append(card);
 }
 
-// ---------- Controle: ligar, modo, módulos e papel de cada conta ----------
-function pkControle(root, s) {
-  const grid = el('div', 'grid-2');
-  for (const c of s.contas) {
-    const r = c.r, card = el('div', 'card');
-    const h = el('div', 'pcard-head'); h.append(el('b', null, pkNome(c)), el('span', 'state', r ? `app ${r.versao || '?'}` : 'carregando o app…')); card.append(h);
-    if (!r) { card.append(el('p', 'tip', 'A conta precisa estar logada para o app entrar.')); grid.append(card); continue; }
-    const ctl = async (acao, valor, msg) => { pkEstado = await window.idle.invoke('poke:pkapp:controle', c.id, acao, valor); if (msg) toast(msg); renderTrader(); };
-    const linha1 = el('div', 'pk-ctl');
-    linha1.append(
-      pkSwitch(r.ligado, r.ligado ? 'Ligado' : 'Parado', (on) => ctl('ligar', on, `${pkNome(c)}: ${on ? 'ligado' : 'parado'}`)),
-      pkSwitch(!r.simulacao, r.simulacao ? 'Simulação' : 'Modo real', (real) => {
-        if (real && !confirm(`Modo real em ${pkNome(c)}: o app passa a comprar e vender de verdade, com os limites de Coins e Gemas da conta. Continuar?`)) return renderTrader();
-        ctl('simulacao', !real, `${pkNome(c)}: ${real ? 'modo real' : 'simulação'}`);
-      }, 'Simulação: só registra o que faria, sem gastar.'),
-    );
-    card.append(linha1);
-    const mods = el('div', 'pk-mods');
-    for (const [k, rot] of pkMods) mods.append(pkSwitch(r.mod && r.mod[k], rot, (on) => ctl('mod', { k, on })));
-    card.append(mods);
-    const sel = el('select'); for (const p of s.papeis) { const o = el('option', null, `${pkNomePapel[p]} — ${pkDicaPapel[p]}`); o.value = p; sel.append(o); }
-    sel.value = c.papel || 'tudo';
-    sel.onchange = async () => { pkEstado = await window.idle.invoke('poke:pkapp:papel', c.id, sel.value); toast(`Papel de ${pkNome(c)}: ${pkNomePapel[sel.value]}`); renderTrader(); };
-    const sug = s.sugestao.papeis[c.id];
-    const lin = el('div', 'actions'); lin.append(el('span', 'muted', 'Papel'), sel, button('Abrir no jogo', 'ghost', async () => { await window.idle.invoke('poke:select', c.id).catch(() => {}); go('poke'); }));
-    card.append(lin);
-    if (sug && sug !== c.papel) card.append(el('p', 'tip', `Sugerido: ${pkNomePapel[sug]} — ${s.sugestao.porque[c.id] || ''}`));
-    const outras = s.contas.filter((o) => o.id !== c.id && o.r);
-    if (outras.length) {
-      const so = el('select'); for (const o of outras) { const op = el('option', null, pkNome(o)); op.value = o.id; so.append(op); }
-      const cp = el('div', 'actions');
-      cp.append(el('span', 'muted', 'Copiar ajustes de'), so, button('Copiar', 'ghost', async () => {
-        const de = s.contas.find((o) => o.id === so.value);
-        if (!confirm(`Copiar os ajustes de ${pkNome(de)} para ${pkNome(c)}? Casas e papel continuam os desta conta, e ela fica em simulação até você ligar o modo real.`)) return;
-        const r = await window.idle.invoke('poke:pkapp:copiarAjustes', so.value, c.id);
-        toast(r && r.ok ? `Ajustes de ${pkNome(de)} copiados para ${pkNome(c)} (em simulação)` : `Não copiou: ${(r && r.erro) || 'erro'}`);
-        pkEstado = await window.idle.invoke('poke:pkapp:estado'); renderTrader();
-      }));
-      card.append(cp);
-    }
-    grid.append(card);
+// ---------- Ajustes desta conta (módulos, papel, copiar) e do app ----------
+async function pkControle(root, s, c) {
+  const r = c.r;
+  const ctl = async (acao, valor, msg) => { pkEstado = await window.idle.invoke('poke:pkapp:controle', c.id, acao, valor); if (msg) toast(msg); renderTrader(); };
+  const card = el('div', 'card');
+  card.append(el('h2', 'section first', `O que a ${pkNome(c)} faz`));
+  const mods = el('div', 'pk-mods');
+  for (const [k, rot] of pkMods) mods.append(pkSwitch(r.mod && r.mod[k], rot, (on) => ctl('mod', { k, on }, `${rot}: ${on ? 'ligado' : 'desligado'}`)));
+  card.append(mods);
+  const sel = el('select'); for (const p of s.papeis) { const o = el('option', null, `${pkNomePapel[p]} — ${pkDicaPapel[p]}`); o.value = p; sel.append(o); }
+  sel.value = c.papel || 'tudo';
+  sel.onchange = async () => { pkEstado = await window.idle.invoke('poke:pkapp:papel', c.id, sel.value); toast(`Papel: ${pkNomePapel[sel.value]}`); renderTrader(); };
+  const lin = el('div', 'actions'); lin.append(el('span', 'muted', 'Papel da conta'), sel); card.append(lin);
+  const sug = s.sugestao.papeis[c.id];
+  if (sug && sug !== c.papel) { const t = el('p', 'tip'); t.append(`Sugerido: ${pkNomePapel[sug]} — ${s.sugestao.porque[c.id] || ''} `); const b = button('Usar', 'ghost', async () => { pkEstado = await window.idle.invoke('poke:pkapp:papel', c.id, sug); renderTrader(); }); t.append(b); card.append(t); }
+  const outras = s.contas.filter((o) => o.id !== c.id && o.r);
+  if (outras.length) {
+    const so = el('select'); for (const o of outras) { const op = el('option', null, pkNome(o)); op.value = o.id; so.append(op); }
+    const cp = el('div', 'actions');
+    cp.append(el('span', 'muted', 'Copiar ajustes de'), so, button('Copiar', 'ghost', async () => {
+      const de = s.contas.find((o) => o.id === so.value);
+      if (!confirm(`Copiar os ajustes de ${pkNome(de)} para ${pkNome(c)}? Casas, papel e boss continuam os desta conta, e ela fica em simulação até você ligar o modo real.`)) return;
+      const rr = await window.idle.invoke('poke:pkapp:copiarAjustes', so.value, c.id);
+      toast(rr && rr.ok ? `Ajustes copiados (em simulação)` : `Não copiou: ${(rr && rr.erro) || 'erro'}`);
+      pkEstado = await window.idle.invoke('poke:pkapp:estado'); renderTrader();
+    }));
+    card.append(cp);
   }
-  root.append(grid);
-  if (Object.entries(s.sugestao.papeis).some(([id, p]) => (s.contas.find((c) => c.id === id) || {}).papel !== p)) {
-    const act = el('div', 'actions'); act.append(button('Aplicar as sugestões de papel', 'primary', async () => { pkEstado = await window.idle.invoke('poke:pkapp:aplicarSugestao'); toast('Papéis aplicados'); renderTrader(); }));
-    root.append(act);
-  }
+  root.append(card);
 
-  const card = el('div', 'card'); card.style.marginTop = '16px';
-  card.append(el('h2', 'section first', 'App'));
+  const app = el('div', 'card');
+  app.append(el('h2', 'section first', 'App (todas as contas)'));
   const op = el('div', 'pk-mods');
   op.append(
-    pkSwitch(s.painelNoJogo, 'Mostrar o painel dentro do jogo', async (on) => { pkEstado = await window.idle.invoke('poke:pkapp:painel', on); renderTrader(); }, 'O painel completo de antes, com todas as abas e ajustes finos.'),
     pkSwitch(s.avisos, 'Avisos de vendas, drops raros e parecer do dia', async (on) => { pkEstado = await window.idle.invoke('poke:pkapp:avisos', on); renderTrader(); }, 'PC, celular (ntfy) e Discord — canais em Ajustes → Avisos.'),
+    pkSwitch(s.painelNoJogo, 'Mostrar o painel antigo dentro do jogo', async (on) => { pkEstado = await window.idle.invoke('poke:pkapp:painel', on); renderTrader(); }, 'O painel completo de antes, com os ajustes finos.'),
   );
-  card.append(op);
-  card.append(el('h2', 'section', 'Atualização automática'),
-    el('p', 'sub', 'Confere versões novas a cada 15 min e instala sozinho quando o PC fica 2 min sem uso. Com o repositório privado, cole um token do GitHub só de leitura (Contents: Read-only, só o pokeidle-app). Fica só neste PC.'));
-  const inp = el('input'); inp.type = 'password'; inp.placeholder = s.temToken ? 'token salvo — cole outro para trocar' : 'github_pat_…'; inp.style.width = '360px';
-  const act = el('div', 'actions'); act.append(inp, button('Salvar token', 'primary', async () => { pkEstado = await window.idle.invoke('poke:pkapp:token', inp.value); inp.value = ''; toast('Token salvo.'); renderTrader(); }));
-  card.append(act);
-  card.append(el('p', 'tip', 'Baseado no Idleterino, de VinniiSaantos (licença MIT).'));
-  root.append(card);
+  app.append(op);
+  app.append(el('p', 'sub', 'Atualização automática: confere a cada 15 min e instala quando o PC fica 2 min sem uso; depois de reiniciar, cada conta volta ligada como estava.'));
+  const det = el('details', 'pk-det'); det.append(el('summary', null, 'Avançado: token do GitHub e o que o app já viu no jogo'));
+  const inp = el('input'); inp.type = 'password'; inp.placeholder = s.temToken ? 'token salvo — cole outro para trocar' : 'github_pat_… (só se o repositório for privado)'; inp.style.width = '360px';
+  const act = el('div', 'actions'); act.append(inp, button('Salvar token', 'ghost', async () => { pkEstado = await window.idle.invoke('poke:pkapp:token', inp.value); inp.value = ''; toast('Token salvo.'); renderTrader(); }));
+  det.append(act);
+  const ex = await window.idle.invoke('poke:pkapp:explorador').catch(() => []);
+  const saida = new Map(); for (const x of (Array.isArray(ex) ? ex : [])) for (const y of x.saida || []) { const z = saida.get(y.t); if (!z || y.ult > z.ult) saida.set(y.t, { ...y, n: (z ? z.n : 0) + y.n }); }
+  const LL = [...saida.values()].sort((a2, z) => z.ult - a2.ult).slice(0, 40);
+  if (LL.length) det.append(pkTabela(['Ação do jogo', 'Vezes', 'Última', 'Exemplo'], LL.map((y) => pkLinha(y.t, String(y.n), new Date(y.ult).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }), el('code', 'pk-ex', y.ex || '')))));
+  app.append(det);
+  app.append(el('p', 'tip', 'Baseado no Idleterino, de VinniiSaantos (licença MIT).'));
+  root.append(app);
 }
 
 // ---------- Farm: os melhores pokémon para as hunts de cada conta (tipos + Z-Move, AoE, ×4) ----------
@@ -287,10 +287,7 @@ async function pkFarmTela(root, s) {
   const contas = s.contas.filter((c) => c.r);
   if (!contas.length) { root.append(emptyBox('Farm', 'Nenhuma conta logada.')); return; }
   if (!pkFarmConta || !contas.some((c) => c.id === pkFarmConta)) pkFarmConta = contas[0].id;
-  const barra = el('div', 'pk-barra');
-  const sel = el('div', 'pk-chips');
-  for (const c of contas) sel.append(button(pkNome(c), 'pk-chip' + (c.id === pkFarmConta ? ' on' : ''), () => { pkFarmConta = c.id; pkFarm = null; renderTrader(); }));
-  barra.append(sel, button('Atualizar', 'ghost', () => { pkFarm = null; renderTrader(); }));
+  const barra = el('div', 'pk-barra'); barra.append(el('span', 'muted', 'Pokémon, hunts e investimentos desta conta'), button('Atualizar', 'ghost', () => { pkFarm = null; renderTrader(); }));
   root.append(barra);
   if (!pkFarm && !pkFarmCarregando) { pkFarmCarregando = true; pkFarm = await window.idle.invoke('poke:pve', pkFarmConta, 'farm', null).catch(() => null); pkFarmCarregando = false; }
   const F = pkFarm;

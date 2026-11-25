@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.55
+// @version      5.56
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -31,7 +31,7 @@
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.55';
+  const VERSAO_APP = '5.56';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -141,6 +141,7 @@
     CFG.tokenPrecoMaxGemas = 0; CFG.tokenAutoCompra = true; CFG.tokenLucroMinGemas = CFG.tokenLucroMinGemas || 2; CFG.bossTokenMoeda = 'orb';   // em Gemas, como pedido (Coins ficam para as casas; dá para escolher "Coins e Gemas" na aba Boss)
     CFG.cfgVersao = Math.max(CFG.cfgVersao || 0, 52); salvarCfg();
   }
+  if (!CFG.migApi556) { CFG.migApi556 = true; if (CFG.claudeIntervaloMin < 180) CFG.claudeIntervaloMin = 180; salvarCfg(); }   // v5.56: menos API — estratégia a cada 3 h
   if ((CFG.cfgVersao || 0) < 54) { CFG.claudeConfere = 'todas'; CFG.cfgVersao = Math.max(CFG.cfgVersao || 0, 54); salvarCfg(); }   // v5.4: o Claude confere toda compra (pedido do jogador)
   if ((CFG.cfgVersao || 0) < 50) {                                // v5.0: religa a regra de token que a v4.9 desligou pela revenda (token é para boss)
     for (const r of E.regras) if (r.origem === 'claude' && Number(r.itemId) === 70000 && !r.ativa && (r.compradas || 0) < r.qtd) { r.ativa = true; r.depois = 'guardar'; }
@@ -1332,8 +1333,18 @@
     const limiteClaude = moeda === 'orb' ? CFG.claudeAprovaAcimaGemas : CFG.claudeAprovaAcima;
     const tokenNoSeuPreco = ctx.tipo === 'item' && Number(ctx.itemId ?? a.itemId) === ITEM.TOKEN && (moeda === 'orb' ? CFG.tokenPrecoMaxGemas > 0 : CFG.tokenPrecoMax > 0) && a.preco <= tetoDoJogador(ITEM.TOKEN, moeda);
     const conferir = !tokenNoSeuPreco && CFG.claudeKey && !CFG.simulacao && (CFG.claudeConfere === 'todas' || (CFG.claudeConfere === 'acima' && limiteClaude > 0 && total >= limiteClaude));
-    if (conferir) {
+    // 💸 menos API: o app aprende com as conferências. Depois de 3 aprovações seguidas do mesmo tipo de compra (mesmo item, ou mesma
+    // espécie no sniper/casas, na mesma moeda) e com preço até 5% acima do maior já aprovado, decide sozinho por 3 dias. Um veto zera.
+    const chaveConf = `${ctx.tipo === 'item' ? 'it:' + (ctx.itemId ?? a.itemId) : 'pk:' + String(ctx.nome || '').replace(/ Nv.*$/, '')}:${moeda}:${String(ctx.motivo || '').split(' ')[0]}`;
+    const ap = (E.confAprende ||= {})[chaveConf];
+    const aprendido = ap && ap.ok >= 3 && Date.now() - ap.em < 3 * 86400_000 && a.preco <= ap.max * 1.05;
+    if (conferir && aprendido) { avisoRaro('confAp' + chaveConf, `💸 conferência sem API: ${ctx.nome} — o Claude já aprovou ${ap.ok} compras iguais (até ${moeda === 'orb' ? fmt(ap.max) + ' 🔮' : curto(ap.max)} cada); o app decide sozinho`, 240); }
+    if (conferir && !aprendido) {
       const ok = await claudeAprova(a, { ...ctx, qtd });
+      const x = (E.confAprende[chaveConf] ||= { ok: 0, max: 0, em: 0 });
+      if (ok) { x.ok++; x.max = Math.max(x.max, a.preco); x.em = Date.now(); } else { x.ok = 0; x.max = 0; x.em = Date.now(); }
+      if (Object.keys(E.confAprende).length > 300) for (const k of Object.keys(E.confAprende)) if (Date.now() - E.confAprende[k].em > 7 * 86400_000) delete E.confAprende[k];
+      persistir();
       if (!ok) { log(`🧠 Claude vetou: ${ctx.nome} ${qtdM(qtd, a.preco, moeda)}`); return false; }
     }
     if (CFG.simulacao) {
@@ -1673,6 +1684,13 @@
   /* ============================== 🏠 CASAS ============================== */
   const PCT_RAR = { comum: 25, incomum: 40, rara: 75, mitica: 100, lendaria: 100 };
   function sincronizarCasas(lista) {
+    // conta nova (ou com ajustes copiados): nenhuma das casas configuradas é desta conta → usa as casas em uso DELA (até 5).
+    // Numa conta que já tem as casas certas nada muda (casa extra que você pôs à mão continua fora do app).
+    const daConta = (lista || []).filter((c) => c.emUso).map((c) => c.id);
+    if (daConta.length && !CFG.casas.some((id) => (lista || []).some((c) => c.id === id))) {
+      const antes = CFG.casas.join(', '); CFG.casas = daConta.slice(0, 5); salvarCfg();
+      log(`🏠 casas desta conta: ${CFG.casas.join(', ')} — as configuradas (${antes}) eram de outra conta (ajustes copiados ou padrão)`, 'ok');
+    }
     for (const c of lista) {
       if (!c.emUso) continue;
       (c.postos || []).forEach((pid, slot) => {
@@ -2998,6 +3016,9 @@ Recomende compras SOMENTE dentro de interesses_do_jogador (listas vazias = qualq
     const primeira = !E.estudoConcluido;
     if (forcar !== 'manual' && Date.now() < (E.claudeEsperaAte || 0)) return;
     if (!primeira && !forcar && Date.now() - (E.ultimoClaude || 0) < CFG.claudeIntervaloMin * 60_000) return;
+    // 💸 menos API: se o mercado da conta mal mexeu desde a última estratégia (menos de 3 vendas/compras novas), pula esta rodada
+    const movs = (E.real?.vendas || []).filter((v) => v.em > (E.ultimoClaude || 0)).length + (E.real?.compras || []).filter((v) => v.em > (E.ultimoClaude || 0)).length;
+    if (!primeira && !forcar && E.ultimoClaude && movs < 3 && Date.now() - E.ultimoClaude < 2 * CFG.claudeIntervaloMin * 60_000) { avisoRaro('claudePula', `💸 estratégia do Claude adiada: só ${movs} movimento(s) desde a última — sem gasto de API`, 120); return; }
     E.ultimoClaude = Date.now(); persistir();
     try {
       log(primeira ? '🎓 estudo concluído — Claude analisando as 3 horas de dados…' : '🧠 consultando o Claude…');
@@ -4317,6 +4338,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
         parecer: (() => { const r = (E.relatorios || []).find((x) => !x.parcial); return r ? { dia: r.dia, em: r.em, lucroG: r.lucroG, linhas: r.linhas, ajustes: r.ajustes || [], atrasado: !!r.atrasado } : null; })(),
         decisoes: DEC.slice(0, 60), painelOculto: !!ler('pkapp.painelOculto', false),
         ligadoSalvo: ler('pkapp.ligado', null),
+        casasDet: (() => { try { return CFG.casas.map((cid) => { const p = E.postos[`${cid}:0`]; const nv = p?.xp != null ? nivelDeXp(p.xp) : null; let alvo = null; try { alvo = p?.bot ? alvoDoPokemon(p, cid) : null; } catch {} return { id: cid, nome: p?.pokemonId ? p.nome : null, nv, alvo, bot: !!p?.bot, shiny: !!p?.shiny, pct: p?.pct ?? null }; }); } catch { return []; } })(),
         investir: (() => { try { return estudoCasas().linhas.filter((l) => l.custo > 0 && l.ganhoH > 0).map((l) => ({ acao: l.acao, custo: Math.round(l.custo), ganhoH: Math.round(l.ganhoH), payback: l.payback != null ? Math.round(l.payback * 10) / 10 : null, nota: l.nota || null, moeda: l.moeda || null })).sort((x, y) => (x.payback ?? 1e9) - (y.payback ?? 1e9)).slice(0, 8); } catch { return []; } })(),
         aprendizado: { hist: (E.aprendizado?.hist || []).slice(0, 10), itensEvitar: Object.entries(E.aprendizado?.itensEvitar || {}).filter(([, t]) => t > Date.now()).map(([id, t]) => ({ id, nome: E.nomesItens?.[id] || id, ate: t })) },
       }));

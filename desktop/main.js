@@ -62,11 +62,12 @@ app.on('web-contents-created', (_e, wc) => {
     if (/\.(exe|msi|bat|cmd|com|scr|ps1|vbs|js|jar|dll|appimage|deb|sh|apk|dmg|pkg)$/i.test(item.getFilename())) return event.preventDefault();
     // PokeIdle App: a planilha de vendas da hora vai calada para Documentos\PokeIdle App\planilhas (sem janela de salvar);
     // guarda 14 dias e apaga as mais velhas
-    if (/^pokeidle-vendas-.*\.csv$/i.test(item.getFilename())) {
+    // (qualquer planilha .csv/.xlsx das contas do PokeIdle — a do app e a que o próprio jogo gera ao pedir o CSV do mercado)
+    if (/\.(csv|xlsx)$/i.test(item.getFilename()) && /^persist:poke-/.test(String((trustFor(wc) || {}).partition || '')) || /^pokeidle-vendas-.*\.csv$/i.test(item.getFilename())) {
       try {
-        const pasta = path.join(app.getPath('documents'), 'PokeIdle App', 'planilhas');
-        fs.mkdirSync(pasta, { recursive: true });
-        item.setSavePath(path.join(pasta, item.getFilename()));
+        let pasta = path.join(app.getPath('documents'), 'PokeIdle App', 'planilhas');
+        try { fs.mkdirSync(pasta, { recursive: true }); } catch { pasta = path.join(app.getPath('userData'), 'planilhas'); fs.mkdirSync(pasta, { recursive: true }); }
+        item.setSavePath(path.join(pasta, item.getFilename().replace(/[\\/:*?"<>|]/g, '_')));
         const lim = Date.now() - 14 * 86400_000;
         for (const f of fs.readdirSync(pasta)) { const fp = path.join(pasta, f); try { if (/\.csv$/i.test(f) && fs.statSync(fp).mtimeMs < lim) fs.unlinkSync(fp); } catch {} }
       } catch {}
