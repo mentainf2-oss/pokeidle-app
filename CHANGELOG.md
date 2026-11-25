@@ -2,6 +2,7 @@
 
 | Versão | Data | O que mudou |
 | --- | --- | --- |
+| 5.66 | 25/11/2026 | Aba Mercado no Painel: livro de cada pokémon comprado (preço, moeda, hora, nível, origem) e da venda (preço, recebido, nível, lucro, tempo), com filtros Em estoque / Vendidos / Prejuízo. Guardado na conta e em arquivo no PC (pkapp-livro), com o histórico do jogo completando compras feitas à mão. Trava: pokémon anotado nunca é anunciado nem baixado abaixo do custo + comissão. |
 | 5.65 | 25/11/2026 | Pokémon comprado em Gemas só é revendido em Gemas (nunca vira Coins). Botão "Procurar atualização" no Início e em Ajustes: confere na hora, baixa e instala se já estiver pronta. |
 | 5.64 | 25/11/2026 | Casas: com o giro ligado, não coloca mais na casa um pokémon que já passou do nível de venda (Charizard Nv 510 entrava e saía em loop); quem acabou de ser anunciado não volta para a casa. |
 | 5.63 | 25/11/2026 | Toda venda no log mostra por quanto foi comprado, quanto recebeu (sem a comissão de 15%) e o lucro em valor e %. |

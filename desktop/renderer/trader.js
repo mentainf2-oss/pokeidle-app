@@ -2,13 +2,14 @@
 // Uma conta por vez (troca no topo): estado e controles grandes, os 4 números do dia e as abas Resumo, Decisões, Parecer, Farm e Ajustes.
 // Os números vêm do app que roda dentro de cada conta (lido a cada 30 s pelo pkapp-main.js).
 let pkEstado = null;
-let pkTab = (() => { try { const t = localStorage.getItem('pkTab'); return ['hoje', 'parecer', 'decisoes', 'farm', 'controle'].includes(t) ? t : 'hoje'; } catch { return 'hoje'; } })();
+let pkTab = (() => { try { const t = localStorage.getItem('pkTab'); return ['hoje', 'parecer', 'decisoes', 'mercado', 'farm', 'controle'].includes(t) ? t : 'hoje'; } catch { return 'hoje'; } })();
 let pkFarm = null, pkFarmConta = null, pkFarmCarregando = false;
 // ícones de traço (mesmo estilo da barra lateral)
 const PK_ICO = {
   hoje: '<path d="M4 14a8 8 0 0 1 16 0"/><path d="M12 14l4.2-4.2"/><path d="M3 18h18"/>',
   parecer: '<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/><path d="M10 13h6M10 17h4"/>',
   decisoes: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/>',
+  mercado: '<path d="M3 9l1.5-5h15L21 9"/><path d="M4 9v11h16V9"/><path d="M3 9a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0"/><path d="M10 20v-5h4v5"/>',
   farm: '<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>',
   controle: '<path d="M4 7h9"/><path d="M17 7h3"/><circle cx="15" cy="7" r="2"/><path d="M4 17h3"/><path d="M11 17h9"/><circle cx="9" cy="17" r="2"/>',
   compra: '<path d="M3 4h2l2.4 11h10.4l2.2-8H6.3"/><circle cx="9.5" cy="19" r="1.4"/><circle cx="16.5" cy="19" r="1.4"/>',
@@ -57,8 +58,8 @@ function pkSwitch(on, rot, onchange, dica) {
 
 const pkPedidos = {};
 let pkConta = (() => { try { return localStorage.getItem('pkConta') || null; } catch { return null; } })();
-const PK_ABAS = [['hoje', 'Resumo'], ['decisoes', 'Decisões'], ['parecer', 'Parecer'], ['farm', 'Farm'], ['controle', 'Ajustes']];
-function pkIr(k) { pkTab = k; try { localStorage.setItem('pkTab', k); } catch {} if (k === 'parecer') pkRel = null; if (k === 'decisoes') pkDec = null; if (k === 'farm') pkFarm = null; renderTrader(); }
+const PK_ABAS = [['hoje', 'Resumo'], ['mercado', 'Mercado'], ['decisoes', 'Decisões'], ['parecer', 'Parecer'], ['farm', 'Farm'], ['controle', 'Ajustes']];
+function pkIr(k) { pkTab = k; try { localStorage.setItem('pkTab', k); } catch {} if (k === 'parecer') pkRel = null; if (k === 'decisoes') pkDec = null; if (k === 'mercado') pkLivro = null; if (k === 'farm') pkFarm = null; renderTrader(); }
 
 // Uma página só, de uma conta por vez: troca de conta no topo; embaixo, o estado, os números do dia e as abas.
 async function renderTrader() {
@@ -158,6 +159,7 @@ async function renderTrader() {
   if (pkTab === 'hoje') pkHoje(root, s, c);
   if (pkTab === 'parecer') await pkParecer(root, s, c);
   if (pkTab === 'decisoes') await pkDecisoes(root, s, c);
+  if (pkTab === 'mercado') await pkMercado(root, s, c);
   if (pkTab === 'farm') await pkFarmTela(root, s);
   if (pkTab === 'controle') await pkControle(root, s, c);
   root.scrollTop = rolagem;
@@ -255,6 +257,46 @@ async function pkDecisoes(root, s, c) {
     const tipo = el('span', 'pk-cat'); tipo.dataset.cat = d.cat; tipo.append(pkIco(d.cat), el('span', null, pkCats[d.cat] || d.cat));
     return pkLinha(`${new Date(d.em).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} ${pkHora(d.em)}`, tipo, msg);
   })) : el('p', 'tip', 'Nada nesse filtro ainda. O catálogo guarda 4 dias de decisões.'));
+  root.append(card);
+}
+
+// ---------- 📗 Mercado: livro de compras e vendas de pokémon desta conta ----------
+let pkLivro = null, pkLivroEm = 0, pkLivroFiltro = 'todos';
+const pkM = (v, moeda) => (v == null || !isFinite(v) ? '—' : moeda === 'orb' ? pkG(v) : pkFmt(v));
+const pkQuando = (ms) => ms ? `${new Date(ms).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} ${pkHora(ms)}` : '—';
+const pkDur = (ms) => { const h = ms / 3600_000; return h < 1 ? `${Math.max(1, Math.round(h * 60))} min` : h < 48 ? `${h.toFixed(h < 10 ? 1 : 0)} h` : `${Math.round(h / 24)} d`; };
+async function pkMercado(root, s, c) {
+  if (!pkLivro || Date.now() - pkLivroEm > 60_000) { pkLivro = await window.idle.invoke('poke:pkapp:livro', null).catch(() => []); pkLivroEm = Date.now(); }
+  const L = (pkLivro || []).filter((x) => x.contaId === c.id || x.conta === pkNome(c));
+  const vendidos = L.filter((x) => x.venda), abertos = L.filter((x) => !x.venda), prej = vendidos.filter((x) => x.lucro != null && x.lucro < 0);
+  const soma = (arr, moeda, f) => arr.filter((x) => (x.venda ? x.venda.moeda : x.moeda) === moeda).reduce((t, x) => t + (f(x) || 0), 0);
+  const kp = el('div', 'pk-kpis');
+  const kpi = (rot, val, sub, cls) => { const b = el('div', 'pk-kpi'); b.append(el('span', null, rot), el('b', cls || null, val)); if (sub) b.append(el('small', null, sub)); return b; };
+  const lG = soma(vendidos, 'orb', (x) => x.lucro), lC = soma(vendidos, 'gold', (x) => x.lucro);
+  kp.append(
+    kpi('Comprados', String(L.length), `${abertos.length} em estoque · ${vendidos.length} vendidos`),
+    kpi('Lucro em Gemas', pkSG(lG), `${vendidos.filter((x) => x.venda.moeda === 'orb').length} vendas em Gemas`, pkCls(lG)),
+    kpi('Lucro em Coins', `${lC > 0 ? '+' : lC < 0 ? '−' : ''}${pkFmt(Math.abs(lC))}`, `${vendidos.filter((x) => x.venda.moeda === 'gold').length} vendas em Coins`, pkCls(lC)),
+    kpi('Vendas com prejuízo', String(prej.length), prej.length ? 'veja no filtro Prejuízo' : 'nenhuma — a trava do livro segura o preço', prej.length ? 'bad' : 'ok'),
+  );
+  root.append(kp);
+  const card = el('div', 'card');
+  const chips = el('div', 'pk-chips');
+  const chip = (k, rot, n) => { const b = pkBotao(k === 'todos' ? 'mercado' : k === 'abertos' ? 'casa' : k === 'vendidos' ? 'venda' : 'pulou', `${rot} · ${n}`, 'pk-chip' + (pkLivroFiltro === k ? ' on' : ''), () => { pkLivroFiltro = k; renderTrader(); }); return b; };
+  chips.append(chip('todos', 'Todos', L.length), chip('abertos', 'Em estoque', abertos.length), chip('vendidos', 'Vendidos', vendidos.length), chip('prejuizo', 'Prejuízo', prej.length));
+  const top = el('div', 'pk-barra'); top.append(chips, button('Atualizar', 'ghost', () => { pkLivro = null; renderTrader(); }));
+  card.append(top);
+  const F = (pkLivroFiltro === 'abertos' ? abertos : pkLivroFiltro === 'vendidos' ? vendidos : pkLivroFiltro === 'prejuizo' ? prej : L).slice(0, 400);
+  const origem = { sniper: 'sniper', casa: 'para casa', 'histórico': 'à mão / histórico', app: 'app' };
+  card.append(F.length ? pkTabela(['Pokémon', 'Compra', 'Nv compra', 'Venda', 'Nv venda', 'Recebido', 'Lucro', 'Tempo'], F.map((x) => {
+    const nome = el('span'); nome.append(el('b', null, `${x.shiny ? '✨ ' : ''}${x.nome}`), el('small', 'muted', `  ${origem[x.origem] || x.origem || ''}`));
+    const compra = el('span'); compra.append(el('b', null, pkM(x.custo, x.moeda)), el('small', 'muted', `  ${pkQuando(x.em)}`));
+    const v = x.venda;
+    const venda = v ? (() => { const sp = el('span'); sp.append(el('b', null, pkM(v.bruto, v.moeda)), el('small', 'muted', `  ${pkQuando(v.em)}`)); return sp; })() : pkPill('em estoque', '');
+    const lucro = v && x.lucro != null ? el('b', pkCls(x.lucro), `${x.lucro > 0 ? '+' : x.lucro < 0 ? '−' : ''}${pkM(Math.abs(x.lucro), v.moeda)}`) : '—';
+    return pkLinha(nome, compra, x.nv ?? '—', venda, v ? v.nv ?? '—' : '—', v ? pkM(v.recebe, v.moeda) : '—', lucro, pkDur((v ? v.em : Date.now()) - x.em));
+  })) : el('p', 'tip', 'Nada anotado ainda. Cada pokémon comprado (pelo app, à mão ou visto no histórico do jogo) entra aqui com preço, hora e nível; a venda é anotada depois, com o nível e o lucro já sem a comissão de 15%.'));
+  card.append(el('p', 'tip', 'Guardado na conta e num arquivo do PC (pasta do app, pkapp-livro). O app usa este livro como trava: nenhum pokémon anotado é anunciado nem baixado abaixo do custo de compra + comissão.'));
   root.append(card);
 }
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.65
+// @version      5.66
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -31,7 +31,7 @@
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.65';
+  const VERSAO_APP = '5.66';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -223,6 +223,35 @@
   }
   setInterval(() => { if (decSujo) { decSujo = false; salvar('pkapp.decisoes', DEC); } }, 60_000);
   function op(o) { E.ops.unshift({ em: Date.now(), ...o }); E.ops.length = Math.min(E.ops.length, 300); persistir(); }
+  /* 📗 LIVRO DE MERCADO (5.66): cada pokémon comprado (preço, moeda, quando, nível) e, depois, a venda (preço, recebido, nível, lucro).
+   * Guardado à parte (pkapp.livro, até 3.000) e copiado pelo app de PC num arquivo — não se perde como o E.ops (só 300). É a referência
+   * de custo na hora de anunciar: nada vai à vitrine abaixo do que custou. */
+  const LIVRO = (() => { const L = ler('pkapp.livro', []); return Array.isArray(L) ? L : []; })();
+  let livroSujo = false;
+  setInterval(() => { if (livroSujo) { livroSujo = false; salvar('pkapp.livro', LIVRO); } }, 20_000);
+  const livroAberto = (pid) => (pid == null ? null : LIVRO.find((x) => String(x.pid) === String(pid) && !x.venda) || null);
+  const livroConv = (v, de, para) => { if (v == null || de === para) return v; const cb = cambioImplicito()?.taxa || 0; if (!cb) return null; return de === 'orb' ? v * cb : v / cb; };
+  function livroCompra({ pid, nome, nv, custo, moeda, em, origem, shiny }) {
+    if (pid == null || !(custo > 0) || !nome || nome === '?') return;
+    if (livroAberto(pid)) return;                                                     // já anotado (e ainda não vendido)
+    if (LIVRO.some((x) => String(x.pid) === String(pid) && x.venda && (em || Date.now()) <= x.venda.em)) return;   // compra antiga, já fechada
+    LIVRO.unshift({ pid: String(pid), nome: String(nome).replace(/^✨\s*/, '').replace(/\s+Nv\s.*$/, ''), nv: nv || null, custo: Math.round(custo), moeda: moeda === 'orb' ? 'orb' : 'gold', em: em || Date.now(), origem: origem || 'app', shiny: !!shiny });
+    LIVRO.sort((a, z) => z.em - a.em); if (LIVRO.length > 3000) LIVRO.length = 3000; livroSujo = true;
+  }
+  function livroVenda({ pid, nome, nv, bruto, recebe, moeda, em }) {
+    let x = livroAberto(pid);
+    if (!x && nome) { const ab = LIVRO.filter((y) => !y.venda && norm2(y.nome) === norm2(nome) && (!nv || !y.nv || y.nv <= nv) && y.em < (em || Date.now())); if (ab.length === 1) x = ab[0]; }
+    if (!x) return null;
+    moeda = moeda === 'orb' ? 'orb' : 'gold';
+    x.venda = { bruto: Math.round(bruto), recebe: Math.round(recebe), moeda, nv: nv || null, em: em || Date.now() };
+    const c = livroConv(x.custo, x.moeda, moeda); x.lucro = c != null ? Math.round(recebe - c) : null;
+    livroSujo = true; return x;
+  }
+  // o histórico do jogo (compras e vendas da conta) completa o livro: compra feita à mão, venda que o app não viu
+  function livroDoHistorico() {
+    for (const c of (E.real?.compras || [])) { if (c.tipo !== 'pokemon' || c.pokemonId == null) continue; const m = String(c.desc || '').match(/^(.+?) Nv ([\d.]+)/); livroCompra({ pid: c.pokemonId, nome: m ? m[1] : c.desc, nv: m ? Number(m[2].replace(/\./g, '')) : null, custo: c.bruto, moeda: c.moeda, em: c.em, origem: 'histórico' }); }
+    for (const v of (E.real?.vendas || [])) { if (v.tipo !== 'pokemon') continue; const m = String(v.desc || '').match(/^(.+?) Nv ([\d.]+)/); if (LIVRO.some((x) => x.venda && Math.abs(x.venda.em - v.em) < 120_000 && (v.pokemonId == null || String(x.pid) === String(v.pokemonId)))) continue; livroVenda({ pid: v.pokemonId, nome: m ? m[1] : null, nv: m ? Number(m[2].replace(/\./g, '')) : null, bruto: v.bruto, recebe: v.liquido ?? v.bruto * (1 - COMISSAO), moeda: v.moeda, em: v.em }); }
+  }
 
   /* ============================== CONEXÃO ============================== */
   // a página roda o jogo; com o Tampermonkey o script fica numa caixa à parte e mexe na página por unsafeWindow
@@ -242,6 +271,9 @@
   const enviar = (o) => {
     if (!M.ws || M.ws.readyState !== 1) return false;
     if (/^(market|csv)\./.test(o.t || '')) { M.reqs.push(Date.now()); M.reqTotal++; }
+    // 📗 trava final (5.66): editar preço de um pokémon anotado no livro nunca abaixo do que ele custou (com a comissão)
+    if (o.t === 'market.editar' && o.preco > 0) { try { const a = (M.meus || []).find((x) => String(x.id) === String(o.id)); const lv = a && a.tipo === 'pokemon' ? livroAberto(a.pokemonId) : null; const cv = lv ? livroConv(lv.custo, lv.moeda, o.moeda) : null;
+      if (cv > 0) { const minimo = Math.ceil(cv / (1 - COMISSAO) * 1.01); if (o.preco < minimo) { log(`📗 trava do livro: ${lv.nome} foi comprado por ${curtoM(lv.custo, lv.moeda)} — preço ${curtoM(o.preco, o.moeda)} → ${curtoM(minimo, o.moeda)}`, 'venda'); o = { ...o, preco: minimo }; } } } catch {} }
     M.enviandoNosso = true; try { M.ws.send(JSON.stringify(o)); } finally { M.enviandoNosso = false; } return true;
   };
   // espera a vez: intervalo mínimo entre pedidos, teto por minuto e pausa quando o servidor pede calma
@@ -366,6 +398,7 @@
       if (!a) return ' · compra: não achei o anúncio';
       const qtd = Number(e.qtd) || (a.tipo === 'item' ? Number((String(e.descricao || '').match(/^(\d+)\s*×/) || [])[1]) || Number(a.qtd) || 1 : 1), moeda = a.moeda;
       const bruto = Number(e.preco ?? e.valor ?? e.total) || a.preco * qtd, recebe = Math.round(bruto * (1 - COMISSAO));
+      if (a.tipo === 'pokemon') { const lv = livroVenda({ pid: a.pokemonId, nome: a.ficha?.nome, nv: a.ficha?.level, bruto, recebe, moeda }); if (lv && lv.lucro != null) return ` · comprado por ${curtoM(livroConv(lv.custo, lv.moeda, moeda), moeda)}${lv.moeda !== moeda ? ` (pago ${curtoM(lv.custo, lv.moeda)})` : ''} no Nv ${lv.nv ?? '?'} · vendido no Nv ${a.ficha?.level ?? '?'} · recebi ${curtoM(recebe, moeda)} · lucro ${lv.lucro >= 0 ? '+' : '−'}${curtoM(Math.abs(lv.lucro), moeda)}`; }
       const c = custoDoAnuncio(a);
       if (!c || c.custo == null) return ` · recebi ${curtoM(recebe, moeda)} · compra: custo desconhecido`;
       const custo = Math.round(c.unit ? c.custo * qtd : c.custo), lucro = recebe - custo;
@@ -552,6 +585,7 @@
     const norm = (l, lado) => ({ id: l.id, em: l.em, desc: l.descricao, pokemonId: l.pokemonId ?? l.ficha?.id ?? null, itemId: l.itemId ?? null, qtd: Number(String(l.descricao || '').match(/^(\d+)×/)?.[1]) || l.qtd || 1, tipo: l.tipo || (l.pokemonId || l.ficha?.speciesId ? 'pokemon' : 'item'), moeda: l.moeda, bruto: l.bruto ?? l.preco ?? 0, liquido: lado === 'venda' ? l.liquido ?? liquidoVenda(l.bruto ?? l.preco ?? 0, l.moeda, l.tipo || (l.ficha ? 'pokemon' : 'item')) : null });
     E.real = { em: Date.now(), vendas: vendas.map((l) => norm(l, 'venda')), compras: compras.map((l) => norm(l, 'compra')) };
     persistir();
+    try { livroDoHistorico(); } catch {}
     acertarOrcamento(compras);
     const r = resumoReal(24);
     log(`💰 lucro real (24 h, histórico do jogo): Coins ${curto(r.gold.recebido)} recebidos − ${curto(r.gold.gasto)} gastos; Gemas ${fmt(Math.round(r.orb.recebido))} − ${fmt(r.orb.gasto)}`, 'ok');
@@ -1409,6 +1443,7 @@
       return;
     }
     const o = E.ops.find((x) => x.tipo === 'compra' && x.pokemonId != null && x.pokemonId === p.pokemonId); if (o) { o.registrado = true; persistir(); }
+    livroCompra({ pid: p.pokemonId, nome: p.nome, nv: p.nv ?? p.ficha?.level, custo: p.preco, moeda: p.moeda || 'gold', origem: p.depois === 'casa' || p.casaKey ? 'casa' : 'sniper', shiny: p.shiny });
     if (p.depois === 'casa') contarCompraCasa(p);
     if (p.depois === 'casa' || p.casaKey) setTimeout(() => registrarNoPosto(p), 2500);
     else if (p.depois === 'revender') setTimeout(() => anunciarPokemon({ pokemonId: p.pokemonId, nome: p.nome, nv: p.nv, nota: p.nota, pot: p.pot, iv: p.iv, shiny: p.shiny, custo: p.preco, moedaCompra: p.moeda || 'gold', alvo: p.revenderPor, moeda: p.moeda || 'gold', lucro: p.lucro, ficha: p.ficha }), 5000);
@@ -2068,6 +2103,7 @@
   function custoDoAnuncio(a) {
     const cb = cambioImplicito()?.taxa || 0, conv = (v, de) => (de === a.moeda ? v : !cb ? null : de === 'gold' ? v / cb : v * cb);
     if (a.tipo === 'pokemon') {
+      { const lv = livroAberto(a.pokemonId); if (lv) { const v = conv(lv.custo, lv.moeda); if (v != null) return { custo: v, fonte: 'livro' }; } }   // 📗 o livro manda
       const pn = compraPorNome(a.ficha?.nome, a.ficha?.level, (a.criadoEm || Date.now()) + 60_000);
       const reg0 = E.anunciosPk?.[a.pokemonId];
       if (pn && !(reg0?.custo > 0) && !E.ops.some((x) => x.tipo === 'compra' && String(x.pokemonId) === String(a.pokemonId))) { const v = conv(pn.bruto, pn.moeda); if (v != null) return { custo: v, fonte: 'histórico (pelo nome)' }; }
@@ -2136,6 +2172,7 @@
   function compradoEmGemas(pokemonId, nome, nv) {
     const id = pokemonId != null ? String(pokemonId) : null;
     if (id) {
+      const lv = livroAberto(id); if (lv) return lv.moeda === 'orb';
       const o = E.ops.find((x) => x.tipo === 'compra' && x.pokemonId != null && String(x.pokemonId) === id); if (o) return o.moeda === 'orb';
       const c = (E.real?.compras || []).find((x) => x.pokemonId != null && String(x.pokemonId) === id); if (c) return c.moeda === 'orb';
       const fc = [...(E.filaCasa || []), ...(E.filaVenda || [])].find((x) => String(x.pokemonId) === id && x.custo > 0); if (fc) return fc.moedaCompra === 'orb';
@@ -2361,6 +2398,7 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
       if (!E.filaCasa.some((x) => String(x.pokemonId) === String(pokemonId))) { E.filaCasa.push({ pokemonId, nome, nv, nota, pot, iv, shiny: !!shiny, ficha: ficha || null, custo: custo || 0, moedaCompra, em: Date.now() }); persistir(); log(`${sim()}🏠 ${nome} Nv ${nv}: não anuncio abaixo do Nv ${CFG.nivelMinVenda} — vai para as casas upar até lá (${E.filaCasa.length} esperando casa)`, 'venda'); }
       return false;
     }
+    { const lv = livroAberto(pokemonId); if (lv && !(custo > 0)) { custo = lv.custo; moedaCompra = lv.moeda; } }   // 📗 o livro sabe quanto custou
     if (!(custo > 0) && !E.ops.some((x) => x.tipo === 'compra' && String(x.pokemonId) === String(pokemonId))) {   // comprado à mão? o histórico diz pelo nome
       const pn = compraPorNome(nome, nv); if (pn) { custo = pn.bruto; moedaCompra = pn.moeda; }
     }
@@ -2402,7 +2440,9 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
     let alvoC = alvoV;
     if (rapido) { const cc = await menorConcorrentePk(ficha?.nome || String(nome).replace(/ Nv .*$/, ''), Math.round(nv), nota, pot, moeda, shiny); if (cc?.preco && degrauAbaixo(cc.preco, moeda) < alvoC) { alvoC = degrauAbaixo(cc.preco, moeda); porque += ` — abaixo do menor parecido (${curtoM(cc.preco, moeda)})`; } }
     if (justoSh && ref.rapido) alvoC = Math.max(alvoC, ref.rapido);   // shiny: o concorrente nunca puxa abaixo do preço rápido
-    const preco = Math.max(Math.round(alvoC), piso, 1);
+    let preco = Math.max(Math.round(alvoC), piso, 1);
+    { const lv = livroAberto(pokemonId), cv = lv ? livroConv(lv.custo, lv.moeda, moeda) : null;    // 📗 trava: nunca abaixo do custo de compra (já com a comissão)
+      if (cv > 0) { const minimo = Math.ceil(cv / (1 - COMISSAO) * 1.01); if (preco < minimo) { porque += ` — subi ao mínimo do livro (comprado por ${curtoM(lv.custo, lv.moeda)})`; preco = minimo; } } }
     if (justoSh) porque += ' — shiny no preço justo';
     else if (rapido) porque += emGiro() ? ' — giro rápido' : ' — vender rápido';
     if (ref.prc) porque += ` [precificador: ${ref.prc.rapido}/${ref.prc.justo}/${ref.prc.esperar} 🔮]`;
@@ -4596,6 +4636,8 @@ Inclua em mods só o que muda. "deixar na hunt" = boss:false; "fazer boss" = bos
     relatorios: () => JSON.parse(JSON.stringify((E.relatorios || []).filter((r) => !r.parcial))),
     parecerHoje: () => JSON.parse(JSON.stringify(compilarParecer(hoje(), true))),
     decisoes: (cat) => DEC.filter((x) => !cat || x.cat === cat).slice(0, 300),
+    livro: () => LIVRO.slice(0, 3000),
+    livroImportar: (arr) => { let n = 0; for (const x of Array.isArray(arr) ? arr : []) { if (!x || x.pid == null || !x.em) continue; const i = LIVRO.findIndex((y) => String(y.pid) === String(x.pid) && Math.abs(y.em - x.em) < 60_000); if (i < 0) { LIVRO.push(x); n++; } else if (x.venda && !LIVRO[i].venda) { LIVRO[i] = x; n++; } } if (n) { LIVRO.sort((a, z) => z.em - a.em); if (LIVRO.length > 3000) LIVRO.length = 3000; livroSujo = true; } return n; },
     definirIrmas(lista) {
       M.irmas = { ids: new Set((lista || []).map((x) => x && x.vendedorId).filter((x) => x != null).map(String)), nicks: new Set((lista || []).map((x) => x && x.nick).filter(Boolean).map((x) => String(x).toLowerCase())) };
       return { ids: M.irmas.ids.size, nicks: M.irmas.nicks.size };

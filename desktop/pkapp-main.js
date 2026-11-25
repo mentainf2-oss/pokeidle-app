@@ -238,6 +238,30 @@ module.exports = function pkappMain({ ipcMain, views, config, send, ctx, app, pa
     for (const a of accounts()) { const x = await ponte(a.id, 'explorador'), r = resumos.get(a.id); if (x) out.push({ conta: (r && r.r && r.r.nick) || a.name, ...x }); }
     return out;
   });
+  // ---------- 📗 livro de mercado: compras e vendas de pokémon de cada conta, guardadas também em arquivo ----------
+  // userData/pkapp-livro/<conta>.json — se o jogo perder o localStorage, o app devolve o livro para a conta.
+  const dirLivro = () => path.join(app.getPath('userData'), 'pkapp-livro');
+  const chaveL = (x) => `${x.pid}|${Math.round((x.em || 0) / 60000)}`;
+  const lerLivroArq = (id) => { try { const j = JSON.parse(fs.readFileSync(path.join(dirLivro(), `${String(id).replace(/[^\w-]/g, '_')}.json`), 'utf8')); return Array.isArray(j) ? j : []; } catch { return []; } };
+  const livroEm = new Map();
+  async function sincronizarLivro(id, forcar) {
+    if (!forcar && Date.now() - (livroEm.get(id) || 0) < 5 * 60_000) return lerLivroArq(id);
+    livroEm.set(id, Date.now());
+    const vivo = await ponte(id, 'livro'); if (!Array.isArray(vivo)) return lerLivroArq(id);
+    const arqv = lerLivroArq(id), m = new Map();
+    for (const x of arqv) m.set(chaveL(x), x);
+    for (const x of vivo) { const k = chaveL(x), y = m.get(k); if (!y || x.venda || !y.venda) m.set(k, x); }   // a anotação com venda vence
+    const tudo = [...m.values()].sort((a, z) => z.em - a.em).slice(0, 5000);
+    const vm = new Map(vivo.map((x) => [chaveL(x), x])), faltam = tudo.filter((x) => { const v = vm.get(chaveL(x)); return !v || (x.venda && !v.venda); });
+    if (faltam.length) await ponte(id, 'livroImportar', faltam.slice(0, 3000));
+    try { fs.mkdirSync(dirLivro(), { recursive: true }); fs.writeFileSync(path.join(dirLivro(), `${String(id).replace(/[^\w-]/g, '_')}.json`), JSON.stringify(tudo)); } catch {}
+    return tudo;
+  }
+  ipcMain.handle('poke:pkapp:livro', async (_e, id) => {
+    const out = [];
+    for (const a of accounts()) { if (id && a.id !== id) continue; const L = await sincronizarLivro(a.id, true), x = resumos.get(a.id); for (const d of L || []) out.push({ conta: (x && x.r && x.r.nick) || a.name, contaId: a.id, ...d }); }
+    return out.sort((a, z) => z.em - a.em);
+  });
   ipcMain.handle('poke:pkapp:decisoes', async (_e, cat) => {
     const out = [];
     for (const a of accounts()) { const L = await ponte(a.id, 'decisoes', cat || null), x = resumos.get(a.id); for (const d of L || []) out.push({ conta: (x && x.r && x.r.nick) || a.name, ...d }); }
@@ -245,7 +269,7 @@ module.exports = function pkappMain({ ipcMain, views, config, send, ctx, app, pa
   });
 
   async function tick() {
-    for (const a of accounts()) { const r = await lerConta(a.id); if (r) { avisar(a.id, r); avisarParecer(a.id, r); await aplicarPainel(a.id, r); await manterLigado(a.id, r); } }
+    for (const a of accounts()) { const r = await lerConta(a.id); if (r) { avisar(a.id, r); avisarParecer(a.id, r); await aplicarPainel(a.id, r); await manterLigado(a.id, r); try { await sincronizarLivro(a.id); } catch {} } }
     await avisarIrmas();
     await aplicarPapeis();
     try { await sincronizarBase(); } catch {}
