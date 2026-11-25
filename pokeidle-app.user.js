@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.59
+// @version      5.60
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -31,7 +31,7 @@
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.59';
+  const VERSAO_APP = '5.60';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -1494,6 +1494,27 @@
     const I = PAGINA.__idleterinoMercado; if (!I || typeof I.evoMapa !== 'function') return;
     try { const m = await I.evoMapa(); if (m && typeof m === 'object') M.evo = m; } catch {}
   }
+  // 🧬 a ação de evoluir que o jogo manda quando VOCÊ evolui (o Explorador anotou): vira um molde para o app evoluir sozinho
+  function acaoEvoluir() {
+    const ent = Object.entries(EXP.saida || {}).find(([t, e]) => /evolu/i.test(t) && e.ex);
+    if (!ent) return null;
+    let modelo; try { modelo = JSON.parse(ent[1].ex); } catch { return null; }
+    const kPk = Object.keys(modelo).find((k) => /^(id|pid|pokemonId|pokemon|alvoId)$/i.test(k) && typeof modelo[k] === 'number');
+    const kPara = Object.keys(modelo).find((k) => k !== kPk && /(para|destino|especie|species|evolucao|evo|alvo)/i.test(k));
+    if (!kPk) return null;
+    return { t: ent[0], montar: (pid, paraId) => ({ ...modelo, [kPk]: pid, ...(kPara && paraId != null ? { [kPara]: typeof modelo[kPara] === 'number' ? Number(paraId) : String(paraId) } : {}) }) };
+  }
+  // pokémon que ainda não está na forma final (nota baixa, vende mal): evolui antes de vender (pedido do jogador)
+  function evoluirAntesDeVender(pk, cid) {
+    const e = M.evo?.[pk?.nome]; if (!e || !((pk.level || 0) >= e.nivel)) return false;
+    const ac = acaoEvoluir();
+    if (!ac) { avisoRaro('evoFalta' + pk.id, `🧬 casa ${cid}: ${pk.nome} Nv ${pk.level} pode evoluir para ${e.para} (vende bem melhor) — evolua um pokémon pelo jogo uma vez e o app aprende a evoluir sozinho; até lá ele não vende este`, 120); return true; }
+    if (Date.now() - ((M.evoFeito ||= {})[pk.id] || 0) < 5 * 60_000) return true;   // já pediu: espera o jogo confirmar
+    M.evoFeito[pk.id] = Date.now();
+    log(`${sim()}🧬 casa ${cid}: evoluindo ${pk.nome} Nv ${pk.level} → ${e.para} antes de vender`, 'ok');
+    if (!CFG.simulacao) enviar(ac.montar(pk.id, e.paraId));
+    return true;
+  }
   function evoOportunidade(a, f) {
     const e = M.evo?.[f.nome]; if (!e || !(f.level >= e.nivel) || f.shiny) return;
     const ev = precoMercado(e.para, f.level, f.nota, f.potencia, f.ivTotal); if (!ev || ev.n < 5 || !/^espécie/.test(ev.como)) return;
@@ -1720,6 +1741,7 @@
       }
       if (p?.naoAdotar && p.pokemonId) continue;
       if (p?.bot && !p.naFila && p.xp != null && nivelDeXp(p.xp) >= alvoDoPokemon(p, cid)) {
+        { const pkE = (M.pokemons || []).find((x) => x.id === p.pokemonId); if (pkE && evoluirAntesDeVender(pkE, cid)) continue; }
         const nv = nivelDeXp(p.xp), fichaP = fichaDoPokemon(p.pokemonId) || p.ficha;
         const ok = await anunciarPokemon({ pokemonId: p.pokemonId, nome: p.nome, nv, nota: p.nota, pot: p.pot, iv: p.iv, shiny: !!(p.shiny || fichaP?.shiny), custo: p.custo, moedaCompra: p.moedaCompra || 'gold', ficha: fichaP, fila: false });
         if (ok && !CFG.simulacao) { E.postos[key] = null; persistir(); }
@@ -3223,7 +3245,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
         try { instalarFiltroPopups(); } catch {}
         try { cicloPasse(); avisoXpShare(); } catch {}
         if (CFG.mod.hunt) await cicloHunt();
-        if (CFG.mod.sniperPk) await carregarEvo();
+        if (CFG.mod.sniperPk || CFG.mod.casas) await carregarEvo();
       } catch (e) { log('erro: ' + e.message, 'erro'); }
       pintar();
       await dormir(CFG.intervaloSeg * 1000 * (0.85 + Math.random() * 0.3));
