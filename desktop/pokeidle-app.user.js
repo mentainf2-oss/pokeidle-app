@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.61
+// @version      5.62
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -31,7 +31,7 @@
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.61';
+  const VERSAO_APP = '5.62';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -1782,15 +1782,29 @@
     const alvo = alvoDaCasa(cid);
     const ocupados = new Set([...Object.values(E.postos).filter(Boolean).map((p) => p.pokemonId), ...M.meus.map((a) => a.pokemonId), M.activeId, ...(E.filaVenda || []).map((x) => x.pokemonId), ...Object.values(M.simCasa)].filter((x) => x != null).map(String));
     // primeiro os que esperam casa (comprados para revender abaixo do Nv 500); depois o melhor da coleção
-    const naFilaCasa = new Set((E.filaCasa || []).map((x) => String(x.pokemonId)));
-    E.filaCasa = (E.filaCasa || []).filter((x) => (M.pokemons || []).some((p) => String(p.id) === String(x.pokemonId) && p.slot == null) && !ocupados.has(String(x.pokemonId)));
-    const espera = (M.pokemons || []).filter((p) => naFilaCasa.has(String(p.id)) && p.slot == null && !ocupados.has(String(p.id)) && (p.level || 0) < Math.max(alvo, CFG.nivelMinVenda || 0));
+    // 5.62: quem acabou de ser comprado pode ainda não ter chegado na lista da coleção — não sai da fila por isso; usa o que a fila guardou
+    const pkDe = (id) => (M.pokemons || []).find((p) => String(p.id) === String(id));
+    if (!E.mig562) {                                                   // recupera quem a versão antiga tirou da fila (ex.: Bastiodon da HrnFarm)
+      E.mig562 = true; E.filaCasa = E.filaCasa || [];
+      const vendidos = new Set(E.ops.filter((o) => o.tipo !== 'compra' && o.pokemonId != null).map((o) => String(o.pokemonId)));
+      for (const o of E.ops) {
+        const nv = o.ctx?.nv ?? o.ctx?.ficha?.level;
+        if (o.tipo !== 'compra' || o.pokemonId == null || o.casaKey || !(nv < (CFG.nivelMinVenda || 0)) || Date.now() - o.em > 24 * 3600_000) continue;
+        if (vendidos.has(String(o.pokemonId)) || ocupados.has(String(o.pokemonId)) || E.filaCasa.some((x) => String(x.pokemonId) === String(o.pokemonId))) continue;
+        E.filaCasa.push({ pokemonId: o.pokemonId, nome: o.ctx?.nome || o.nome, nv, nota: o.ctx?.nota, pot: o.ctx?.pot, iv: o.ctx?.iv, shiny: !!o.ctx?.shiny, ficha: o.ctx?.ficha || null, custo: o.unit ?? o.preco, moedaCompra: o.moeda || 'gold', em: Date.now() });
+      }
+      persistir();
+    }
+    E.filaCasa = (E.filaCasa || []).filter((x) => { const p = pkDe(x.pokemonId); return !ocupados.has(String(x.pokemonId)) && !(p && p.slot != null) && Date.now() - (x.em || 0) < (p ? 48 : 2) * 3600_000; });
+    const nvMin = Math.max(alvo, CFG.nivelMinVenda || 0);
+    const espera = E.filaCasa.map((x) => ({ x, p: pkDe(x.pokemonId) })).filter(({ x, p }) => ((p?.level ?? x.nv) || 0) < nvMin);
     if (espera.length) {
-      const p = espera.sort((a2, z) => (z.level || 0) - (a2.level || 0))[0], ivp = Object.values(p.ivs || {}).reduce((x, y) => x + y, 0), fx = E.filaCasa.find((x) => String(x.pokemonId) === String(p.id));
-      log(`${sim()}🏠 casa ${cid}: colocando ${p.nome} Nv ${p.level} (comprado para revender — sobe até o Nv ${Math.max(alvo, CFG.nivelMinVenda || 0)} antes de anunciar)`, 'ok');
-      registrarNoPosto({ pokemonId: p.id, nome: p.nome, nv: p.level, xp: p.xp, nota: p.nota, pot: p.potencia, iv: ivp, ficha: fichaMin(p), preco: fx?.custo || custoConhecido(p.id), moeda: fx?.moedaCompra || 'gold', casaKey: key });
-      E.filaCasa = E.filaCasa.filter((x) => String(x.pokemonId) !== String(p.id)); persistir();
-      if (CFG.simulacao) M.simCasa[key] = p.id;
+      const { x: fx, p } = espera.sort((a2, z) => ((z.p?.level ?? z.x.nv) || 0) - ((a2.p?.level ?? a2.x.nv) || 0))[0];
+      const nv = (p?.level ?? fx.nv) || 1, ivp = p ? Object.values(p.ivs || {}).reduce((x, y) => x + y, 0) : fx.iv;
+      log(`${sim()}🏠 casa ${cid}: colocando ${fx.nome} Nv ${nv} (comprado para revender — sobe até o Nv ${nvMin} antes de anunciar)`, 'ok');
+      registrarNoPosto({ pokemonId: fx.pokemonId, nome: p?.nome || fx.nome, nv, xp: p?.xp, nota: p?.nota ?? fx.nota, pot: p?.potencia ?? fx.pot, iv: ivp, ficha: p ? fichaMin(p) : fx.ficha || null, shiny: p?.shiny ?? fx.shiny, preco: fx.custo || custoConhecido(fx.pokemonId), moeda: fx.moedaCompra || 'gold', casaKey: key });
+      E.filaCasa = E.filaCasa.filter((x) => String(x.pokemonId) !== String(fx.pokemonId)); persistir();
+      if (CFG.simulacao) M.simCasa[key] = fx.pokemonId;
       return true;
     }
     const cands = (M.pokemons || []).filter((p) => p.slot == null && !ocupados.has(String(p.id)) && (p.level || 0) < alvo && (p.nota >= 3.5 || p.shiny || p.potencia === 5) && !(CFG.evitarOutland && ehOutland(p)));
@@ -2314,7 +2328,7 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
     // 🏠 abaixo do Nv mínimo de venda (500) não vai para a vitrine: espera vaga nas casas e sobe até lá (vende bem mais rápido)
     if ((nv || ficha?.level || 0) < (CFG.nivelMinVenda || 0)) {
       E.filaCasa = E.filaCasa || [];
-      if (!E.filaCasa.some((x) => String(x.pokemonId) === String(pokemonId))) { E.filaCasa.push({ pokemonId, nome, nv, custo: custo || 0, moedaCompra, em: Date.now() }); persistir(); log(`${sim()}🏠 ${nome} Nv ${nv}: não anuncio abaixo do Nv ${CFG.nivelMinVenda} — vai para as casas upar até lá (${E.filaCasa.length} esperando casa)`, 'venda'); }
+      if (!E.filaCasa.some((x) => String(x.pokemonId) === String(pokemonId))) { E.filaCasa.push({ pokemonId, nome, nv, nota, pot, iv, shiny: !!shiny, ficha: ficha || null, custo: custo || 0, moedaCompra, em: Date.now() }); persistir(); log(`${sim()}🏠 ${nome} Nv ${nv}: não anuncio abaixo do Nv ${CFG.nivelMinVenda} — vai para as casas upar até lá (${E.filaCasa.length} esperando casa)`, 'venda'); }
       return false;
     }
     if (!(custo > 0) && !E.ops.some((x) => x.tipo === 'compra' && String(x.pokemonId) === String(pokemonId))) {   // comprado à mão? o histórico diz pelo nome

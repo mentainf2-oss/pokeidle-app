@@ -2,6 +2,7 @@
 
 | Versão | Data | O que mudou |
 | --- | --- | --- |
+| 5.62 | 25/11/2026 | Casas: pokémon comprado abaixo do Nv 500 não some mais da fila de casa quando ainda não apareceu na coleção (deixava casa vazia na HrnFarm); recupera os que a versão anterior perdeu nas últimas 24 h. |
 | 5.61 | 2026-11-25 | 👑 Popup do boss só quando cai item (pedido do jogador): a vitória com drop volta a aparecer; continuam escondidas a vitória sem drop, a derrota e o sorteio das compras do app. |
 | 5.60 | 2026-11-25 | 🧬 Evoluir antes de vender (explicação do jogador sobre a HrnFarm: pokémon fora da forma final têm nota baixa e vendem mal): quando um pokémon da casa chega ao alvo e já pode evoluir (tabela de evoluções do jogo), o app evolui antes de anunciar — usando a ação de evoluir que o Explorador aprende quando você evolui um pokémon pelo jogo uma vez; até aprender, ele não vende o pokémon e avisa em Decisões. Evolui em cadeia (ex.: Mudkip → Marshtomp → Swampert) se o nível permitir. |
 | 5.59 | 2026-11-25 | ✨ Shiny vendido pelo que vale (pedido do jogador: o Parasect shiny estava saindo com só ~200 🔮 de lucro, podendo valer até 6k): shiny em Gemas entra no preço justo do precificador, sem o desconto do giro; o concorrente nunca puxa o preço abaixo do rápido; o reajuste segura o justo nas primeiras 24 h, depois o meio entre justo e rápido, e só depois de 48 h o rápido; o degrau extra do giro não vale para shiny. Shiny já anunciado abaixo do justo sobe quando o jogo deixar editar. |
