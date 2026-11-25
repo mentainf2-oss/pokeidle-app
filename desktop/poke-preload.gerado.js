@@ -2112,7 +2112,7 @@ contextBridge.executeInMainWorld({
 });
 
 
-// ===================== PokeIdle App 5.63 (gerado por tools/montar-preload.js — não edite aqui) =====================
+// ===================== PokeIdle App 5.64 (gerado por tools/montar-preload.js — não edite aqui) =====================
 ;(() => {
   const { contextBridge: pontePk, ipcRenderer: ipcPk } = require('electron');
   // o que o script pede ao app: rede só para os sites liberados (API do Claude e precificador) e avisos
@@ -2138,7 +2138,7 @@ contextBridge.executeInMainWorld({
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.63
+// @version      5.64
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -2168,7 +2168,7 @@ contextBridge.executeInMainWorld({
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.63';
+  const VERSAO_APP = '5.64';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -3933,8 +3933,9 @@ contextBridge.executeInMainWorld({
   function encherComColecao(key, cid) {
     M.simCasa = M.simCasa || {};
     if (CFG.simulacao && M.simCasa[key]) return true;                 // na simulação a casa "já recebeu" (não repete o log)
-    const alvo = alvoDaCasa(cid);
-    const ocupados = new Set([...Object.values(E.postos).filter(Boolean).map((p) => p.pokemonId), ...M.meus.map((a) => a.pokemonId), M.activeId, ...(E.filaVenda || []).map((x) => x.pokemonId), ...Object.values(M.simCasa)].filter((x) => x != null).map(String));
+    // 5.64: o mesmo alvo que decide quando vender (no giro o teto é menor) — senão coloca um Nv 510 e já vende, em loop
+    const alvo0 = alvoDaCasa(cid), alvo = Math.min(CFG.nivelMaxCasa, Math.max(CFG.nivelMinVenda || 0, emGiro() ? Math.min(alvo0, CFG.giroNivelMax) : alvo0));
+    const ocupados = new Set([...Object.values(E.postos).filter(Boolean).map((p) => p.pokemonId), ...M.meus.map((a) => a.pokemonId), ...Object.keys(E.anunciosPk || {}), M.activeId, ...(E.filaVenda || []).map((x) => x.pokemonId), ...Object.values(M.simCasa)].filter((x) => x != null).map(String));
     // primeiro os que esperam casa (comprados para revender abaixo do Nv 500); depois o melhor da coleção
     // 5.62: quem acabou de ser comprado pode ainda não ter chegado na lista da coleção — não sai da fila por isso; usa o que a fila guardou
     const pkDe = (id) => (M.pokemons || []).find((p) => String(p.id) === String(id));

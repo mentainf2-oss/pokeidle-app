@@ -2,6 +2,7 @@
 
 | Versão | Data | O que mudou |
 | --- | --- | --- |
+| 5.64 | 25/11/2026 | Casas: com o giro ligado, não coloca mais na casa um pokémon que já passou do nível de venda (Charizard Nv 510 entrava e saía em loop); quem acabou de ser anunciado não volta para a casa. |
 | 5.63 | 25/11/2026 | Toda venda no log mostra por quanto foi comprado, quanto recebeu (sem a comissão de 15%) e o lucro em valor e %. |
 | 5.62 | 25/11/2026 | Casas: pokémon comprado abaixo do Nv 500 não some mais da fila de casa quando ainda não apareceu na coleção (deixava casa vazia na HrnFarm); recupera os que a versão anterior perdeu nas últimas 24 h. |
 | 5.61 | 2026-11-25 | 👑 Popup do boss só quando cai item (pedido do jogador): a vitória com drop volta a aparecer; continuam escondidas a vitória sem drop, a derrota e o sorteio das compras do app. |
