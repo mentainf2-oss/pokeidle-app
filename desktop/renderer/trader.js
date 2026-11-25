@@ -19,6 +19,7 @@ const PK_ICO = {
   'negociação': '<path d="M4 5h16v10H9l-5 4z"/>',
   pulou: '<circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/>',
   hunt: '<path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2z"/><path d="M9 4v14M15 6v14"/>',
+  pedido: '<path d="M4 5h16v10H9l-5 4z"/><path d="M8 9h8M8 12h5"/>',
   'evolução': '<path d="M12 20V9"/><path d="M7 13l5-5 5 5"/><path d="M5 4h14"/>',
   claude: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/>',
   auditoria: '<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/>',
@@ -39,8 +40,8 @@ const pkHora = (ms) => new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit
 const pkNomePapel = { tudo: 'Tudo', boss: 'Boss', casas: 'Casas', mercado: 'Mercado' };
 const pkDicaPapel = { tudo: 'todos os módulos', boss: 'boss e tokens', casas: 'casas + sniper de pokémon', mercado: 'sniper de pokémon e itens' };
 const pkMods = [['compras', 'Lista de compras'], ['sniperPk', 'Sniper de pokémon'], ['sniperIt', 'Sniper de itens'], ['casas', 'Casas'], ['boss', 'Boss'], ['hunt', 'Hunt automática'], ['claude', 'Claude']];
-const pkCats = { compra: 'Compra', venda: 'Venda', 'preço': 'Preço', casa: 'Casa', boss: 'Boss', 'negociação': 'Negociação', pulou: 'Não comprou', hunt: 'Hunt', 'evolução': 'Evolução', claude: 'Claude', auditoria: 'Auditoria', aprendizado: 'Aprendizado', ajuste: 'Ajuste', erro: 'Erro' };
-window.idle.on('poke:pkapp:estado', (s) => { pkEstado = s; if (page === 'trader' && pkTab === 'hoje' && !document.querySelector('#page-trader select:focus')) renderTrader(); });
+const pkCats = { compra: 'Compra', venda: 'Venda', 'preço': 'Preço', casa: 'Casa', boss: 'Boss', 'negociação': 'Negociação', pulou: 'Não comprou', hunt: 'Hunt', 'evolução': 'Evolução', pedido: 'Pedido', claude: 'Claude', auditoria: 'Auditoria', aprendizado: 'Aprendizado', ajuste: 'Ajuste', erro: 'Erro' };
+window.idle.on('poke:pkapp:estado', (s) => { pkEstado = s; if (page === 'trader' && pkTab === 'hoje' && !document.querySelector('#page-trader select:focus, #page-trader input:focus')) renderTrader(); });
 
 function pkKpi(rot, val, sub, cls) {
   const b = el('div', 'stat'); b.append(el('span', null, rot), el('b', cls || null, val)); if (sub) b.append(el('small', 'muted', sub)); return b;
@@ -54,6 +55,7 @@ function pkSwitch(on, rot, onchange, dica) {
   l.append(i, el('i'), el('span', null, rot)); if (dica) l.title = dica; return l;
 }
 
+const pkPedidos = {};
 let pkConta = (() => { try { return localStorage.getItem('pkConta') || null; } catch { return null; } })();
 const PK_ABAS = [['hoje', 'Resumo'], ['decisoes', 'Decisões'], ['parecer', 'Parecer'], ['farm', 'Farm'], ['controle', 'Ajustes']];
 function pkIr(k) { pkTab = k; try { localStorage.setItem('pkTab', k); } catch {} if (k === 'parecer') pkRel = null; if (k === 'decisoes') pkDec = null; if (k === 'farm') pkFarm = null; renderTrader(); }
@@ -121,6 +123,34 @@ async function renderTrader() {
   );
   root.append(kp);
 
+  // ---- 💬 pedido rápido: uma decisão sua, em português, vira regra com prazo ----
+  const chat = el('div', 'card pk-chat');
+  const form = el('form', 'pk-chat-f');
+  const inp = el('input'); inp.type = 'text'; inp.maxLength = 300; inp.placeholder = 'Peça algo para esta conta — ex.: "enquanto este boost de XP estiver ativo deixe na hunt, depois volte para o boss"';
+  const env = el('button', 'primary'); env.type = 'submit'; env.textContent = 'Enviar';
+  const resp = el('div', 'pk-chat-r');
+  form.append(pkIco('negociação'), inp, env);
+  form.onsubmit = async (e) => {
+    e.preventDefault(); const t = inp.value.trim(); if (!t) return;
+    env.disabled = true; resp.textContent = 'Entendendo o pedido…';
+    const r = await window.idle.invoke('poke:pkapp:pedido', c.id, t).catch((er) => ({ ok: false, erro: String(er) }));
+    env.disabled = false;
+    if (r && r.ok) { inp.value = ''; pkPedidos[c.id] = null; resp.className = 'pk-chat-r ok'; resp.textContent = r.resposta; setTimeout(() => renderTrader(), 1200); }
+    else { resp.className = 'pk-chat-r bad'; resp.textContent = (r && r.erro) || 'não deu certo'; }
+  };
+  chat.append(form, resp);
+  if (!pkPedidos[c.id]) pkPedidos[c.id] = await window.idle.invoke('poke:pkapp:pedidos', c.id).catch(() => []);
+  const ativos = (Array.isArray(pkPedidos[c.id]) ? pkPedidos[c.id] : []).filter((p) => p.estado === 'ativa');
+  for (const p of ativos) {
+    const l = el('div', 'pk-chat-l');
+    const quando = p.cond && p.cond.tipo === 'ate' ? `até ${new Date(p.cond.ate).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : 'sem prazo';
+    l.append(el('span', 'pk-pill ok', 'ativo'), el('span', null, p.resposta || p.texto), el('small', 'muted', quando));
+    l.append(button('Cancelar', 'ghost', async () => { pkPedidos[c.id] = await window.idle.invoke('poke:pkapp:cancelarPedido', c.id, p.id, false); renderTrader(); }));
+    if (p.depois) l.append(button('Encerrar e já fazer o depois', 'ghost', async () => { pkPedidos[c.id] = await window.idle.invoke('poke:pkapp:cancelarPedido', c.id, p.id, true); renderTrader(); }));
+    chat.append(l);
+  }
+  root.append(chat);
+
   // ---- abas ----
   const tabs = el('div', 'pvp-tabs pk-tabs');
   for (const [k, l] of PK_ABAS) tabs.append(pkBotao(k === 'controle' ? 'ajuste' : k, l, pkTab === k ? 'on' : '', () => pkIr(k)));
@@ -145,6 +175,7 @@ function pkHoje(root, s, c) {
   vit.append(
     lin('Pokémon anunciados', `${r.vitrine.usadas} de 10`),
     lin('Esperando vaga', r.vitrine.fila ? `${r.vitrine.fila} na fila` : 'ninguém', r.vitrine.fila >= 8 ? 'bad' : ''),
+    lin('Esperando casa (abaixo do Nv 500)', r.vitrine.filaCasa ? `${r.vitrine.filaCasa}` : 'ninguém'),
     lin('Parados há mais de 48 h', String(h.parados || 0), h.parados ? 'bad' : ''),
     lin('Vendas · compras hoje', `${h.vendas || 0} · ${h.compras || 0}`),
     lin('Giro do evento', r.giro ? 'ligado (vende mais rápido)' : 'desligado'),

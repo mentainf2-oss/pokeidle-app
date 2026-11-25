@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.56
+// @version      5.57
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -31,7 +31,7 @@
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.56';
+  const VERSAO_APP = '5.57';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -65,7 +65,7 @@
     vendaFatorMediana: 0.95, vendaDias: 7, especiesPreferidas: [],
     vendaRapida: true, fatorRapido: 0.9, mexerEmTodos: true,   // vender rápido (com lucro) e gerir todos os seus anúncios, não só os do app
     casaDaColecao: true, casaNaoParar: true, filaMax: 15,         // casa pronta com vitrine cheia: vai para a fila e entra outro
-    alvoPorPokemon: true, nivelMaxCasa: 1000, trocarParaCoinsH: 6,
+    alvoPorPokemon: true, nivelMaxCasa: 1000, nivelMinVenda: 500, trocarParaCoinsH: 6,
     // giro rápido da vitrine (no evento de XP upar é barato: vender mais rápido, com menos lucro por pokémon)
     // estudo contínuo do mercado: o que vale, o que vende rápido e o que deu lucro decide o que comprar
     estudoAtivo: true, estudoVendasDiaMin: 3, estudoHorasLenta: 36,
@@ -210,7 +210,7 @@
     ['auditoria', (m) => /^🔎/.test(m)], ['erro', (m, t) => t === 'erro' || /^erro|falhou/i.test(m)], ['aprendizado', (m) => /^🎓 aprendizado|^📋 parecer/.test(m)],
     ['claude', (m) => /^🧠/.test(m)], ['venda', (m) => /^💰 vendido|^ANUNCIAR|^VENDER|^🪟/.test(m)], ['preço', (m) => /^(BAIXAR|SUBIR|REAJUSTAR|CORRIGIR)|^🔁|^🤝 aplicando/.test(m)],
     ['negociação', (m) => /^🤝/.test(m)], ['compra', (m, t) => t === 'compra' || /^COMPRAR|^🛒|^✨/.test(m)], ['casa', (m) => /^🏠/.test(m)], ['boss', (m) => /^👑|Boss Token|^🎁/.test(m)],
-    ['pulou', (m) => /pulei|^⛔|não compro|sem preço|sem câmbio|^📚|^🐢/.test(m)], ['hunt', (m) => /^🗺️/.test(m)], ['evolução', (m) => /^🧬/.test(m)], ['ajuste', (m) => /^⚙️|^👥|^▶|^⏹|^🧪|^⚡ modo|ligado$|desligado$/.test(m)],
+    ['pulou', (m) => /pulei|^⛔|não compro|sem preço|sem câmbio|^📚|^🐢/.test(m)], ['hunt', (m) => /^🗺️/.test(m)], ['evolução', (m) => /^🧬/.test(m)], ['pedido', (m) => /^💬/.test(m)], ['ajuste', (m) => /^⚙️|^👥|^▶|^⏹|^🧪|^⚡ modo|ligado$|desligado$/.test(m)],
   ];
   const IGNORAR_DEC = /^💰 lucro real|planilha|^🔮 precificador|^🎓 (em|estudo)|^🧾|^📊/;
   let decSujo = false;
@@ -1509,6 +1509,8 @@
     const f = a.ficha || {};
     if (f.level < 50 && !f.shiny) return;
     if (a.moeda === 'gold') { try { evoOportunidade(a, f); } catch {} }
+    // abaixo do Nv 500 não vai direto para a vitrine: só compra se houver vaga nas casas para upar (fila de casa menor que o nº de casas)
+    if ((f.level || 0) < (CFG.nivelMinVenda || 0) && (E.filaCasa || []).length >= CFG.casas.length) return avisoRaro('snipeFilaCasa', `🎯 sniper: pokémon abaixo do Nv ${CFG.nivelMinVenda} só com vaga nas casas (${(E.filaCasa || []).length} já esperando)`, 60);
     let ref, moedaVenda = a.moeda;
     if (a.moeda === 'gold') { if (f.shiny || M.base.length < 300) return; ref = precoMercado(f.nome, f.level, f.nota, f.potencia, f.ivTotal); }
     else {
@@ -1750,6 +1752,18 @@
     if (CFG.simulacao && M.simCasa[key]) return true;                 // na simulação a casa "já recebeu" (não repete o log)
     const alvo = alvoDaCasa(cid);
     const ocupados = new Set([...Object.values(E.postos).filter(Boolean).map((p) => p.pokemonId), ...M.meus.map((a) => a.pokemonId), M.activeId, ...(E.filaVenda || []).map((x) => x.pokemonId), ...Object.values(M.simCasa)].filter((x) => x != null).map(String));
+    // primeiro os que esperam casa (comprados para revender abaixo do Nv 500); depois o melhor da coleção
+    const naFilaCasa = new Set((E.filaCasa || []).map((x) => String(x.pokemonId)));
+    E.filaCasa = (E.filaCasa || []).filter((x) => (M.pokemons || []).some((p) => String(p.id) === String(x.pokemonId) && p.slot == null) && !ocupados.has(String(x.pokemonId)));
+    const espera = (M.pokemons || []).filter((p) => naFilaCasa.has(String(p.id)) && p.slot == null && !ocupados.has(String(p.id)) && (p.level || 0) < Math.max(alvo, CFG.nivelMinVenda || 0));
+    if (espera.length) {
+      const p = espera.sort((a2, z) => (z.level || 0) - (a2.level || 0))[0], ivp = Object.values(p.ivs || {}).reduce((x, y) => x + y, 0), fx = E.filaCasa.find((x) => String(x.pokemonId) === String(p.id));
+      log(`${sim()}🏠 casa ${cid}: colocando ${p.nome} Nv ${p.level} (comprado para revender — sobe até o Nv ${Math.max(alvo, CFG.nivelMinVenda || 0)} antes de anunciar)`, 'ok');
+      registrarNoPosto({ pokemonId: p.id, nome: p.nome, nv: p.level, xp: p.xp, nota: p.nota, pot: p.potencia, iv: ivp, ficha: fichaMin(p), preco: fx?.custo || custoConhecido(p.id), moeda: fx?.moedaCompra || 'gold', casaKey: key });
+      E.filaCasa = E.filaCasa.filter((x) => String(x.pokemonId) !== String(p.id)); persistir();
+      if (CFG.simulacao) M.simCasa[key] = p.id;
+      return true;
+    }
     const cands = (M.pokemons || []).filter((p) => p.slot == null && !ocupados.has(String(p.id)) && (p.level || 0) < alvo && (p.nota >= 3.5 || p.shiny || p.potencia === 5) && !(CFG.evitarOutland && ehOutland(p)));
     if (!cands.length) return false;
     const iv = (p) => Object.values(p.ivs || {}).reduce((x, y) => x + y, 0);
@@ -1767,7 +1781,7 @@
     E.casaBusca[cid] = ag; persistir();
     const feitas = E.casaComprasHoje?.dia === E.dia ? E.casaComprasHoje.n : 0;
     if (CFG.casaComprasDia > 0 && feitas >= CFG.casaComprasDia) return avisoRaro('casaDia', `🏠 já foram ${feitas} compras para casas hoje (limite ${CFG.casaComprasDia})`, 60);
-    const gf = emGiro() ? CFG.giroCasaFator : 1, alvo = emGiro() ? Math.min(alvoDaCasa(cid), CFG.giroNivelMax) : alvoDaCasa(cid), pct = E.postos[key]?.pct || 25, xpH = xpHoraCasa(pct);
+    const gf = emGiro() ? CFG.giroCasaFator : 1, alvo = Math.max(CFG.nivelMinVenda || 0, emGiro() ? Math.min(alvoDaCasa(cid), CFG.giroNivelMax) : alvoDaCasa(cid)), pct = E.postos[key]?.pct || 25, xpH = xpHoraCasa(pct);
     // só espécies que vendem no nível-alvo e dão bom lucro na mediana; 4 buscas no máximo
     const cands = rankingEspecies(alvo).filter((e) => e.nAlto >= CFG.casaVendasMinAlvo && e.lucro >= CFG.casaLucroMin * gf * 0.7).slice(0, 4);
     if (!cands.length) return avisoRaro('casaSem' + cid, `🏠 casa ${cid}: nenhuma espécie com lucro ≥ ${curto(CFG.casaLucroMin)} e vendas no Nv ${alvo} — esperando`, 60);
@@ -1918,6 +1932,7 @@
       const c = compras.get(String(p.id)); if (!c) continue;
       if (!(p.level >= 50) || !(p.nota >= 3.5 || p.shiny)) continue;
       const iv = Object.values(p.ivs || {}).reduce((a, b) => a + b, 0);
+      if ((p.level || 0) < (CFG.nivelMinVenda || 0)) { E.filaCasa = E.filaCasa || []; if (!E.filaCasa.some((x) => String(x.pokemonId) === String(p.id))) E.filaCasa.push({ pokemonId: p.id, nome: p.nome, nv: p.level, custo: c.bruto, moedaCompra: c.moeda === 'orb' ? 'orb' : 'gold', em: Date.now() }); continue; }
       (E.filaVenda = E.filaVenda || []).push({ pokemonId: p.id, nome: p.nome, nv: p.level, nota: p.nota, pot: p.potencia, iv, shiny: !!p.shiny, custo: c.bruto, moedaCompra: c.moeda === 'orb' ? 'orb' : 'gold', ficha: fichaMin(p), lucro: 0, em: Date.now(), recuperado: true });
       n++;
     }
@@ -2263,6 +2278,12 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
   function fichaDoPokemon(id) { const p = (M.pokemons || []).find((x) => x.id === id); return p ? fichaMin(p) : null; }
   async function anunciarPokemon({ pokemonId, nome, nv, nota, pot, iv, shiny, custo, alvo, moeda = 'gold', fila = true, lucro, ficha, moedaCompra = 'gold', moedaForcada = null }) {
     ficha = ficha || fichaDoPokemon(pokemonId);
+    // 🏠 abaixo do Nv mínimo de venda (500) não vai para a vitrine: espera vaga nas casas e sobe até lá (vende bem mais rápido)
+    if ((nv || ficha?.level || 0) < (CFG.nivelMinVenda || 0)) {
+      E.filaCasa = E.filaCasa || [];
+      if (!E.filaCasa.some((x) => String(x.pokemonId) === String(pokemonId))) { E.filaCasa.push({ pokemonId, nome, nv, custo: custo || 0, moedaCompra, em: Date.now() }); persistir(); log(`${sim()}🏠 ${nome} Nv ${nv}: não anuncio abaixo do Nv ${CFG.nivelMinVenda} — vai para as casas upar até lá (${E.filaCasa.length} esperando casa)`, 'venda'); }
+      return false;
+    }
     if (!(custo > 0) && !E.ops.some((x) => x.tipo === 'compra' && String(x.pokemonId) === String(pokemonId))) {   // comprado à mão? o histórico diz pelo nome
       const pn = compraPorNome(nome, nv); if (pn) { custo = pn.bruto; moedaCompra = pn.moeda; }
     }
@@ -2625,7 +2646,8 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
   const alvoDaCasa = (cid) => (CFG.alvoPorCasa ? planoAlvos()[cid]?.alvo : null) || CFG.nivelAlvo;
   // para cada pokémon na casa: o nível (até nivelMaxCasa) em que ele vale mais, pelas vendas da espécie com 3+ vendas no nível.
   // Pega o MENOR nível que chega a 97% do melhor preço (subir além disso é XP gasto à toa). Menos pokémon prontos, cada um valendo mais.
-  function alvoDoPokemon(p, cid) { const a = alvoDoPokemonBase(p, cid); return emGiro() ? Math.min(a, CFG.giroNivelMax) : a; }
+  // nunca abaixo do nível mínimo de venda (500, pedido do jogador: abaixo disso vende devagar)
+  function alvoDoPokemon(p, cid) { const a0 = alvoDoPokemonBase(p, cid), a = emGiro() ? Math.min(a0, CFG.giroNivelMax) : a0; return Math.min(CFG.nivelMaxCasa, Math.max(CFG.nivelMinVenda || 0, a)); }
   function alvoDoPokemonBase(p, cid) {
     const base = alvoDaCasa(cid);
     if (p?.alvoNv) return p.alvoNv;                                   // escolhido na compra (shiny)
@@ -4312,6 +4334,104 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
       else if (Date.now() - t0 > 15 * 60_000) clearInterval(ini);
     }, 3000);
   }
+  /* ============================== 💬 PEDIDOS RÁPIDOS (chat do painel) ============================== */
+  // Você escreve uma decisão do seu jeito ("enquanto este boost de XP estiver ativo deixe na hunt, depois volte para o boss") e o app
+  // vira isso numa regra: QUANDO (enquanto o boost durar / até HH:MM / por N horas / sempre) → FAZER (módulos, ligar/pausar) → DEPOIS (o que volta).
+  // Entende sozinho os pedidos comuns (sem API); só pergunta ao Claude o que não entendeu.
+  const MODS_PALAVRAS = [[/\bboss\b/, ['boss']], [/\bcasas?\b/, ['casas']], [/sniper de ite[mn]|sniper ite[mn]/, ['sniperIt']], [/sniper de pok|sniper pok/, ['sniperPk']], [/\bsniper\b/, ['sniperPk', 'sniperIt']],
+    [/lista de compras|\bcompras?\b/, ['compras']], [/\bclaude\b/, ['claude']], [/\bprey\b/, ['prey']], [/hunt autom/, ['hunt']]];
+  const normP = (t) => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  function acaoDeTexto(t) {
+    const x = normP(t), a = { mods: {} };
+    if (/\b(pause|pausa|pausar|pare o app|desligue o app|para o app)\b/.test(x)) a.ligado = false;
+    if (/\b(ligue o app|liga o app|volte a trabalhar)\b/.test(x)) a.ligado = true;
+    // "deixe/fique na hunt" = sem boss; "faça/volte para o boss" = boss ligado
+    if (/(deix|fiq|fica|mant|volt|vai|ir)\w* (na|pra|para a|para) hunt|\bso hunt\b|upar na hunt/.test(x)) a.mods.boss = false;
+    if (/(fa[cz]\w*|volt\w*|vai|ir|ligue?|faca|fazer) (o |pro |para o |pra |de )?boss/.test(x)) a.mods.boss = true;
+    // "ligue/desligue <módulo>": vale o verbo mais perto antes do nome do módulo
+    const verbos = [...x.matchAll(/\b(desligue|desliga|desative|desativa|pare|para de|sem|ligue|liga|ative|ativa|use|usa)\b/g)].map((m) => ({ i: m.index, on: !/^(desl|desat|pare|para de|sem)/.test(m[1]) }));
+    if (verbos.length) for (const [re, ks] of MODS_PALAVRAS) {
+      const m = x.match(re); if (!m || (ks[0] === 'boss' && 'boss' in a.mods) || (ks.length > 1 && ks.some((k) => k in a.mods))) continue;   // "sniper" genérico só se nenhum sniper específico foi citado
+      const v = verbos.filter((y) => y.i < m.index).pop() || verbos[0];
+      for (const k of ks) if (!(k in a.mods)) a.mods[k] = v.on;
+    }
+    return Object.keys(a.mods).length || 'ligado' in a ? a : null;
+  }
+  function boostsCurtos() {   // os boosts de XP que acabam em até 24 h (o "este boost" do pedido)
+    return (M.bonusXp?.partes || []).filter((p) => p.ate && p.ate > Date.now() && p.ate - Date.now() < 24 * 3600_000).sort((a, z) => z.ate - a.ate);
+  }
+  function interpretarLocal(texto) {
+    const x = normP(texto);
+    const [p1, p2] = x.split(/\b(?:depois disso|depois|apos isso|apos|em seguida|quando acabar|quando terminar|e ai)\b/);
+    let cond = null;
+    if (/boost|bonus de xp|xp em dobro|boost de xp/.test(p1)) { const b = boostsCurtos(); if (!b.length) return { erro: 'não achei boost de XP terminando nas próximas 24 h' }; cond = { tipo: 'ate', ate: b[0].ate, rot: `enquanto o boost de XP durar (até ${new Date(b[0].ate).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })})` }; }
+    const hm = p1.match(/ate (?:as )?(\d{1,2})(?:[:h](\d{2}))?\s*(?:h|hs|horas)?\b/);
+    if (!cond && hm) { const d = new Date(); d.setHours(Number(hm[1]), Number(hm[2] || 0), 0, 0); if (d.getTime() < Date.now()) d.setDate(d.getDate() + 1); cond = { tipo: 'ate', ate: d.getTime(), rot: `até ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` }; }
+    const dur = p1.match(/(?:por|durante|nas? proxim[ao]s?) (\d+(?:[.,]\d+)?)\s*(h|hora|horas|min|minutos?)\b/);
+    if (!cond && dur) { const n = Number(dur[1].replace(',', '.')), ms = /^h|hora/.test(dur[2]) ? n * 3600_000 : n * 60_000; cond = { tipo: 'ate', ate: Date.now() + ms, rot: `por ${dur[1]} ${/^h|hora/.test(dur[2]) ? 'h' : 'min'}` }; }
+    const fazer = acaoDeTexto(p1); if (!fazer) return null;
+    let depois = p2 ? acaoDeTexto(p2) : null;
+    if (p2 && !depois && /de novo|como estava|ao normal|volt|relig|retom/.test(p2)) depois = { mods: Object.fromEntries(Object.entries(fazer.mods).map(([k, v]) => [k, !v])), ...('ligado' in fazer ? { ligado: !fazer.ligado } : {}) };   // "depois volte ao normal" = o contrário
+    return { cond: cond || { tipo: 'sempre', rot: 'a partir de agora' }, fazer, depois };
+  }
+  const PEDIDO_SIS = `Você converte um pedido do jogador do PokeIdle (em português) numa regra JSON para o app que joga por ele. Responda SÓ com JSON:
+{"cond":{"tipo":"ate","ate":<epoch ms>,"rot":"texto curto"} | {"tipo":"sempre","rot":"a partir de agora"},
+ "fazer":{"mods":{"boss":bool,"casas":bool,"sniperPk":bool,"sniperIt":bool,"compras":bool,"claude":bool,"prey":bool,"hunt":bool},"ligado":bool},
+ "depois":{...mesmo formato de fazer...} ou null,
+ "resposta":"confirmação curta e natural do que o app vai fazer"}
+Inclua em mods só o que muda. "deixar na hunt" = boss:false; "fazer boss" = boss:true. Use os boosts e a hora atual do contexto para calcular "ate". Se o pedido não der para virar regra, responda {"erro":"motivo curto"}.`;
+  async function interpretarPedido(texto) {
+    const loc = interpretarLocal(texto);
+    if (loc && !loc.erro) return { ...loc, como: 'local' };
+    if (!CFG.claudeKey) return { erro: loc?.erro || 'não entendi o pedido (e sem a chave do Claude não consigo interpretar pedidos diferentes) — tente algo como "por 2 h deixe na hunt, depois volte para o boss"' };
+    const ctx = { agora: Date.now(), hora: new Date().toLocaleString('pt-BR'), boosts: (M.bonusXp?.partes || []).filter((p) => p.ate > Date.now()).map((p) => ({ id: p.id, ate: p.ate, faltaMin: Math.round((p.ate - Date.now()) / 60000) })), modulos: CFG.mod };
+    try {
+      const j = await chamarClaude(CFG.claudeModeloRapido, [{ role: 'user', content: `Contexto: ${JSON.stringify(ctx)}\nPedido: ${texto}` }], false, 600, PEDIDO_SIS, true);
+      const txt = (j?.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
+      const r = JSON.parse(txt.slice(txt.indexOf('{'), txt.lastIndexOf('}') + 1));
+      if (r.erro) return { erro: r.erro };
+      return { cond: r.cond || { tipo: 'sempre', rot: 'a partir de agora' }, fazer: r.fazer || {}, depois: r.depois || null, resposta: r.resposta, como: 'claude' };
+    } catch (e) { return { erro: 'não consegui interpretar agora: ' + e.message }; }
+  }
+  const txtAcao = (a) => { if (!a) return 'nada'; const L = []; if ('ligado' in a) L.push(a.ligado ? 'ligar o app' : 'pausar o app'); for (const [k, v] of Object.entries(a.mods || {})) L.push(`${v ? 'ligar' : 'desligar'} ${({ boss: 'o boss', casas: 'as casas', sniperPk: 'o sniper de pokémon', sniperIt: 'o sniper de itens', compras: 'a lista de compras', claude: 'o Claude', prey: 'o Prey', hunt: 'a hunt automática' })[k] || k}`); return L.join(', ') || 'nada'; };
+  function aplicarAcao(a, regra, fase) {
+    if (!a) return;
+    for (const [k, v] of Object.entries(a.mods || {})) if (Object.prototype.hasOwnProperty.call(CFG.mod, k)) CFG.mod[k] = !!v;
+    salvarCfg();
+    // boss desligado no meio de uma série: encerra a série (o app volta para a hunt quando o jogo confirma)
+    if (a.mods && a.mods.boss === false && (M.bossAuto || M.emBoss) && !CFG.simulacao) { enviar({ t: 'boss.auto', ativo: false, key: CFG.bossKey }); setTimeout(() => { try { if (E.huntSlug && !M.emBoss) enviar({ t: 'hunt.select', slug: E.huntSlug }); } catch {} }, 8000); }
+    if ('ligado' in a && a.ligado !== M.ligado) { M.ligado = !!a.ligado; salvar('pkapp.ligado', M.ligado); if (M.ligado) loop(); }
+    log(`💬 pedido "${regra.texto.slice(0, 60)}": ${fase} — ${txtAcao(a)}`, 'ok');
+    try { pintar(); } catch {}
+  }
+  async function novoPedido(texto) {
+    texto = String(texto || '').trim().slice(0, 300); if (!texto) return { ok: false, erro: 'escreva o pedido' };
+    const r = await interpretarPedido(texto);
+    if (r.erro) return { ok: false, erro: r.erro };
+    const regra = { id: Date.now().toString(36), texto, criada: Date.now(), cond: r.cond, fazer: r.fazer, depois: r.depois, como: r.como, estado: 'ativa' };
+    (E.pedidos ||= []).unshift(regra); E.pedidos = E.pedidos.slice(0, 20);
+    if (regra.cond.tipo === 'ate' && regra.cond.ate <= Date.now()) return { ok: false, erro: 'esse prazo já passou' };
+    aplicarAcao(regra.fazer, regra, 'agora'); regra.aplicada = true; persistir();
+    const resposta = r.resposta || `Combinado: ${regra.cond.rot}, ${txtAcao(regra.fazer)}${regra.depois ? `; depois, ${txtAcao(regra.depois)}` : ''}.`;
+    regra.resposta = resposta;
+    return { ok: true, resposta, regra };
+  }
+  function cicloPedidos() {
+    for (const r of E.pedidos || []) {
+      if (r.estado !== 'ativa') continue;
+      if (r.cond.tipo === 'ate' && Date.now() >= r.cond.ate) { r.estado = 'feita'; r.fim = Date.now(); aplicarAcao(r.depois, r, 'prazo acabou'); persistir(); }
+      else if (r.aplicada) {   // mantém o combinado (se outra coisa mudou o módulo no meio, volta)
+        for (const [k, v] of Object.entries(r.fazer?.mods || {})) if (CFG.mod[k] !== !!v) { CFG.mod[k] = !!v; salvarCfg(); }
+      }
+    }
+  }
+  function cancelarPedido(id, aplicarDepois = false) {
+    const r = (E.pedidos || []).find((x) => x.id === id); if (!r || r.estado !== 'ativa') return false;
+    r.estado = 'cancelada'; r.fim = Date.now(); if (aplicarDepois) aplicarAcao(r.depois, r, 'cancelado'); else log(`💬 pedido cancelado: "${r.texto.slice(0, 60)}"`);
+    persistir(); return true;
+  }
+  setInterval(() => { try { cicloPedidos(); } catch {} }, 30_000);
+
   // ---- ponte com o app de PC (várias contas): resumo da conta, contas irmãs e papel de cada conta ----
   const PAPEIS = {
     tudo: { compras: true, sniperPk: true, sniperIt: true, casas: true, boss: true },
@@ -4326,7 +4446,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
       return JSON.parse(JSON.stringify({
         nick: M.nick || null, vendedorId: meuId(), versao: VERSAO_APP, ligado: !!M.ligado, simulacao: !!CFG.simulacao, papel: CFG.papel || 'tudo', mod: CFG.mod,
         coins: M.gold ?? null, gemas: M.gemas ?? null, tokens: M.tokens ?? null, gemasHoje: E.gemasHoje, gastoHoje: E.gastoHoje, limiteGemasDia: CFG.gemasMaxPorDia, cambio: cb || null,
-        vitrine: { usadas: vg.usadas, livres: vg.livres, fila: (E.filaVenda || []).length }, giro: (() => { try { return emGiro(); } catch { return false; } })(),
+        vitrine: { usadas: vg.usadas, livres: vg.livres, fila: (E.filaVenda || []).length, filaCasa: (E.filaCasa || []).length }, giro: (() => { try { return emGiro(); } catch { return false; } })(),
         real: E.real ? { em: E.real.em, d1: r24, d7: r7 } : null,
         revendas7: { n: rv.length, lucroC: rv.reduce((s2, x) => s2 + x.lucroC, 0) },
         boss: bd && { lutas: bd.lutas, vit: bd.vit, porHora: bd.porHora, drops: bd.drops, recebido: bd.recebido, pendente: bd.pendente, custo: bd.custo, lucro: bd.lucro },
@@ -4380,6 +4500,9 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
       return r;
     },
     explorador: () => ({ entrada: Object.entries(EXP.entrada).map(([t, e]) => ({ t, ...e })).sort((a, z) => z.ult - a.ult), saida: Object.entries(EXP.saida).map(([t, e]) => ({ t, ...e })).sort((a, z) => z.ult - a.ult) }),
+    pedido: (texto) => novoPedido(texto).then((r) => JSON.parse(JSON.stringify(r))),
+    pedidos: () => JSON.parse(JSON.stringify((E.pedidos || []).slice(0, 12))),
+    cancelarPedido: (id, depois) => cancelarPedido(id, !!depois),
     relatorios: () => JSON.parse(JSON.stringify((E.relatorios || []).filter((r) => !r.parcial))),
     parecerHoje: () => JSON.parse(JSON.stringify(compilarParecer(hoje(), true))),
     decisoes: (cat) => DEC.filter((x) => !cat || x.cat === cat).slice(0, 300),
@@ -4394,7 +4517,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     papeis: () => Object.keys(PAPEIS),
   };
   try { Object.defineProperty(PAGINA, '__PKAPP_PONTE', { value: ponteDesktop, configurable: true }); } catch {}
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, estudoToken, resultadoBossDia, exportarCfg, importarCfg, compilarParecer, fecharDia, aprender, DEC, bossDaConta, cicloHunt, abrirVagaParaShiny, instalarFiltroPopups, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: VERSAO_APP }, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, estudoToken, resultadoBossDia, exportarCfg, importarCfg, compilarParecer, fecharDia, aprender, DEC, bossDaConta, cicloHunt, abrirVagaParaShiny, instalarFiltroPopups, novoPedido, interpretarLocal, cicloPedidos, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: VERSAO_APP }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));

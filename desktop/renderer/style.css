@@ -1089,3 +1089,12 @@ input[type=password] { background: var(--s2); border: 1px solid var(--line-2); b
 .pk-intro { margin: 0 0 12px; }
 .pk-det { margin-top: 14px; } .pk-det summary { cursor: pointer; color: var(--muted); font-size: 13.5px; }
 #page-trader.pk-pagina .pk-tab td, #page-trader.pk-pagina .pk-tab th { font-size: 13.5px; }
+.pk-chat { padding: 14px 18px !important; }
+.pk-chat-f { display: flex; align-items: center; gap: 10px; }
+.pk-chat-f .pk-ico { width: 20px; height: 20px; color: var(--muted); }
+.pk-chat-f input { flex: 1; min-width: 0; font-size: 15px; padding: 11px 14px; border-radius: 10px; }
+.pk-chat-r { margin-top: 8px; font-size: 14px; color: var(--muted); min-height: 0; }
+.pk-chat-r:empty { display: none; }
+.pk-chat-r.ok { color: #9ff0c8; } .pk-chat-r.bad { color: #ff9b9b; }
+.pk-chat-l { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 0 0; margin-top: 8px; border-top: 1px solid var(--line); font-size: 14px; }
+.pk-chat-l > span:nth-child(2) { flex: 1; min-width: 200px; }

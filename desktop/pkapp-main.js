@@ -229,6 +229,10 @@ module.exports = function pkappMain({ ipcMain, views, config, send, ctx, app, pa
     }
     return out;
   });
+  // 💬 pedidos rápidos do chat do painel (regras com prazo: "enquanto o boost durar, hunt; depois, boss")
+  ipcMain.handle('poke:pkapp:pedido', async (_e, id, texto) => { const r = await ponte(id, 'pedido', String(texto || '').slice(0, 300)); await lerConta(id); return r || { ok: false, erro: 'a conta não respondeu' }; });
+  ipcMain.handle('poke:pkapp:pedidos', async (_e, id) => (await ponte(id, 'pedidos')) || []);
+  ipcMain.handle('poke:pkapp:cancelarPedido', async (_e, id, pid, depois) => { await ponte(id, 'cancelarPedido', String(pid), !!depois); await lerConta(id); return (await ponte(id, 'pedidos')) || []; });
   ipcMain.handle('poke:pkapp:explorador', async () => {
     const out = [];
     for (const a of accounts()) { const x = await ponte(a.id, 'explorador'), r = resumos.get(a.id); if (x) out.push({ conta: (r && r.r && r.r.nick) || a.name, ...x }); }
