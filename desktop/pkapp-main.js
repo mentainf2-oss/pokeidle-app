@@ -123,6 +123,21 @@ module.exports = function pkappMain({ ipcMain, views, config, send, ctx, app, pa
     if (!!r.painelOculto === !cfg.painelNoJogo) return;                 // já está como deve (escondido quando não é para mostrar)
     await ponte(id, 'controle', 'painel', !!cfg.painelNoJogo);
   }
+  // ▶ depois de reiniciar (atualização), a conta que estava ligada volta ligada: o app de PC lembra quem estava ligado e,
+  // se a conta não religar sozinha em 3 min, religa pela ponte (os ajustes — simulação/real, módulos — já ficam na conta)
+  const inicioApp = Date.now(), religados = new Set();
+  async function manterLigado(id, r) {
+    cfg.ligados = cfg.ligados || {};
+    if (Date.now() - inicioApp < 3 * 60_000) return;                    // dá tempo de a conta religar sozinha
+    if (r.ligadoSalvo === false) { if (cfg.ligados[id]) { cfg.ligados[id] = false; salvar(); } return; }   // você parou: fica parado
+    if (cfg.ligados[id] && !r.ligado && !religados.has(id)) {
+      religados.add(id);
+      await ponte(id, 'controle', 'ligar', true);
+      if (ctx.alert && cfg.avisos) ctx.alert('pkapp', `Religado — ${r.nick || nomeDa(id)}`, 'O app estava ligado antes de reiniciar e voltou a trabalhar com os mesmos ajustes.', `${id}|religado|${inicioApp}`);
+      return;
+    }
+    if (!!cfg.ligados[id] !== !!r.ligado) { cfg.ligados[id] = !!r.ligado; salvar(); }
+  }
   async function ponte(id, metodo, ...args) {
     const v = views.get(id); if (!v || v.webContents.isDestroyed()) return null;
     return v.webContents.executeJavaScript(`window.__PKAPP_PONTE ? window.__PKAPP_PONTE[${JSON.stringify(metodo)}](...${JSON.stringify(args)}) : null`).catch(() => null);
@@ -195,6 +210,7 @@ module.exports = function pkappMain({ ipcMain, views, config, send, ctx, app, pa
   ipcMain.handle('poke:pkapp:controle', async (_e, id, acao, valor) => {
     if (!CONTROLES.has(acao)) return estado();
     if (acao === 'mod' && !(valor && typeof valor.k === 'string')) return estado();
+    if (acao === 'ligar') { (cfg.ligados ||= {})[id] = !!valor; salvar(); }
     await ponte(id, 'controle', acao, valor); await lerConta(id); return estado();
   });
   // copiar os ajustes de uma conta para outra (a de destino fica em simulação)
@@ -225,7 +241,7 @@ module.exports = function pkappMain({ ipcMain, views, config, send, ctx, app, pa
   });
 
   async function tick() {
-    for (const a of accounts()) { const r = await lerConta(a.id); if (r) { avisar(a.id, r); avisarParecer(a.id, r); await aplicarPainel(a.id, r); } }
+    for (const a of accounts()) { const r = await lerConta(a.id); if (r) { avisar(a.id, r); avisarParecer(a.id, r); await aplicarPainel(a.id, r); await manterLigado(a.id, r); } }
     await avisarIrmas();
     await aplicarPapeis();
     try { await sincronizarBase(); } catch {}

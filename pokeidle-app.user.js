@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.53
+// @version      5.54
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -31,7 +31,7 @@
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.53';
+  const VERSAO_APP = '5.54';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -3323,7 +3323,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
       <div class="cart"><h4>Agora</h4><div class="kv" id="i-num" style="margin:0"></div></div>
       <div id="i-aviso"></div>
       <div class="cart"><h4>Atividade</h4><div class="log" id="i-log" style="max-height:170px;overflow:auto"></div></div>`;
-    $('#i-on').onclick = () => { M.ligado = !M.ligado; log(M.ligado ? '▶ app LIGADO' : '⏹ app PARADO'); if (M.ligado) loop(); pintar(); };
+    $('#i-on').onclick = () => { M.ligado = !M.ligado; salvar('pkapp.ligado', M.ligado); log(M.ligado ? '▶ app LIGADO' : '⏹ app PARADO'); if (M.ligado) loop(); pintar(); };
     $('#i-sim').onclick = () => {
       if (CFG.simulacao && !confirm('Sair da simulação? O app vai comprar, anunciar, mexer nas casas e no boss de verdade, sempre em Coins e dentro dos limites.')) return;
       CFG.simulacao = !CFG.simulacao; salvarCfg(); log(CFG.simulacao ? '🧪 modo SIMULAÇÃO' : '⚡ modo REAL'); pintar();
@@ -4226,6 +4226,19 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
   setInterval(() => { try { agendaParecer(); } catch (e) { console.warn('[PKApp] parecer', e); } }, 5 * 60_000);
   setTimeout(() => { try { agendaParecer(); } catch {} }, 90_000);
 
+  // ▶ volta ligado depois de reiniciar (atualização do app, queda, PC reiniciado): se estava ligado, religa sozinho com os mesmos
+  // ajustes (simulação/real, módulos e limites já ficam salvos) assim que a conta conectar no jogo
+  // (na 1ª vez com esta versão ainda não há o registro: se o app estava trabalhando nos últimos 20 min, estava ligado)
+  const ligadoSalvo = ler('pkapp.ligado', null);
+  const estavaLigado = ligadoSalvo === null ? !!(DEC[0] && Date.now() - DEC[0].em < 20 * 60_000 && DEC.slice(0, 30).some((d) => ['compra', 'venda', 'boss', 'preço', 'casa'].includes(d.cat))) : !!ligadoSalvo;
+  if (estavaLigado) {
+    const t0 = Date.now();
+    const ini = setInterval(() => {
+      if (M.ligado) return clearInterval(ini);
+      if (M.ws && M.ws.readyState === 1 && M.gold != null) { clearInterval(ini); M.ligado = true; log('▶ app LIGADO de novo — estava ligado antes de reiniciar'); loop(); try { pintar(); } catch {} }
+      else if (Date.now() - t0 > 15 * 60_000) clearInterval(ini);
+    }, 3000);
+  }
   // ---- ponte com o app de PC (várias contas): resumo da conta, contas irmãs e papel de cada conta ----
   const PAPEIS = {
     tudo: { compras: true, sniperPk: true, sniperIt: true, casas: true, boss: true },
@@ -4251,13 +4264,14 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
         hoje: (() => { try { const r = compilarParecer(hoje(), true); return { lucroG: r.lucroG, caixaG: r.caixaG, partes: r.partes, vendas: r.mov.pokemon.nV + r.mov.item.nV, compras: r.mov.pokemon.nC + r.mov.item.nC, revendas: r.revendas, prejuizos: r.prejuizos, decisoes: r.decisoes, erros: r.porCat.erro || 0, parados: r.parados }; } catch { return null; } })(),
         parecer: (() => { const r = (E.relatorios || []).find((x) => !x.parcial); return r ? { dia: r.dia, em: r.em, lucroG: r.lucroG, linhas: r.linhas, ajustes: r.ajustes || [], atrasado: !!r.atrasado } : null; })(),
         decisoes: DEC.slice(0, 60), painelOculto: !!ler('pkapp.painelOculto', false),
+        ligadoSalvo: ler('pkapp.ligado', null),
         investir: (() => { try { return estudoCasas().linhas.filter((l) => l.custo > 0 && l.ganhoH > 0).map((l) => ({ acao: l.acao, custo: Math.round(l.custo), ganhoH: Math.round(l.ganhoH), payback: l.payback != null ? Math.round(l.payback * 10) / 10 : null, nota: l.nota || null, moeda: l.moeda || null })).sort((x, y) => (x.payback ?? 1e9) - (y.payback ?? 1e9)).slice(0, 8); } catch { return []; } })(),
         aprendizado: { hist: (E.aprendizado?.hist || []).slice(0, 10), itensEvitar: Object.entries(E.aprendizado?.itensEvitar || {}).filter(([, t]) => t > Date.now()).map(([id, t]) => ({ id, nome: E.nomesItens?.[id] || id, ate: t })) },
       }));
     },
     // controles vindos da página do app de PC (o mesmo que os botões do painel)
     controle(acao, valor) {
-      if (acao === 'ligar') { const on = !!valor; if (on !== M.ligado) { M.ligado = on; log(on ? '▶ app LIGADO' : '⏹ app PARADO'); if (on) loop(); } }
+      if (acao === 'ligar') { const on = !!valor; salvar('pkapp.ligado', on); if (on !== M.ligado) { M.ligado = on; log(on ? '▶ app LIGADO' : '⏹ app PARADO'); if (on) loop(); } }
       else if (acao === 'simulacao') { const on = !!valor; if (on !== !!CFG.simulacao) { CFG.simulacao = on; salvarCfg(); log(on ? '🧪 modo SIMULAÇÃO' : '⚡ modo REAL'); } }
       else if (acao === 'mod') { const k = valor && valor.k; if (!Object.prototype.hasOwnProperty.call(CFG.mod, k)) return false; CFG.mod[k] = !!valor.on; salvarCfg(); log(`⚙️ ${k}: ${CFG.mod[k] ? 'ligado' : 'desligado'} (app de PC)`); }
       else if (acao === 'painel') { const ver = !!valor; salvar('pkapp.painelOculto', !ver); if (W) W.style.display = ver ? '' : 'none'; }
