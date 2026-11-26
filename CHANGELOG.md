@@ -2,6 +2,7 @@
 
 | Versão | Data | O que mudou |
 | --- | --- | --- |
+| 5.71 | 26/11/2026 | Sniper só compra o que gira: no máximo 1 shiny da mesma espécie esperando venda (3 nos normais); não compra espécie que tem anúncio meu parado há 24 h+ sem favorito; e só compra se o mercado vende o bastante para girar em até 3 dias (6 para shiny), pelas vendas dos últimos 14 dias. Vale também para o shiny comprado para upar nas casas. |
 | 5.70 | 26/11/2026 | O painel antigo saiu do jogo: todas as funções dele estão no Painel do app, nas abas Compras (lista, sniper pokémon e itens), Casas, Lucro, Boss (e Prey), Análise (mercado, estudo, avaliar, investir), Claude, e em Ajustes (config e log). Cada clique e campo vale na conta de verdade; confirmações aparecem no app. |
 | 5.69 | 26/11/2026 | Mercado: o histórico do jogo passa a ser reconhecido como venda/compra de pokémon (o campo tipo do jogo é o da transação — por isso nada era conferido e as revendas não casavam). Venda com anúncio repetido espera o histórico em vez de chutar o preço; ✓ marca o que já foi conferido. |
 | 5.68 | 26/11/2026 | Conta nova começa sem casas configuradas (vinham as casas da HRNF por padrão); o app passa a usar as casas da própria conta. |

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.70
+// @version      5.71
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -31,7 +31,7 @@
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.70';
+  const VERSAO_APP = '5.71';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -69,7 +69,8 @@
     // giro rápido da vitrine (no evento de XP upar é barato: vender mais rápido, com menos lucro por pokémon)
     // estudo contínuo do mercado: o que vale, o que vende rápido e o que deu lucro decide o que comprar
     estudoAtivo: true, estudoVendasDiaMin: 3, estudoHorasLenta: 36,
-    maxPorEspecie: 3,                                              // no máximo N da mesma espécie entre casas, fila e vitrine (não inundar o próprio mercado)
+    maxPorEspecie: 3, maxPorEspecieShiny: 1, snipeDiasVendaMax: 3, snipeDiasVendaMaxShiny: 6,   // 5.71: giro de verdade antes de comprar
+                                                 // no máximo N da mesma espécie entre casas, fila e vitrine (não inundar o próprio mercado)
     giro: 'auto', giroFator: 0.82, giroFatorGemas: 0.9, giroNivelMax: 500, giroTrocaH: 2, giroPasso: 0.06, giroMargem: 0.01, giroCasaFator: 0.5,
     negociar: true, negociarMaxRespostas: 8,
     // shiny nas casas (em Gemas): desligado até você ligar
@@ -1652,6 +1653,14 @@
     // vaga na vitrine é escassa: com poucas sobrando, só entra o que dá o dobro do lucro mínimo
     // vaga na vitrine é escassa: com poucas sobrando, só entra o dobro do lucro mínimo; sem vaga, compra para a fila (até filaMax) com o dobro também
     const naFila = vg.paraSnipe < 1;
+    {   // 🔁 5.71: só compra o que gira — estoque da espécie, vendas por dia e anúncios parados sem favorito
+      const tenho = emAndamento(f.nome), maxE = f.shiny ? CFG.maxPorEspecieShiny : CFG.maxPorEspecie;
+      if (maxE > 0 && tenho >= maxE) return avisoRaro('maxEsp' + f.nome + !!f.shiny, `🔁 ${f.shiny ? '✨' : ''}${f.nome}: já tenho ${tenho} esperando venda — não compro outro até vender (giro)`, 120);
+      const sf = paradosSemFavorito(f.nome, f.shiny); if (sf) return avisoRaro('semFav' + f.nome + !!f.shiny, `🔁 ${f.shiny ? '✨' : ''}${f.nome}: ${sf} anúncio(s) meus parados há 24 h+ sem nenhum favorito — o mercado não quer, não compro mais`, 120);
+      const g = giroEspecie(f.nome, f.shiny, a.moeda), diasMax = f.shiny ? CFG.snipeDiasVendaMaxShiny : CFG.snipeDiasVendaMax;
+      const diasPrev = g && g.porDia > 0 ? (tenho + 1) / g.porDia : Infinity;
+      if (diasMax > 0 && (!g || diasPrev > diasMax)) return avisoRaro('giro' + f.nome + !!f.shiny, `🔁 ${f.shiny ? '✨' : ''}${f.nome}: vende ${g ? `${g.n} em ${Math.round(g.dias)} dias (${g.porDia.toFixed(1)}/dia)` : 'sem vendas no banco'} — levaria ${isFinite(diasPrev) ? diasPrev.toFixed(0) + ' dias' : 'tempo demais'} para girar (máx. ${diasMax}); não compro`, 120);
+    }
     if (CFG.maxPorEspecie > 0 && desc < 0.6 && emAndamento(f.nome) >= CFG.maxPorEspecie + 1) return avisoRaro('maxEspS' + f.nome, `🎯 ${f.nome}: já tenho ${emAndamento(f.nome)} em andamento — só compro mais com 60%+ de desconto`, 60);
     if (naFila && (E.filaVenda || []).length >= CFG.filaMax) return;
     const lucroMin = (a.moeda === 'orb' ? CFG.snipeLucroMinGemas : CFG.snipeLucroMin) * (vg.paraSnipe <= 2 ? 2 : 1);
@@ -1993,6 +2002,7 @@
       const f = a.ficha, m = melhorNivelShiny(f, f.level, a.preco, f.xp ?? null, xpH);
       await new Promise((r) => setTimeout(r, 30));                        // o precificador é pesado: cede a vez ao jogo
       if (!m || (m.nFam || 0) < CFG.casaShinyVendasMin) continue;                      // família pouco vendida: difícil de revender
+      if (emAndamento(f.nome) >= (CFG.maxPorEspecieShiny || 1) || paradosSemFavorito(f.nome, true)) continue;   // 🔁 5.71: já tenho um desta espécie (ou parado sem favorito)
       if (m.lucro < CFG.casaShinyLucroMin || m.lucro < a.preco * CFG.casaShinyMargemMin) continue;
       if (!melhor || m.porH > melhor.m.porH) melhor = { a, f, m };
     }
@@ -2007,6 +2017,20 @@
   M.irmas = { ids: new Set(), nicks: new Set() };
   const ehIrma = (a) => !!a && ((a.vendedorId != null && M.irmas.ids.has(String(a.vendedorId))) || (a.vendedor && M.irmas.nicks.has(String(a.vendedor).toLowerCase())));
   // quantos da mesma espécie o app já tem em andamento (casas, fila de venda, vitrine e compras pendentes)
+  // 🔁 5.71 (pedido do jogador: comprava shiny sem saída — 3 Numel ✨ parados e sem favorito): quantas desta espécie (e shiny ou não)
+  // vendem por dia no mercado, pelo banco de vendas dos últimos 14 dias, na moeda da compra
+  function giroEspecie(nome, shiny, moeda) {
+    const B = (moeda === 'orb' ? M.baseOrb : M.base) || [], n0 = norm2(String(nome || '').replace(/^✨\s*/, ''));
+    if (!B.length) return null;
+    const dias = Math.max(1, Math.min(14, (Date.now() - Math.min(...B.map((v) => v.em || Date.now()))) / 86400_000));
+    const n = B.filter((v) => norm2(v.nome) === n0 && !!v.shiny === !!shiny).length;
+    return { porDia: n / dias, n, dias };
+  }
+  // os meus anúncios desta espécie parados há 24 h+ sem nenhum favorito: o mercado não quer — não compro mais dela
+  function paradosSemFavorito(nome, shiny) {
+    const n0 = norm2(String(nome || '').replace(/^✨\s*/, ''));
+    return (M.meus || []).filter((a) => a.tipo === 'pokemon' && norm2(a.ficha?.nome) === n0 && !!a.ficha?.shiny === !!shiny && Date.now() - desdeQuando(a) > 24 * 3600_000 && !favsDe(a)).length;
+  }
   function emAndamento(nome) {
     const n0 = String(nome || '').replace(/ Nv .*$/, '').trim(); if (!n0) return 0;
     const nomes = [...Object.values(E.postos || {}).filter((p) => p?.bot).map((p) => p.nome), ...(E.filaVenda || []).map((x) => x.nome), ...M.meus.filter((a) => a.tipo === 'pokemon').map((a) => a.ficha?.nome), ...Object.values(E.pendentes || {}).filter((x) => x.tipo === 'pokemon').map((x) => x.nome)];
