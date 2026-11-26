@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.67
+// @version      5.68
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -31,7 +31,7 @@
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.67';
+  const VERSAO_APP = '5.68';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -53,7 +53,7 @@
     snipeItSeg: 45, snipeItMoeda: 'gold', margemMinGemas: 0.10, cruzarMoedas: false, cambioCoinsPorGema: 0,
 
     // casas
-    casas: [2975, 3465, 818, 1016], casasOcupadas: 'manter', nivelAlvo: 420, alvoPorCasa: true,   // casasOcupadas: manter | adotar | trocar
+    casas: [], casasOcupadas: 'manter', nivelAlvo: 420, alvoPorCasa: true,   // casasOcupadas: manter | adotar | trocar   // 5.68: casas vazias por padrão (vinham as da HRNF em conta nova)
     compraNivelMax: 200, compraNotaMin: 3.6, compraPrecoMax: 60_000_000,
     evitarOutland: true,                                           // nunca compra pokémon de Outland (#2001–2999)
     // compra para casa: só o que dá muito lucro, uma busca por casa a cada X min, poucas compras por dia
