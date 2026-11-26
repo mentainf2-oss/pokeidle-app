@@ -12,6 +12,7 @@ module.exports = function pkappMain({ ipcMain, views, config, send, ctx, app, pa
   const arq = () => path.join(app.getPath('userData'), 'pkapp.json');
   let cfg = { githubToken: '', papeis: {}, avisos: true, painelNoJogo: false, parecerAvisado: {} };
   try { cfg = { ...cfg, ...JSON.parse(fs.readFileSync(arq(), 'utf8')) }; } catch {}
+  cfg.painelNoJogo = false;   // 5.70: o painel antigo saiu do jogo (todas as funções estão no Painel do app)
   const salvar = () => { try { fs.writeFileSync(arq(), JSON.stringify(cfg, null, 2)); } catch {} };
 
   const resumos = new Map();      // accId -> { em, r }
@@ -205,7 +206,7 @@ module.exports = function pkappMain({ ipcMain, views, config, send, ctx, app, pa
   });
   ipcMain.handle('poke:pkapp:token', (_e, tok) => { cfg.githubToken = String(tok || '').trim().slice(0, 200); salvar(); return estado(); });
   ipcMain.handle('poke:pkapp:avisos', (_e, on) => { cfg.avisos = !!on; salvar(); return estado(); });
-  ipcMain.handle('poke:pkapp:painel', async (_e, on) => { cfg.painelNoJogo = !!on; salvar(); for (const [id, x] of resumos) await aplicarPainel(id, x.r); return estado(); });
+  ipcMain.handle('poke:pkapp:painel', async (_e, on) => { cfg.painelNoJogo = false; salvar(); for (const [id, x] of resumos) await aplicarPainel(id, x.r); return estado(); });
   const CONTROLES = new Set(['ligar', 'simulacao', 'mod', 'fecharDia']);
   ipcMain.handle('poke:pkapp:controle', async (_e, id, acao, valor) => {
     if (!CONTROLES.has(acao)) return estado();
@@ -257,6 +258,10 @@ module.exports = function pkappMain({ ipcMain, views, config, send, ctx, app, pa
     try { fs.mkdirSync(dirLivro(), { recursive: true }); fs.writeFileSync(path.join(dirLivro(), `${String(id).replace(/[^\w-]/g, '_')}.json`), JSON.stringify(tudo)); } catch {}
     return tudo;
   }
+  // 🪞 painel antigo espelhado no Painel do app (5.70): HTML de uma aba e os cliques/mudanças devolvidos à conta
+  ipcMain.handle('poke:pkapp:espelho', async (_e, id, aba) => ponte(id, 'painelEspelho', aba));
+  ipcMain.handle('poke:pkapp:espelhoEvento', async (_e, id, aba, pkx, tipo, valor, confirmado) => ponte(id, 'painelEvento', aba, pkx, tipo, valor, !!confirmado));
+  ipcMain.handle('poke:pkapp:espelhoCss', async (_e, id) => ponte(id, 'painelCss'));
   ipcMain.handle('poke:pkapp:livroColecao', async (_e, id) => { const n = await ponte(id, 'livroDaColecao'); await sincronizarLivro(id, true); return typeof n === 'number' ? n : null; });
   ipcMain.handle('poke:pkapp:livro', async (_e, id) => {
     const out = [];

@@ -2166,7 +2166,7 @@ contextBridge.executeInMainWorld({
 });
 
 
-// ===================== PokeIdle App 5.69 (gerado por tools/montar-preload.js — não edite aqui) =====================
+// ===================== PokeIdle App 5.70 (gerado por tools/montar-preload.js — não edite aqui) =====================
 ;(() => {
   const { contextBridge: pontePk, ipcRenderer: ipcPk } = require('electron');
   // o que o script pede ao app: rede só para os sites liberados (API do Claude e precificador) e avisos
@@ -2192,7 +2192,7 @@ contextBridge.executeInMainWorld({
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.69
+// @version      5.70
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -2222,7 +2222,7 @@ contextBridge.executeInMainWorld({
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.69';
+  const VERSAO_APP = '5.70';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -6806,6 +6806,48 @@ Inclua em mods só o que muda. "deixar na hunt" = boss:false; "fazer boss" = bos
     casas: { compras: true, sniperPk: true, sniperIt: false, casas: true, boss: false },
     mercado: { compras: true, sniperPk: true, sniperIt: true, casas: false, boss: false },
   };
+  /* 🪞 ESPELHO DO PAINEL (5.70): o painel antigo saiu do jogo e mora no Painel do app de PC. O app de PC pede o HTML de uma aba
+   * (com os valores dos campos) e devolve cada clique/mudança, que é aplicado no painel de verdade (escondido) — assim TODAS
+   * as funções continuam valendo, sem reescrever cada formulário. alert/confirm viram avisos e confirmações na tela do app. */
+  function espelhoTag(raiz) { let i = 0; raiz.querySelectorAll('input,select,textarea,button,[data-tog],[data-del],[data-aba],[data-mod]').forEach((el) => { el.dataset.pkx = String(i++); }); }
+  function espelhoValores(raiz) {
+    raiz.querySelectorAll('input,select,textarea').forEach((el) => { try {
+      if (el.type === 'checkbox' || el.type === 'radio') { if (el.checked) el.setAttribute('checked', ''); else el.removeAttribute('checked'); }
+      else if (el.tagName === 'SELECT') [...el.options].forEach((o) => { if (o.selected) o.setAttribute('selected', ''); else o.removeAttribute('selected'); });
+      else if (el.tagName === 'TEXTAREA') el.textContent = el.value;
+      else if (el.type !== 'password') el.setAttribute('value', el.value);
+      else el.setAttribute('value', el.value ? '••••••••' : '');      // a chave da API nunca sai do jogo
+    } catch {} });
+  }
+  function painelEspelho(aba) {
+    if (!W) return null;
+    if (aba && ABAS.some(([k]) => k === aba)) abaAtual = aba;
+    try { pintar(); } catch (e) { console.warn('[PKApp] espelho', e); }
+    const sec = W.querySelector('#sec-' + abaAtual); if (!sec) return null;
+    espelhoTag(sec); espelhoValores(sec);
+    return { aba: abaAtual, html: sec.innerHTML };
+  }
+  async function painelEvento(aba, pkx, tipo, valor, confirmado) {
+    if (!W) return null;
+    if (aba && ABAS.some(([k]) => k === aba)) abaAtual = aba;
+    const sec = W.querySelector('#sec-' + abaAtual); if (!sec) return null;
+    let el = sec.querySelector(`[data-pkx="${Number(pkx)}"]`);
+    if (!el) { espelhoTag(sec); el = sec.querySelector(`[data-pkx="${Number(pkx)}"]`); }
+    if (!el) return { ...painelEspelho(abaAtual), avisos: ['A tela mudou enquanto você clicava — tente de novo.'] };
+    if (el.type === 'password' && tipo === 'valor' && /^•+$/.test(String(valor || ''))) return painelEspelho(abaAtual);   // não troca a chave pela máscara
+    const avisos = [], oa = window.alert, oc = window.confirm; let pediu = null;
+    window.alert = (m) => { avisos.push(String(m)); };
+    window.confirm = (m) => { if (confirmado) return true; pediu = String(m); return false; };
+    try {
+      if (tipo === 'valor') {
+        if (el.type === 'checkbox' || el.type === 'radio') el.checked = !!valor; else el.value = valor ?? '';
+        el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true }));
+      } else el.click();
+    } catch (e) { avisos.push('Erro: ' + (e?.message || e)); }
+    await dormir(400);
+    window.alert = oa; window.confirm = oc;
+    return { ...painelEspelho(abaAtual), avisos, confirmar: pediu };
+  }
   const ponteDesktop = {
     resumoConta() {
       const r24 = resumoReal(24), r7 = resumoReal(168), cb = cambioImplicito()?.taxa || 0, vg = vagasPk(), bd = (() => { try { return resultadoBossDia(); } catch { return null; } })();
@@ -6874,6 +6916,10 @@ Inclua em mods só o que muda. "deixar na hunt" = boss:false; "fazer boss" = bos
     parecerHoje: () => JSON.parse(JSON.stringify(compilarParecer(hoje(), true))),
     decisoes: (cat) => DEC.filter((x) => !cat || x.cat === cat).slice(0, 300),
     livro: () => LIVRO.slice(0, 3000),
+    painelEspelho: (aba) => painelEspelho(aba),
+    painelEvento: (aba, pkx, tipo, valor, confirmado) => painelEvento(aba, pkx, tipo, valor, confirmado),
+    painelCss: () => CSS,
+    painelAbas: () => ({ grupos: GRUPOS, nomes: NOME_ABA }),
     livroDaColecao: () => livroDaColecao(true),
     livroImportar: (arr) => { let n = 0; for (const x of Array.isArray(arr) ? arr : []) { if (!x || x.pid == null || !x.em) continue; const i = LIVRO.findIndex((y) => String(y.pid) === String(x.pid) && Math.abs(y.em - x.em) < 60_000); if (i < 0) { LIVRO.push(x); n++; } else if (x.venda && !LIVRO[i].venda) { LIVRO[i] = x; n++; } } if (n) { LIVRO.sort((a, z) => z.em - a.em); if (LIVRO.length > 3000) LIVRO.length = 3000; livroSujo = true; } return n; },
     definirIrmas(lista) {

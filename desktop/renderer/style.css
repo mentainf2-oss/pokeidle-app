@@ -1098,3 +1098,11 @@ input[type=password] { background: var(--s2); border: 1px solid var(--line-2); b
 .pk-chat-r.ok { color: #9ff0c8; } .pk-chat-r.bad { color: #ff9b9b; }
 .pk-chat-l { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 0 0; margin-top: 8px; border-top: 1px solid var(--line); font-size: 14px; }
 .pk-chat-l > span:nth-child(2) { flex: 1; min-width: 200px; }
+
+/* 🪞 painel antigo espelhado (5.70) */
+.pk-esp{display:block}
+.pk-esp .pk-sec{display:block}
+.pk-esp .cart{max-width:none}
+.pk-modal{position:fixed;inset:0;background:#0009;display:flex;align-items:center;justify-content:center;z-index:9999}
+.pk-modal .card{max-width:520px;white-space:pre-wrap}
+.pk-tabs{flex-wrap:wrap}

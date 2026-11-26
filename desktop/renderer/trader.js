@@ -2,7 +2,7 @@
 // Uma conta por vez (troca no topo): estado e controles grandes, os 4 números do dia e as abas Resumo, Decisões, Parecer, Farm e Ajustes.
 // Os números vêm do app que roda dentro de cada conta (lido a cada 30 s pelo pkapp-main.js).
 let pkEstado = null;
-let pkTab = (() => { try { const t = localStorage.getItem('pkTab'); return ['hoje', 'parecer', 'decisoes', 'mercado', 'farm', 'controle'].includes(t) ? t : 'hoje'; } catch { return 'hoje'; } })();
+let pkTab = (() => { try { const t = localStorage.getItem('pkTab'); return ['hoje', 'parecer', 'decisoes', 'mercado', 'farm', 'controle', 'compras', 'casasA', 'lucro', 'bossA', 'analise', 'claude'].includes(t) ? t : 'hoje'; } catch { return 'hoje'; } })();
 let pkFarm = null, pkFarmConta = null, pkFarmCarregando = false;
 // ícones de traço (mesmo estilo da barra lateral)
 const PK_ICO = {
@@ -10,6 +10,12 @@ const PK_ICO = {
   parecer: '<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/><path d="M10 13h6M10 17h4"/>',
   decisoes: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/>',
   mercado: '<path d="M3 9l1.5-5h15L21 9"/><path d="M4 9v11h16V9"/><path d="M3 9a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0"/><path d="M10 20v-5h4v5"/>',
+  compras: '<path d="M3 4h2l2.4 11h10.4l2.2-8H6.3"/><circle cx="9.5" cy="19" r="1.4"/><circle cx="16.5" cy="19" r="1.4"/>',
+  casasA: '<path d="M4 11.5 12 5l8 6.5"/><path d="M6 10v9h12v-9"/><path d="M10 19v-5h4v5"/>',
+  lucro: '<path d="M7 7h11l-3-3M17 17H6l3 3"/>',
+  bossA: '<path d="M4 8l4.2 4L12 5.5 15.8 12 20 8l-2 10H6z"/><path d="M6 21h12"/>',
+  analise: '<path d="M4 20h16"/><path d="M7 17v-6"/><path d="M12 17V6"/><path d="M17 17v-9"/>',
+  claude: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/>',
   farm: '<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>',
   controle: '<path d="M4 7h9"/><path d="M17 7h3"/><circle cx="15" cy="7" r="2"/><path d="M4 17h3"/><path d="M11 17h9"/><circle cx="9" cy="17" r="2"/>',
   compra: '<path d="M3 4h2l2.4 11h10.4l2.2-8H6.3"/><circle cx="9.5" cy="19" r="1.4"/><circle cx="16.5" cy="19" r="1.4"/>',
@@ -58,7 +64,7 @@ function pkSwitch(on, rot, onchange, dica) {
 
 const pkPedidos = {};
 let pkConta = (() => { try { return localStorage.getItem('pkConta') || null; } catch { return null; } })();
-const PK_ABAS = [['hoje', 'Resumo'], ['mercado', 'Mercado'], ['decisoes', 'Decisões'], ['parecer', 'Parecer'], ['farm', 'Farm'], ['controle', 'Ajustes']];
+const PK_ABAS = [['hoje', 'Resumo'], ['mercado', 'Mercado'], ['compras', 'Compras'], ['casasA', 'Casas'], ['lucro', 'Lucro'], ['bossA', 'Boss'], ['analise', 'Análise'], ['claude', 'Claude'], ['decisoes', 'Decisões'], ['parecer', 'Parecer'], ['farm', 'Farm'], ['controle', 'Ajustes']];
 function pkIr(k) { pkTab = k; try { localStorage.setItem('pkTab', k); } catch {} if (k === 'parecer') pkRel = null; if (k === 'decisoes') pkDec = null; if (k === 'mercado') pkLivro = null; if (k === 'farm') pkFarm = null; renderTrader(); }
 
 // Uma página só, de uma conta por vez: troca de conta no topo; embaixo, o estado, os números do dia e as abas.
@@ -160,8 +166,9 @@ async function renderTrader() {
   if (pkTab === 'parecer') await pkParecer(root, s, c);
   if (pkTab === 'decisoes') await pkDecisoes(root, s, c);
   if (pkTab === 'mercado') await pkMercado(root, s, c);
+  if (PK_ESP[pkTab]) await pkEspelho(root, c, pkTab);
   if (pkTab === 'farm') await pkFarmTela(root, s);
-  if (pkTab === 'controle') await pkControle(root, s, c);
+  if (pkTab === 'controle') { await pkControle(root, s, c); const h = el('h2', 'section', 'Ajustes finos e log (o painel que ficava no jogo)'); root.append(h); await pkEspelho(root, c, 'avancado'); }
   root.scrollTop = rolagem;
 }
 
@@ -309,6 +316,69 @@ async function pkMercado(root, s, c) {
   root.append(c2);
 }
 
+// ---------- 🪞 Abas do painel antigo (Compras, Casas, Lucro, Boss, Análise, Claude, e Config/Início em Ajustes) ----------
+// O painel antigo saiu do jogo: cada aba aqui mostra a mesma tela dele, lida da conta, e cada clique ou campo mudado volta para a
+// conta e vale de verdade. Confirmações (ex.: sair da simulação, ativar Gemas) aparecem aqui antes de valer.
+const PK_ESP = {
+  compras: [['compras', 'Lista de compras'], ['sniperPk', 'Sniper pokémon'], ['sniperIt', 'Sniper itens']],
+  casasA: [['casas', 'Casas']], lucro: [['opPk', 'Pokémon'], ['opIt', 'Itens']], bossA: [['boss', 'Boss'], ['prey', 'Prey']],
+  analise: [['analise', 'Mercado'], ['estudo', 'Estudo'], ['avaliar', 'Avaliar'], ['investir', 'Investir']], claude: [['claude', 'Claude']],
+  avancado: [['config', 'Config'], ['inicio', 'Início e log']],
+};
+const pkEspSub = (() => { try { return JSON.parse(localStorage.getItem('pkEspSub') || '{}'); } catch { return {}; } })();
+let pkEspCss = null, pkEspTimer = null;
+function pkEspLimpo(html) {   // o HTML vem da nossa conta, mas nada de script nem atributos on*
+  const d = new DOMParser().parseFromString(`<div>${html}</div>`, 'text/html');
+  d.querySelectorAll('script,iframe,object,embed,link,meta').forEach((x) => x.remove());
+  d.querySelectorAll('*').forEach((x) => { for (const a of [...x.attributes]) if (/^on/i.test(a.name) || (/^(href|src|xlink:href)$/i.test(a.name) && /^\s*javascript:/i.test(a.value))) x.removeAttribute(a.name); });
+  return d.body.firstChild;
+}
+function pkConfirmar(msg) {
+  return new Promise((ok) => {
+    const fundo = el('div', 'pk-modal'); const cx = el('div', 'card');
+    cx.append(el('p', null, msg)); const bts = el('div', 'actions');
+    bts.append(button('Cancelar', 'ghost', () => { fundo.remove(); ok(false); }), button('Confirmar', null, () => { fundo.remove(); ok(true); }));
+    cx.append(bts); fundo.append(cx); document.body.append(fundo);
+  });
+}
+async function pkEspelho(root, c, grupo) {
+  const subs = PK_ESP[grupo], sub = subs.some(([k]) => k === pkEspSub[grupo]) ? pkEspSub[grupo] : subs[0][0];
+  if (!pkEspCss) { const css = await window.idle.invoke('poke:pkapp:espelhoCss', c.id).catch(() => null); if (css) { pkEspCss = el('style'); pkEspCss.textContent = String(css).replace(/#pka\{[^}]*\}/, '').replace(/#pka/g, '.pk-esp') + '\n.pk-esp{--bg:#11141a;--sf:#171b23;--sf2:#1e232d;--sf3:#262c38;--bd:#2c3340;--tx:#e8ecf3;--mu:#9aa4b5;--ac:#f39ac7;--vd:#7fd6a0;--vm:#ff9494;--am:#ffd27a;--az:#8ec9ff;color:var(--tx);font-size:13px}'; document.head.append(pkEspCss); } }
+  const card = el('div', 'card');
+  if (subs.length > 1) { const ch = el('div', 'pk-chips'); for (const [k, rot] of subs) { const b = el('button', 'pk-chip' + (k === sub ? ' on' : ''), rot); b.onclick = () => { pkEspSub[grupo] = k; try { localStorage.setItem('pkEspSub', JSON.stringify(pkEspSub)); } catch {} renderTrader(); }; ch.append(b); } card.append(ch); }
+  const corpo = el('div', 'pk-esp'); card.append(corpo); root.append(card);
+  const pintarEsp = (r) => {
+    if (!r || r.html == null) { corpo.replaceChildren(el('p', 'tip', 'A conta ainda não carregou o app. Abra o jogo dela um instante.')); return; }
+    corpo.replaceChildren(pkEspLimpo(r.html));
+    for (const m of r.avisos || []) toast(m);
+  };
+  const evento = async (pkx, tipo, valor, confirmado) => {
+    let r = await window.idle.invoke('poke:pkapp:espelhoEvento', c.id, sub, pkx, tipo, valor, confirmado).catch(() => null);
+    if (r && r.confirmar && !confirmado) { if (await pkConfirmar(r.confirmar)) r = await window.idle.invoke('poke:pkapp:espelhoEvento', c.id, sub, pkx, tipo, valor, true).catch(() => null); }
+    if (r && r.aba && r.aba !== sub) { const g = Object.keys(PK_ESP).find((k) => PK_ESP[k].some(([x]) => x === r.aba)); if (g) { pkEspSub[g] = r.aba; if (g !== 'avancado' && g !== pkTab) { pkIr(g); return; } } }
+    pintarEsp(r);
+  };
+  corpo.addEventListener('click', (ev) => {
+    const alvo = ev.target.closest('[data-pkx]'); if (!alvo || !corpo.contains(alvo)) return;
+    if (/^(INPUT|SELECT|TEXTAREA)$/.test(alvo.tagName) && !/^(checkbox|radio|button|submit)$/.test(alvo.type)) return;
+    if (/^(checkbox|radio)$/.test(alvo.type)) return;     // vai pelo change
+    ev.preventDefault(); evento(alvo.dataset.pkx, 'clique');
+  });
+  corpo.addEventListener('change', (ev) => {
+    const alvo = ev.target.closest('[data-pkx]'); if (!alvo) return;
+    evento(alvo.dataset.pkx, 'valor', /^(checkbox|radio)$/.test(alvo.type) ? alvo.checked : alvo.value);
+  });
+  corpo.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && ev.target.matches('input[data-pkx]')) { ev.target.blur(); } });
+  pintarEsp(await window.idle.invoke('poke:pkapp:espelho', c.id, sub).catch(() => null));
+  // atualiza sozinho a cada 5 s enquanto ninguém está digitando
+  clearInterval(pkEspTimer);
+  pkEspTimer = setInterval(async () => {
+    if (!document.body.contains(corpo)) { clearInterval(pkEspTimer); return; }
+    if (corpo.contains(document.activeElement) && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
+    const r = await window.idle.invoke('poke:pkapp:espelho', c.id, sub).catch(() => null); if (r && document.body.contains(corpo)) pintarEsp(r);
+  }, 5000);
+}
+
 // ---------- Ajustes desta conta (módulos, papel, copiar) e do app ----------
 async function pkControle(root, s, c) {
   const r = c.r;
@@ -344,7 +414,6 @@ async function pkControle(root, s, c) {
   const op = el('div', 'pk-mods');
   op.append(
     pkSwitch(s.avisos, 'Avisos de vendas, drops raros e parecer do dia', async (on) => { pkEstado = await window.idle.invoke('poke:pkapp:avisos', on); renderTrader(); }, 'PC, celular (ntfy) e Discord — canais em Ajustes → Avisos.'),
-    pkSwitch(s.painelNoJogo, 'Mostrar o painel antigo dentro do jogo', async (on) => { pkEstado = await window.idle.invoke('poke:pkapp:painel', on); renderTrader(); }, 'O painel completo de antes, com os ajustes finos.'),
   );
   app.append(op);
   app.append(el('p', 'sub', 'Atualização automática: confere a cada 15 min e instala quando o PC fica 2 min sem uso; depois de reiniciar, cada conta volta ligada como estava.'));
