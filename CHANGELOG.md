@@ -2,6 +2,7 @@
 
 | Versão | Data | O que mudou |
 | --- | --- | --- |
+| 5.69 | 26/11/2026 | Mercado: o histórico do jogo passa a ser reconhecido como venda/compra de pokémon (o campo tipo do jogo é o da transação — por isso nada era conferido e as revendas não casavam). Venda com anúncio repetido espera o histórico em vez de chutar o preço; ✓ marca o que já foi conferido. |
 | 5.68 | 26/11/2026 | Conta nova começa sem casas configuradas (vinham as casas da HRNF por padrão); o app passa a usar as casas da própria conta. |
 | 5.67 | 26/11/2026 | Idleterino 0.3.47 mesclado (modo seguro de vídeo contra tela preta, registro, score fiel ao jogo). Planilha: corrigido o erro de JavaScript que travava o app ao salvar. Preço: todo pokémon entra no preço justo, vai ao meio em 12 h e ao rápido em 24 h; concorrente só depois de 24 h; lucro mínimo de 15%. Mercado: abas Esperando venda e Vendidos, preço da venda e da compra conferidos com o histórico do jogo, e os pokémon que ainda estão na conta ganham o preço de compra pelo histórico (até 180 dias). |
 | 5.66 | 25/11/2026 | Aba Mercado no Painel: livro de cada pokémon comprado (preço, moeda, hora, nível, origem) e da venda (preço, recebido, nível, lucro, tempo), com filtros Em estoque / Vendidos / Prejuízo. Guardado na conta e em arquivo no PC (pkapp-livro), com o histórico do jogo completando compras feitas à mão. Trava: pokémon anotado nunca é anunciado nem baixado abaixo do custo + comissão. |

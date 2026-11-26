@@ -2166,7 +2166,7 @@ contextBridge.executeInMainWorld({
 });
 
 
-// ===================== PokeIdle App 5.68 (gerado por tools/montar-preload.js — não edite aqui) =====================
+// ===================== PokeIdle App 5.69 (gerado por tools/montar-preload.js — não edite aqui) =====================
 ;(() => {
   const { contextBridge: pontePk, ipcRenderer: ipcPk } = require('electron');
   // o que o script pede ao app: rede só para os sites liberados (API do Claude e precificador) e avisos
@@ -2192,7 +2192,7 @@ contextBridge.executeInMainWorld({
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.68
+// @version      5.69
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -2222,7 +2222,7 @@ contextBridge.executeInMainWorld({
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.68';
+  const VERSAO_APP = '5.69';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -2434,8 +2434,8 @@ contextBridge.executeInMainWorld({
     if (!x && nome) { const ab = LIVRO.filter((y) => !y.venda && norm2(y.nome) === norm2(nome) && (!nv || !y.nv || y.nv <= nv) && y.em < (em || Date.now())); if (ab.length === 1) x = ab[0]; }
     if (!x) return null;
     moeda = moeda === 'orb' ? 'orb' : 'gold';
-    x.venda = { bruto: Math.round(bruto), recebe: Math.round(recebe), moeda, nv: nv || null, em: em || Date.now() };
-    const c = livroConv(x.custo, x.moeda, moeda); x.lucro = c != null ? Math.round(recebe - c) : null;
+    x.venda = { bruto: bruto != null ? Math.round(bruto) : null, recebe: recebe != null ? Math.round(recebe) : null, moeda, nv: nv || null, em: em || Date.now() };
+    const c = livroConv(x.custo, x.moeda, moeda); x.lucro = c != null && recebe != null ? Math.round(recebe - c) : null;
     livroSujo = true; return x;
   }
   // o histórico do jogo (compras e vendas da conta) completa o livro: compra feita à mão, venda que o app não viu
@@ -2605,7 +2605,13 @@ contextBridge.executeInMainWorld({
           .sort((x, z) => (x.tipo === 'pokemon' && d.includes(String(x.ficha?.level)) ? -1 : 0) - (z.tipo === 'pokemon' && d.includes(String(z.ficha?.level)) ? -1 : 0))[0];
       if (!a) return ' · compra: não achei o anúncio';
       const qtd = Number(e.qtd) || (a.tipo === 'item' ? Number((String(e.descricao || '').match(/^(\d+)\s*×/) || [])[1]) || Number(a.qtd) || 1 : 1), moeda = a.moeda;
-      const bruto = Number(e.preco ?? e.valor ?? e.total) || a.preco * qtd, recebe = Math.round(bruto * (1 - COMISSAO));
+      const porId = [e.id, e.anuncioId, e.anuncio].some((k) => k != null && String(k) === String(a.id));
+      const repetido = !porId && (M.meus || []).filter((x) => x.tipo === a.tipo && nomeA(x) && norm2(nomeA(x)) === norm2(nomeA(a))).length > 1;
+      if (!E.camposVendido || Date.now() - E.camposVendido > 86400_000) { E.camposVendido = Date.now(); log(`🔍 campos do aviso de venda: ${Object.keys(e).join(', ')}`, 'info'); }
+      E.real = { ...(E.real || {}), em: 0 };                     // lê o histórico logo: é ele que confirma o preço
+      const doEvento = Number(e.preco ?? e.valor ?? e.total ?? e.bruto) || null;
+      const bruto = doEvento || (repetido ? null : a.preco * qtd), recebe = bruto != null ? Math.round(bruto * (1 - COMISSAO)) : null;
+      if (bruto == null) { if (a.tipo === 'pokemon') livroVenda({ pid: a.pokemonId, nome: a.ficha?.nome, nv: a.ficha?.level, bruto: null, recebe: null, moeda: a.moeda }); return ' · preço: confiro no histórico do jogo (há mais de um anúncio igual)'; }
       if (a.tipo === 'pokemon') { const lv = livroVenda({ pid: a.pokemonId, nome: a.ficha?.nome, nv: a.ficha?.level, bruto, recebe, moeda }); if (lv && lv.lucro != null) return ` · comprado por ${curtoM(livroConv(lv.custo, lv.moeda, moeda), moeda)}${lv.moeda !== moeda ? ` (pago ${curtoM(lv.custo, lv.moeda)})` : ''} no Nv ${lv.nv ?? '?'} · vendido no Nv ${a.ficha?.level ?? '?'} · recebi ${curtoM(recebe, moeda)} · lucro ${lv.lucro >= 0 ? '+' : '−'}${curtoM(Math.abs(lv.lucro), moeda)}`; }
       const c = custoDoAnuncio(a);
       if (!c || c.custo == null) return ` · recebi ${curtoM(recebe, moeda)} · compra: custo desconhecido`;
@@ -2807,7 +2813,7 @@ contextBridge.executeInMainWorld({
     const comprando = CFG.mod.compras || CFG.mod.sniperIt || CFG.mod.sniperPk || CFG.tokenAutoCompra;
     if (!forcar && Date.now() - (E.real?.em || 0) < (comprando ? 10 : 30) * 60_000) return;
     const [vendas, compras] = [await lerHistoricoProprio('market.historico'), await lerHistoricoProprio('market.historicoCompras')];
-    const norm = (l, lado) => ({ id: l.id, em: l.em, desc: l.descricao, pokemonId: l.pokemonId ?? l.ficha?.id ?? null, itemId: l.itemId ?? null, qtd: Number(String(l.descricao || '').match(/^(\d+)×/)?.[1]) || l.qtd || 1, tipo: l.tipo || (l.pokemonId || l.ficha?.speciesId ? 'pokemon' : 'item'), moeda: l.moeda, bruto: l.bruto ?? l.preco ?? 0, liquido: lado === 'venda' ? l.liquido ?? liquidoVenda(l.bruto ?? l.preco ?? 0, l.moeda, l.tipo || (l.ficha ? 'pokemon' : 'item')) : null });
+    const norm = (l, lado) => ({ id: l.id, em: l.em, desc: l.descricao, pokemonId: l.pokemonId ?? l.ficha?.id ?? null, itemId: l.itemId ?? null, qtd: Number(String(l.descricao || '').match(/^(\d+)×/)?.[1]) || l.qtd || 1, tipo: (l.pokemonId != null || l.ficha) ? 'pokemon' : l.itemId != null ? 'item' : (l.tipo === 'pokemon' ? 'pokemon' : 'item'), transacao: l.tipo, moeda: l.moeda, bruto: l.bruto ?? l.preco ?? 0, liquido: lado === 'venda' ? l.liquido ?? liquidoVenda(l.bruto ?? l.preco ?? 0, l.moeda, (l.pokemonId != null || l.ficha) ? 'pokemon' : 'item') : null });
     E.real = { em: Date.now(), vendas: vendas.map((l) => norm(l, 'venda')), compras: compras.map((l) => norm(l, 'compra')) };
     persistir();
     try { livroDoHistorico(); } catch {}

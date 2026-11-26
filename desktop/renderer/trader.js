@@ -303,9 +303,9 @@ async function pkMercado(root, s, c) {
   c2.append(F.length ? pkTabela(['Pokémon', 'Compra', 'Nv compra', 'Venda', 'Nv venda', 'Recebido', 'Lucro', 'Tempo'], F.map((x) => {
     const v = x.venda;
     const lucro = x.lucro != null ? el('b', pkCls(x.lucro), `${x.lucro > 0 ? '+' : x.lucro < 0 ? '−' : ''}${pkM(Math.abs(x.lucro), v.moeda)}${x.moeda !== v.moeda ? ' *' : ''}`) : '—';
-    return pkLinha(nomeDe(x), quandoV(x.custo, x.moeda, x.em), x.nv ?? '—', quandoV(v.bruto, v.moeda, v.em), v.nv ?? '—', pkM(v.recebe, v.moeda) + (v.conf ? '' : ' ·'), lucro, pkDur(v.em - x.em));
+    return pkLinha(nomeDe(x), quandoV(x.custo, x.moeda, x.em), x.nv ?? '—', v.bruto == null ? el('span', 'muted', `conferindo no histórico… ${pkQuando(v.em)}`) : quandoV(v.bruto, v.moeda, v.em), v.nv ?? '—', v.recebe == null ? '—' : pkM(v.recebe, v.moeda) + (v.conf ? ' ✓' : ' ·'), lucro, pkDur(v.em - x.em));
   })) : el('p', 'tip', 'Nada vendido ainda.'));
-  c2.append(el('p', 'tip', 'Recebido já sem a comissão de 15%. O preço da venda é conferido com o histórico do jogo ( · = ainda não conferido). * = comprado numa moeda e vendido na outra (lucro pelo câmbio do dia). Guardado na conta e num arquivo do PC (pkapp-livro); nenhum pokémon anotado é anunciado abaixo do custo + comissão.'));
+  c2.append(el('p', 'tip', 'Recebido já sem a comissão de 15%. O preço da venda é conferido com o histórico do jogo (✓ = conferido, · = ainda não). * = comprado numa moeda e vendido na outra (lucro pelo câmbio do dia). Guardado na conta e num arquivo do PC (pkapp-livro); nenhum pokémon anotado é anunciado abaixo do custo + comissão.'));
   root.append(c2);
 }
 
