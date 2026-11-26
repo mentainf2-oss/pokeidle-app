@@ -261,7 +261,7 @@ async function pkDecisoes(root, s, c) {
 }
 
 // ---------- 📗 Mercado: livro de compras e vendas de pokémon desta conta ----------
-let pkLivro = null, pkLivroEm = 0, pkLivroFiltro = 'todos';
+let pkLivro = null, pkLivroEm = 0, pkLivroFiltro = 'vendidos';
 const pkM = (v, moeda) => (v == null || !isFinite(v) ? '—' : moeda === 'orb' ? pkG(v) : pkFmt(v));
 const pkQuando = (ms) => ms ? `${new Date(ms).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} ${pkHora(ms)}` : '—';
 const pkDur = (ms) => { const h = ms / 3600_000; return h < 1 ? `${Math.max(1, Math.round(h * 60))} min` : h < 48 ? `${h.toFixed(h < 10 ? 1 : 0)} h` : `${Math.round(h / 24)} d`; };
@@ -280,24 +280,33 @@ async function pkMercado(root, s, c) {
     kpi('Vendas com prejuízo', String(prej.length), prej.length ? 'veja no filtro Prejuízo' : 'nenhuma — a trava do livro segura o preço', prej.length ? 'bad' : 'ok'),
   );
   root.append(kp);
-  const card = el('div', 'card');
+  const origem = { sniper: 'sniper', casa: 'para casa', 'histórico': 'histórico do jogo', app: 'app' };
+  const nomeDe = (x) => { const n = el('span'); n.append(el('b', null, `${x.shiny ? '✨ ' : ''}${x.nome}`), el('small', 'muted', `  ${origem[x.origem] || x.origem || ''}`)); return n; };
+  const quandoV = (v, moeda, ms) => { const sp = el('span'); sp.append(el('b', null, pkM(v, moeda)), el('small', 'muted', `  ${pkQuando(ms)}`)); return sp; };
+  // ---- esperando venda ----
+  const c1 = el('div', 'card');
+  const t1 = el('div', 'pk-barra'); t1.append(el('h2', 'section first', `Esperando venda · ${abertos.length}`));
+  const bts = el('div', 'actions'); bts.style.gap = '8px';
+  bts.append(button('Buscar preço de compra no histórico do jogo', 'ghost', async (ev) => { const bt = ev.currentTarget; bt.disabled = true; bt.textContent = 'Lendo o histórico…'; const n = await window.idle.invoke('poke:pkapp:livroColecao', c.id).catch(() => null); toast(n == null ? 'Não consegui ler agora.' : n ? `${n} pokémon ganharam o preço de compra.` : 'Nenhum pokémon novo achado no histórico.'); pkLivro = null; renderTrader(); }),
+    button('Atualizar', 'ghost', () => { pkLivro = null; renderTrader(); }));
+  t1.append(bts); c1.append(t1);
+  c1.append(abertos.length ? pkTabela(['Pokémon', 'Comprado por', 'Nv na compra', 'Parado há'], abertos.slice(0, 400).map((x) => pkLinha(nomeDe(x), quandoV(x.custo, x.moeda, x.em), x.nv ?? '—', pkDur(Date.now() - x.em))))
+    : el('p', 'tip', 'Nenhum pokémon comprado esperando venda.'));
+  root.append(c1);
+  // ---- vendidos ----
+  const c2 = el('div', 'card');
   const chips = el('div', 'pk-chips');
-  const chip = (k, rot, n) => { const b = pkBotao(k === 'todos' ? 'mercado' : k === 'abertos' ? 'casa' : k === 'vendidos' ? 'venda' : 'pulou', `${rot} · ${n}`, 'pk-chip' + (pkLivroFiltro === k ? ' on' : ''), () => { pkLivroFiltro = k; renderTrader(); }); return b; };
-  chips.append(chip('todos', 'Todos', L.length), chip('abertos', 'Em estoque', abertos.length), chip('vendidos', 'Vendidos', vendidos.length), chip('prejuizo', 'Prejuízo', prej.length));
-  const top = el('div', 'pk-barra'); top.append(chips, button('Atualizar', 'ghost', () => { pkLivro = null; renderTrader(); }));
-  card.append(top);
-  const F = (pkLivroFiltro === 'abertos' ? abertos : pkLivroFiltro === 'vendidos' ? vendidos : pkLivroFiltro === 'prejuizo' ? prej : L).slice(0, 400);
-  const origem = { sniper: 'sniper', casa: 'para casa', 'histórico': 'à mão / histórico', app: 'app' };
-  card.append(F.length ? pkTabela(['Pokémon', 'Compra', 'Nv compra', 'Venda', 'Nv venda', 'Recebido', 'Lucro', 'Tempo'], F.map((x) => {
-    const nome = el('span'); nome.append(el('b', null, `${x.shiny ? '✨ ' : ''}${x.nome}`), el('small', 'muted', `  ${origem[x.origem] || x.origem || ''}`));
-    const compra = el('span'); compra.append(el('b', null, pkM(x.custo, x.moeda)), el('small', 'muted', `  ${pkQuando(x.em)}`));
+  const chip = (k, rot, n) => pkBotao(k === 'vendidos' ? 'venda' : 'pulou', `${rot} · ${n}`, 'pk-chip' + ((pkLivroFiltro === 'prejuizo') === (k === 'prejuizo') ? ' on' : ''), () => { pkLivroFiltro = k; renderTrader(); });
+  chips.append(chip('vendidos', 'Todos', vendidos.length), chip('prejuizo', 'Com prejuízo', prej.length));
+  const t2 = el('div', 'pk-barra'); t2.append(el('h2', 'section first', `Vendidos · ${vendidos.length}`), chips); c2.append(t2);
+  const F = (pkLivroFiltro === 'prejuizo' ? prej : vendidos).slice().sort((a, z) => z.venda.em - a.venda.em).slice(0, 400);
+  c2.append(F.length ? pkTabela(['Pokémon', 'Compra', 'Nv compra', 'Venda', 'Nv venda', 'Recebido', 'Lucro', 'Tempo'], F.map((x) => {
     const v = x.venda;
-    const venda = v ? (() => { const sp = el('span'); sp.append(el('b', null, pkM(v.bruto, v.moeda)), el('small', 'muted', `  ${pkQuando(v.em)}`)); return sp; })() : pkPill('em estoque', '');
-    const lucro = v && x.lucro != null ? el('b', pkCls(x.lucro), `${x.lucro > 0 ? '+' : x.lucro < 0 ? '−' : ''}${pkM(Math.abs(x.lucro), v.moeda)}`) : '—';
-    return pkLinha(nome, compra, x.nv ?? '—', venda, v ? v.nv ?? '—' : '—', v ? pkM(v.recebe, v.moeda) : '—', lucro, pkDur((v ? v.em : Date.now()) - x.em));
-  })) : el('p', 'tip', 'Nada anotado ainda. Cada pokémon comprado (pelo app, à mão ou visto no histórico do jogo) entra aqui com preço, hora e nível; a venda é anotada depois, com o nível e o lucro já sem a comissão de 15%.'));
-  card.append(el('p', 'tip', 'Guardado na conta e num arquivo do PC (pasta do app, pkapp-livro). O app usa este livro como trava: nenhum pokémon anotado é anunciado nem baixado abaixo do custo de compra + comissão.'));
-  root.append(card);
+    const lucro = x.lucro != null ? el('b', pkCls(x.lucro), `${x.lucro > 0 ? '+' : x.lucro < 0 ? '−' : ''}${pkM(Math.abs(x.lucro), v.moeda)}${x.moeda !== v.moeda ? ' *' : ''}`) : '—';
+    return pkLinha(nomeDe(x), quandoV(x.custo, x.moeda, x.em), x.nv ?? '—', quandoV(v.bruto, v.moeda, v.em), v.nv ?? '—', pkM(v.recebe, v.moeda) + (v.conf ? '' : ' ·'), lucro, pkDur(v.em - x.em));
+  })) : el('p', 'tip', 'Nada vendido ainda.'));
+  c2.append(el('p', 'tip', 'Recebido já sem a comissão de 15%. O preço da venda é conferido com o histórico do jogo ( · = ainda não conferido). * = comprado numa moeda e vendido na outra (lucro pelo câmbio do dia). Guardado na conta e num arquivo do PC (pkapp-livro); nenhum pokémon anotado é anunciado abaixo do custo + comissão.'));
+  root.append(c2);
 }
 
 // ---------- Ajustes desta conta (módulos, papel, copiar) e do app ----------

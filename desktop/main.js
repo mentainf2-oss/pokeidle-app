@@ -17,6 +17,45 @@ app.commandLine.appendSwitch('js-flags', '--max-semi-space-size=1');
 
 // Pasta de dados alternativa (testes sem mexer na instalação de verdade).
 if (process.env.IDLETERINO_DATA) app.setPath('userData', process.env.IDLETERINO_DATA);
+
+// ---------- 🖥️ MODO SEGURO DE VÍDEO + REGISTRO (25/11/2026: tela preta em vários PCs desde a manhã) ----------
+// Janela inteira preta (nem a barra lateral) e contas "travando" juntas = o processo de VÍDEO (GPU), que é um só para
+// todas as janelas do app, travou ou caiu — começou com o jogo v50 (Pokédex de 1.025 espécies, Gigantamax novos).
+// O app se cura sozinho: se a tela não desenha nos primeiros 30 s, ou se o processo de vídeo cai 2× em 10 min, ele
+// reabre com a aceleração de vídeo DESLIGADA (o Chrome desenha pelo processador). Dá para religar em Ajustes.
+// E tudo vai para um registro (logs/idleterino.log) que a pessoa pode mandar.
+const logArq = () => path.join(app.getPath('userData'), 'logs', 'idleterino.log');
+function logApp(msg) {
+  try {
+    fs.mkdirSync(path.dirname(logArq()), { recursive: true });
+    fs.appendFileSync(logArq(), `${new Date().toISOString()} v${app.getVersion()} ${msg}\n`);
+    if (fs.statSync(logArq()).size > 512 * 1024) fs.writeFileSync(logArq(), fs.readFileSync(logArq(), 'utf8').slice(-256 * 1024));
+  } catch {}
+}
+const videoArq = () => path.join(app.getPath('userData'), 'video-seguro.json');
+let videoSeguro = null;
+try { videoSeguro = JSON.parse(fs.readFileSync(videoArq(), 'utf8')); } catch {}
+if (videoSeguro && videoSeguro.ligado) app.disableHardwareAcceleration();
+function ligarVideoSeguro(motivo) {
+  if (videoSeguro && videoSeguro.ligado) return false; // já está no modo seguro: não fica reabrindo
+  videoSeguro = { ligado: true, motivo, em: Date.now() };
+  try { fs.writeFileSync(videoArq(), JSON.stringify(videoSeguro)); } catch {}
+  logApp(`MODO SEGURO DE VÍDEO ligado: ${motivo}. Reabrindo o app.`);
+  app.relaunch();
+  app.exit(0);
+  return true;
+}
+const quedasGpu = [];
+app.on('child-process-gone', (_e, d) => {
+  logApp(`processo ${d.type}${d.name ? ` (${d.name})` : ''} saiu: ${d.reason}, código ${d.exitCode}`);
+  if (d.type === 'GPU' && d.reason !== 'clean-exit') {
+    quedasGpu.push(Date.now());
+    while (quedasGpu.length && Date.now() - quedasGpu[0] > 10 * 60 * 1000) quedasGpu.shift();
+    if (quedasGpu.length >= 2) ligarVideoSeguro(`o processo de vídeo caiu ${quedasGpu.length}× em 10 min`);
+  }
+});
+app.on('render-process-gone', (_e, wc, d) => { try { logApp(`página saiu: ${d.reason} · ${String(wc.getURL()).slice(0, 80)}`); } catch {} });
+process.on('uncaughtException', (e) => { logApp(`erro no processo principal: ${String(e && e.stack || e).slice(0, 600)}`); });
 // Twitch e Kick recusam login de navegador desconhecido: o app se apresenta como o Chrome que ele é.
 // As contas do PokeIdle usam a identificação original (o Google aceita o login com ela; ver pokeidle.js).
 const ORIGINAL_UA = app.userAgentFallback;
@@ -53,26 +92,35 @@ function openOutside(url) {
   lastOutside = Date.now();
   shell.openExternal(url).catch(() => {});
 }
+const sessoesComDownload = new WeakSet();
 app.on('web-contents-created', (_e, wc) => {
   // Ferramentas de desenvolvedor fechadas no app instalado: ninguém abre o console de uma conta
   // para copiar cookies ou injetar código.
   if (app.isPackaged) wc.on('devtools-opened', () => wc.closeDevTools());
   // Nenhuma página baixa programa (exe, scripts, instaladores) pelo app.
-  wc.session.on('will-download', (event, item) => {
-    if (/\.(exe|msi|bat|cmd|com|scr|ps1|vbs|js|jar|dll|appimage|deb|sh|apk|dmg|pkg)$/i.test(item.getFilename())) return event.preventDefault();
-    // PokeIdle App: a planilha de vendas da hora vai calada para Documentos\PokeIdle App\planilhas (sem janela de salvar);
-    // guarda 14 dias e apaga as mais velhas
-    // (qualquer planilha .csv/.xlsx das contas do PokeIdle — a do app e a que o próprio jogo gera ao pedir o CSV do mercado)
-    if (/\.(csv|xlsx)$/i.test(item.getFilename()) && /^persist:poke-/.test(String((trustFor(wc) || {}).partition || '')) || /^pokeidle-vendas-.*\.csv$/i.test(item.getFilename())) {
+  // 5.67: um ouvinte de download por SESSÃO (antes era um por página: com a página fechada, o ouvinte velho chamava a página
+  // destruída e dava o erro de JavaScript do processo principal ao salvar a planilha, travando o app)
+  const sess = wc.session;
+  if (sess && !sessoesComDownload.has(sess)) {
+    sessoesComDownload.add(sess);
+    const contaPoke = () => { try { return /[\\/]Partitions[\\/]poke-/i.test(String(sess.storagePath || '')) || /^persist:poke-/.test(String((trustFor(wc) || {}).partition || '')); } catch { return /[\\/]Partitions[\\/]poke-/i.test(String(sess.storagePath || '')); } };
+    sess.on('will-download', (event, item) => {
       try {
-        let pasta = path.join(app.getPath('documents'), 'PokeIdle App', 'planilhas');
-        try { fs.mkdirSync(pasta, { recursive: true }); } catch { pasta = path.join(app.getPath('userData'), 'planilhas'); fs.mkdirSync(pasta, { recursive: true }); }
-        item.setSavePath(path.join(pasta, item.getFilename().replace(/[\\/:*?"<>|]/g, '_')));
-        const lim = Date.now() - 14 * 86400_000;
-        for (const f of fs.readdirSync(pasta)) { const fp = path.join(pasta, f); try { if (/\.csv$/i.test(f) && fs.statSync(fp).mtimeMs < lim) fs.unlinkSync(fp); } catch {} }
-      } catch {}
-    }
-  });
+        const nome = item.getFilename();
+        // Nenhuma página baixa programa (exe, scripts, instaladores) pelo app.
+        if (/\.(exe|msi|bat|cmd|com|scr|ps1|vbs|js|jar|dll|appimage|deb|sh|apk|dmg|pkg)$/i.test(nome)) return event.preventDefault();
+        // PokeIdle App: a planilha .csv/.xlsx das contas vai calada para Documentos\PokeIdle App\planilhas (sem janela de salvar);
+        // guarda 14 dias e apaga as mais velhas
+        if ((/\.(csv|xlsx)$/i.test(nome) && contaPoke()) || /^pokeidle-vendas-.*\.csv$/i.test(nome)) {
+          let pasta = path.join(app.getPath('documents'), 'PokeIdle App', 'planilhas');
+          try { fs.mkdirSync(pasta, { recursive: true }); } catch { pasta = path.join(app.getPath('userData'), 'planilhas'); fs.mkdirSync(pasta, { recursive: true }); }
+          item.setSavePath(path.join(pasta, nome.replace(/[\\/:*?"<>|]/g, '_')));
+          const lim = Date.now() - 14 * 86400_000;
+          for (const f of fs.readdirSync(pasta)) { const fp = path.join(pasta, f); try { if (/\.csv$/i.test(f) && fs.statSync(fp).mtimeMs < lim) fs.unlinkSync(fp); } catch {} }
+        }
+      } catch (e) { try { logApp(`download: ${String((e && e.message) || e).slice(0, 200)}`); } catch {} }
+    });
+  }
   // Páginas não podem trocar de janela para endereços estranhos (file://, javascript:, etc.).
   wc.on('will-attach-webview', (event) => event.preventDefault());
   // Nenhuma página segura o fechamento ("Deseja sair do site?"): uma live escondida da Kick fazia
@@ -317,6 +365,13 @@ function setupAutoUpdate() {
 ipcMain.handle('app:state', () => appState());
 ipcMain.handle('app:platform', (_e, ns, on) => { if (modules[ns]) setPlatform(ns, on); return appState(); });
 ipcMain.handle('app:autostart', (_e, on) => { try { setOpenAtLogin(!!on); } catch {} return appState(); });
+// 🖥️ Modo seguro de vídeo: ver/religar a aceleração (reabre o app) e abrir a pasta do registro.
+ipcMain.handle('app:video', (_e, o) => {
+  if (o && o.religar) { try { fs.unlinkSync(videoArq()); } catch {} logApp('aceleração de vídeo religada pela pessoa'); app.relaunch(); app.exit(0); return null; }
+  if (o && o.desligar) { ligarVideoSeguro('desligada pela pessoa em Ajustes'); return null; }
+  if (o && o.log) { try { fs.mkdirSync(path.dirname(logArq()), { recursive: true }); if (!fs.existsSync(logArq())) logApp('registro criado'); shell.showItemInFolder(logArq()); } catch {} return null; }
+  return { seguro: !!(videoSeguro && videoSeguro.ligado), motivo: videoSeguro && videoSeguro.motivo, em: videoSeguro && videoSeguro.em };
+});
 ipcMain.handle('app:introDone', () => { config.lastSeenVersion = app.getVersion(); firstRun = false; saveConfig(); return appState(); });
 ipcMain.handle('app:quit', quitApp);
 ipcMain.handle('app:checkUpdate', async () => (procurarAgora ? procurarAgora() : { status: 'dev' }));
@@ -467,6 +522,19 @@ app.whenReady().then(() => {
   mainWin.setMenuBarVisibility(false);
   for (const ev of ['enter-full-screen', 'leave-full-screen']) mainWin.on(ev, () => send('app:state', appState()));
   mainWin.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  // 🖥️ A tela desenhou? A janela avisa ("app:pintou") de dentro de um quadro de desenho (requestAnimationFrame): com o
+  // vídeo travado esse quadro nunca vem. 30 s sem ele, com a janela À VISTA = tela preta → modo seguro de vídeo.
+  let pintou = false;
+  ipcMain.handle('app:pintou', () => { if (process.env.IDLETERINO_TESTE_TELA_PRETA && !(videoSeguro && videoSeguro.ligado)) return true; // só nos testes: finge que não desenhou
+    if (!pintou) logApp(`tela desenhou${videoSeguro && videoSeguro.ligado ? ' (modo seguro de vídeo)' : ''}`); pintou = true; return true; });
+  setTimeout(() => {
+    if (pintou || !mainWin || mainWin.isDestroyed() || !mainWin.isVisible() || mainWin.isMinimized()) return;
+    logApp('a tela não desenhou em 30 s depois de abrir');
+    ligarVideoSeguro('a tela não desenhou em 30 s ao abrir (tela preta)');
+  }, 30 * 1000);
+  mainWin.webContents.on('render-process-gone', (_e, d) => { logApp(`janela principal caiu: ${d.reason}`); if (!mainWin.isDestroyed()) setTimeout(() => { try { mainWin.reload(); } catch {} }, 1500); });
+  mainWin.webContents.on('unresponsive', () => logApp('janela principal sem resposta'));
+  mainWin.webContents.on('responsive', () => logApp('janela principal voltou a responder'));
   for (const m of Object.values(modules)) m.setMain(mainWin);
   poke.setMain(mainWin);
   // Fechar a janela não para nada: o app continua na bandeja.

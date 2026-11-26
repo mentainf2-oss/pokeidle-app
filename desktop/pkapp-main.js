@@ -257,6 +257,7 @@ module.exports = function pkappMain({ ipcMain, views, config, send, ctx, app, pa
     try { fs.mkdirSync(dirLivro(), { recursive: true }); fs.writeFileSync(path.join(dirLivro(), `${String(id).replace(/[^\w-]/g, '_')}.json`), JSON.stringify(tudo)); } catch {}
     return tudo;
   }
+  ipcMain.handle('poke:pkapp:livroColecao', async (_e, id) => { const n = await ponte(id, 'livroDaColecao'); await sincronizarLivro(id, true); return typeof n === 'number' ? n : null; });
   ipcMain.handle('poke:pkapp:livro', async (_e, id) => {
     const out = [];
     for (const a of accounts()) { if (id && a.id !== id) continue; const L = await sincronizarLivro(a.id, true), x = resumos.get(a.id); for (const d of L || []) out.push({ conta: (x && x.r && x.r.nick) || a.name, contaId: a.id, ...d }); }
