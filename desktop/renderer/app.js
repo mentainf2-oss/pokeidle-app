@@ -1388,6 +1388,7 @@ async function procurarAtualizacao(ev) {
     else if (r.status === 'nova') toast(`Versão ${r.version} encontrada — baixando. Quando terminar, aparece "Atualizar agora" no Início (ou instala sozinho em até 30 min).`);
     else if (r.status === 'baixando') toast(`Baixando a versão ${r.version} (${r.percent}%) — já já fica pronta.`);
     else if (r.status === 'atual') toast('Você já está na versão mais nova.');
+    else if (r.status === 'montando') toast('A versão nova ainda está sendo montada no GitHub — tente de novo em uns 5 minutos.');
     else if (r.status === 'dev') toast('Modo de desenvolvimento: sem atualização automática.');
     else toast('Não consegui conferir agora: ' + (r.erro || 'erro desconhecido'));
   } catch (e) { toast('Não consegui conferir agora.'); }

@@ -357,7 +357,7 @@ function setupAutoUpdate() {
       const v = r && r.updateInfo && r.updateInfo.version;
       if (v && newer(v, app.getVersion())) return { status: 'nova', version: v };
       return { status: 'atual', version: app.getVersion() };
-    } catch (e) { return { status: 'erro', erro: String((e && e.message) || e).slice(0, 160) }; }
+    } catch (e) { const m = String((e && e.message) || e); if (/404|latest\.yml|Cannot find/i.test(m)) return { status: 'montando' }; return { status: 'erro', erro: m.slice(0, 160) }; }
   };
 }
 

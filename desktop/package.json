@@ -34,7 +34,7 @@
         "provider": "github",
         "owner": "mentainf2-oss",
         "repo": "pokeidle-app",
-        "releaseType": "release"
+        "releaseType": "draft"
       }
     ],
     "files": [

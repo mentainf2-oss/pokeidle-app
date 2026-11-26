@@ -55,3 +55,15 @@ jobs:
         run: npx electron-builder --linux --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # A versão só aparece para o app instalado depois que Windows e Linux subiram TUDO (latest.yml incluso).
+  # Antes, a do Linux publicava primeiro e o "Procurar atualização" dava erro (faltava o latest.yml do Windows).
+  publicar:
+    needs: [versao, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publica a versão
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "v${{ needs.versao.outputs.v }}" --repo "${{ github.repository }}" --draft=false --latest
+
