@@ -2166,7 +2166,7 @@ contextBridge.executeInMainWorld({
 });
 
 
-// ===================== PokeIdle App 5.79 (gerado por tools/montar-preload.js — não edite aqui) =====================
+// ===================== PokeIdle App 5.80 (gerado por tools/montar-preload.js — não edite aqui) =====================
 ;(() => {
   const { contextBridge: pontePk, ipcRenderer: ipcPk } = require('electron');
   // o que o script pede ao app: rede só para os sites liberados (API do Claude e precificador) e avisos
@@ -2192,7 +2192,7 @@ contextBridge.executeInMainWorld({
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.79
+// @version      5.80
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -2222,7 +2222,7 @@ contextBridge.executeInMainWorld({
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.79';
+  const VERSAO_APP = '5.80';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -3076,11 +3076,25 @@ contextBridge.executeInMainWorld({
   // referência em Gemas: só vendas reais da mesma espécie e mesmo brilho, com o mesmo ajuste de nota/potência/IV
   // a ficha completa vai para o precificador (30 dias de vendas em Gemas); sem ficha, vendas que o app coletou
   const fichaMin = (f) => (f ? { speciesId: f.speciesId ?? f.especieId ?? null, nome: f.nome, level: f.level, potencia: f.potencia, quality: f.quality, shiny: !!f.shiny, ivs: f.ivs, nota: f.nota, tmElemental: f.tmElemental || null, tmAoe: !!f.tmAoe } : null);
+  /* 5.80 (pedido do jogador: Numel ✨ não vendiam): o precificador sobe o preço com o nível (Poder no PvE), mas tem espécie que o
+   * mercado paga só pela nota — Numel ✨ Nv 1.453 vendeu por 1.062 e o mesmo Nv 40 por 940. Então o preço em Gemas tem um TETO:
+   * o que essa espécie (shiny ou não) vendeu de verdade com nota parecida (±0,35), em qualquer nível, nos últimos 14 dias. */
+  function tetoDaEspecie(nome, shiny, nota) {
+    const n0 = norm2(String(nome || '').replace(/^✨\s*/, '')), lim = Date.now() - 14 * 86400_000;
+    const V = (M.baseOrb || []).filter((v) => v.em >= lim && norm2(v.nome) === n0 && !!v.shiny === !!shiny && (nota == null || v.nota == null || Math.abs(v.nota - nota) <= 0.35)).map((v) => v.preco).sort((a, z) => a - z);
+    if (V.length < 3) return null;
+    const q = (p) => V[Math.min(V.length - 1, Math.floor(p * (V.length - 1) + 0.5))];
+    return { n: V.length, p25: q(0.25), p50: q(0.5), p75: q(0.75) };
+  }
   function precoGemas(nome, nv, shiny, pot = 1, nota = null, iv = null, ficha = null) {
     const alvo = fatores(nota, pot, iv);
     if (ficha) {
       const r = precoPrecificador({ ...ficha, level: Math.round(nv || ficha.level) });
-      if (r) return { preco: r.justo, rapido: r.rapido, esperar: r.esperar, base: r.justo, n: Math.max(r.nFamilia, Math.round(r.neff)), como: `precificador${r.confianca ? `, confiança ${r.confianca}%` : ''}`, fatores: alvo, prc: r };
+      if (r) {
+        const t = tetoDaEspecie(nome, shiny, nota ?? ficha.nota);
+        const rr = t && r.justo > t.p75 ? { ...r, justo: t.p75, rapido: Math.min(r.rapido, t.p50), esperar: Math.min(r.esperar, Math.round(t.p75 * 1.15)), teto: t } : r;
+        return { preco: rr.justo, rapido: rr.rapido, esperar: rr.esperar, base: rr.justo, n: Math.max(rr.nFamilia, Math.round(rr.neff)), como: `precificador${rr.confianca ? `, confiança ${rr.confianca}%` : ''}${rr.teto ? ` · teto: ${rr.teto.n} vendas da espécie com nota parecida (${rr.teto.p50}/${rr.teto.p75})` : ''}`, fatores: alvo, prc: rr };
+      }
     }
     const limpo = (v) => v.preco / fatores(v.nota, v.pot, v.iv).total;
     const b = M.baseOrb.filter((v) => v.nome === nome && v.shiny === !!shiny);
@@ -4480,7 +4494,7 @@ contextBridge.executeInMainWorld({
       const h = (Date.now() - desdeQuando(a)) / 3600_000;
       const escada = (justo, rap) => (h < 12 ? justo : h < 24 ? Math.round((justo + rap) / 2) : rap);
       const fase = h < 12 ? 'preço justo (até 12 h)' : h < 24 ? 'meio do justo e do rápido (12–24 h)' : 'preço rápido (24 h+)';
-      if (a.moeda === 'orb') { const r = precoPrecificador(f), fg = fatorGemasAgora(); if (!r) return null; const rap = Math.round(r.rapido * fg); return { preco: Math.max(1, escada(r.justo, rap)), justo: r.justo, rapido: rap, h, ref: `precificador ${r.rapido}/${r.justo}/${r.esperar} 🔮${fg < 1 ? ` × ${fg} (giro)` : ''} — ${fase}` }; }
+      if (a.moeda === 'orb') { let r = precoPrecificador(f), fg = fatorGemasAgora(); if (!r) return null; { const t = tetoDaEspecie(f.nome, f.shiny, f.nota); if (t && r.justo > t.p75) r = { ...r, justo: t.p75, rapido: Math.min(r.rapido, t.p50), esperar: Math.min(r.esperar, Math.round(t.p75 * 1.15)) }; } const rap = Math.round(r.rapido * fg); return { preco: Math.max(1, escada(r.justo, rap)), justo: r.justo, rapido: rap, h, ref: `precificador ${r.rapido}/${r.justo}/${r.esperar} 🔮${fg < 1 ? ` × ${fg} (giro)` : ''} — ${fase}` }; }
       const r = precoMercado(f.nome, f.level, f.nota, f.potencia, a.ficha?.ivTotal ?? Object.values(f.ivs || {}).reduce((x, y) => x + y, 0)); if (!r || r.como !== 'espécie' || r.n < 3) return null;
       const fr = fatorRapidoAgora(), rap = Math.round(r.preco * fr); return { preco: escada(r.preco, rap), justo: r.preco, rapido: rap, h, ref: `mercado ${curto(r.preco)} × ${fr}${emGiro() ? ' (giro)' : ''} — ${fase}` };
     }

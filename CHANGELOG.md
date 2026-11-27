@@ -2,6 +2,7 @@
 
 | Versão | Data | O que mudou |
 | --- | --- | --- |
+| 5.80 | 27/11/2026 | Preço em Gemas com teto pelo que a espécie vende de verdade: o precificador subia o preço com o nível, mas há espécies (ex.: Numel ✨) que o mercado paga só pela nota. Agora justo ≤ 75% das vendas da espécie com nota parecida (14 dias) e rápido ≤ a mediana — vale para anunciar, baixar preço e para o sniper decidir se está barato. |
 | 5.79 | 27/11/2026 | Giro da vitrine: pokémon anunciado há mais de 48 h sem nenhum favorito sai e volta para o fim da fila (30 min depois, como anúncio novo); quem tem favorito fica. Um por vez, a cada 30 min. O reanúncio continua a escada de preço de onde parou. |
 | 5.78 | 27/11/2026 | Relatório do boss: drops que a conta comprou (sniper de itens/revenda) têm o custo descontado do lucro do boss. |
 | 5.77 | 27/11/2026 | Histórico: página que demora ganha uma 2ª tentativa antes de parar (e o log diz onde parou); "Fragmento de Z-Move" reconhecido como TM Disk Piece no relatório do boss. |
