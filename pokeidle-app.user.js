@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.74
+// @version      5.75
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -31,7 +31,7 @@
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.74';
+  const VERSAO_APP = '5.75';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -652,6 +652,12 @@
       recebidoGemas: Math.round(recebidoG), estoqueGemas: Math.round(estoqueG), custoTokensUsadosGemas: Math.round(custoUsadosG),
       lucroGemas: Math.round(recebidoG + estoqueG - custoUsadosG), lucroPorToken: usados ? +((recebidoG + estoqueG - custoUsadosG) / usados).toFixed(2) : null,
     };
+    // desde o começo, pelo contador do próprio app (o histórico do jogo só guarda os registros mais recentes)
+    const B = E.boss || { lutas: 0, drops: {} };
+    const dropsTot = Object.entries(B.drops || {}).map(([id, n]) => ({ nome: nomeDe(Number(id)), qtd: n, valor: Math.round(n * precoGemaItem(id) * (1 - COMISSAO)) }));
+    const valorTot = dropsTot.reduce((t, d) => t + d.valor, 0), precoTok = r.tokens.medioEmGemas || M.resumo?.[ITEM.TOKEN]?.minOrb || 5;
+    r.desdeComeco = { lutas: B.lutas || 0, vitorias: B.vitorias || 0, drops: dropsTot, valorDrops: valorTot, precoToken: precoTok, custoTokens: Math.round((B.lutas || 0) * precoTok), lucro: Math.round(valorTot - (B.lutas || 0) * precoTok), porToken: B.lutas ? +((valorTot - B.lutas * precoTok) / B.lutas).toFixed(2) : null };
+    r.historicoCurto = r.desde > Date.now() - 4 * 86400_000;
     E.relBoss = r; persistir();
     log(`👑 relatório do boss (histórico ${r.completo ? 'completo' : 'parcial'}): ${qtdTok} tokens comprados a ${r.tokens.medioEmGemas} 🔮 em média; drops renderam ${fmt(r.recebidoGemas)} 🔮 + ${fmt(r.estoqueGemas)} 🔮 em estoque; lucro ${r.lucroGemas >= 0 ? '+' : ''}${fmt(r.lucroGemas)} 🔮`, 'ok');
     return r;

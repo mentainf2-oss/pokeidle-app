@@ -334,7 +334,18 @@ async function pkRelBoss(root, c) {
     bt.disabled = false;
     const r = x && x.ultimo;
     if (!r) { corpo.append(el('p', 'tip', 'Ainda não calculado. Clique em "Calcular agora": o app lê todas as páginas do seu histórico de compras e vendas.')); return; }
-    const t = r.tokens;
+    const t = r.tokens, D = r.desdeComeco;
+    if (D) {
+      const kd = el('div', 'pk-kpis');
+      const kpi0 = (rot, val, sub, cls) => { const b = el('div', 'pk-kpi'); b.append(el('span', null, rot), el('b', cls || null, val)); if (sub) b.append(el('small', null, sub)); return b; };
+      kd.append(
+        kpi0('Desde o começo: lutas', pkFmt(D.lutas), `${pkFmt(D.vitorias)} vitórias · 1 token por luta`),
+        kpi0('Drops (preço de agora)', G(D.valorDrops), D.drops.map((d) => `${d.qtd} ${d.nome}`).join(' · ')),
+        kpi0('Tokens usados', G(D.custoTokens), `${pkFmt(D.lutas)} × ${D.precoToken} 🔮 (preço médio)`),
+        kpi0('Lucro do boss desde o começo', `${D.lucro >= 0 ? '+' : '−'}${pkG(Math.abs(D.lucro))}`, D.porToken != null ? `${D.porToken} 🔮 por token` : '', pkCls(D.lucro)),
+      );
+      corpo.append(el('h3', 'section', 'Desde o começo (contador do app: cada luta e cada drop)'), kd, el('h3', 'section', `Pelo histórico do jogo${r.historicoCurto ? ' — o jogo só guarda os registros mais recentes' : ''}`));
+    }
     const kp = el('div', 'pk-kpis');
     const kpi = (rot, val, sub, cls) => { const b = el('div', 'pk-kpi'); b.append(el('span', null, rot), el('b', cls || null, val)); if (sub) b.append(el('small', null, sub)); return b; };
     kp.append(
@@ -346,7 +357,7 @@ async function pkRelBoss(root, c) {
     corpo.append(kp);
     corpo.append(pkTabela(['Drop', 'Vendidos', 'Recebido em Gemas', 'Recebido em Coins', 'Em estoque', 'Vale (preço de agora)'], r.drops.sort((a, z) => (z.orb.liquido + z.gold.liquido / (r.cambio || 1e9)) - (a.orb.liquido + a.gold.liquido / (r.cambio || 1e9))).map((d) =>
       pkLinha(el('b', null, d.nome), pkFmt(d.qtd), d.orb.liquido ? G(d.orb.liquido) : '—', d.gold.liquido ? C(d.gold.liquido) : '—', pkFmt(d.estoque || 0), d.estoqueValor ? G(d.estoqueValor) : '—'))));
-    corpo.append(el('p', 'tip', `Histórico ${r.completo ? 'completo' : 'parcial (o jogo não devolveu todas as páginas)'} desde ${pkQuando(r.desde)} · calculado ${pkQuando(r.em)}. Recebido já sem a comissão de 15%; Coins convertidos pelo câmbio de ${r.cambio ? pkFmt(Math.round(r.cambio)) : '?'} por Gema. Tokens usados = comprados − revendidos − ${pkFmt(t.noInventario)} no inventário; o custo deles vai pelo preço médio. Drops que você tirou antes do primeiro token comprado também entram.`));
+    corpo.append(el('p', 'tip', `Histórico do jogo desde ${pkQuando(r.desde)}${r.historicoCurto ? ' (é o que o jogo guarda)' : ''} · calculado ${pkQuando(r.em)}. Recebido já sem a comissão de 15%; Coins convertidos pelo câmbio de ${r.cambio ? pkFmt(Math.round(r.cambio)) : '?'} por Gema. Tokens usados = comprados − revendidos − ${pkFmt(t.noInventario)} no inventário; o custo deles vai pelo preço médio. Drops que você tirou antes do primeiro token comprado também entram.`));
   }
   await atualizar();
   clearInterval(pkRelTimer); pkRelTimer = setInterval(atualizar, 4000);

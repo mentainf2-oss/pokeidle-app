@@ -2,6 +2,7 @@
 
 | Versão | Data | O que mudou |
 | --- | --- | --- |
+| 5.75 | 27/11/2026 | Relatório do boss: soma também desde o começo, pelo contador do app (cada luta = 1 token, cada drop pelo preço de agora), porque o histórico do jogo só guarda os registros mais recentes. |
 | 5.74 | 27/11/2026 | Boss: relatório pelo histórico completo da conta (todas as páginas de compras e vendas): tokens comprados, preço médio em cada moeda, drops vendidos por item, o que ainda está em estoque pelo preço de agora, e o lucro do boss. Fica na aba Boss do Painel. |
 | 5.73 | 27/11/2026 | XP Share: o jogo não deixa pôr em quem está numa casa — agora vai para quem espera vaga numa casa (fila) e, depois, para o pokémon da coleção mais perto do nível de venda (nota ≥ 3,5); passa para o próximo quando ele chega lá. |
 | 5.72 | 27/11/2026 | XP Share automático (aprendido com o jogador): o item fica no pokémon que sobe numa casa do app e mais longe do nível de venda; quando ele chega lá, passa para o próximo (tira, espera o 1 min do jogo e coloca). O "tirar" o app aprende na primeira vez que você clica em Remover. Vitrine: 2 vagas sempre guardadas para o que sai das casas. Mercado: os comprados para as casas entram no livro, e a lista Esperando venda mostra onde cada um está (casa, vitrine, fila, coleção). |
