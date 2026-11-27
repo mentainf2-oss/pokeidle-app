@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.77
+// @version      5.78
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -31,7 +31,7 @@
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.77';
+  const VERSAO_APP = '5.78';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -630,6 +630,9 @@
     const tok = { gold: { qtd: 0, total: 0 }, orb: { qtd: 0, total: 0 }, desde: null, vendidos: { qtd: 0, total: 0, moeda: null } };
     for (const l of compras) { if (idDe(l) !== ITEM.TOKEN) continue; const m = l.moeda === 'orb' ? 'orb' : 'gold', q = qtdDe(l); tok[m].qtd += q; tok[m].total += Number(l.bruto ?? l.preco ?? 0); tok.desde = Math.min(tok.desde ?? l.em, l.em); }
     for (const l of vendas) { if (idDe(l) !== ITEM.TOKEN) continue; tok.vendidos.qtd += qtdDe(l); }
+    // drops que a conta COMPROU (sniper de itens / revenda): o que foi vendido deles não é lucro do boss — desconta o custo
+    const dropsComprados = {};
+    for (const l of compras) { const id = idDe(l); if (!DROPS[id]) continue; const m = l.moeda === 'orb' ? 'orb' : 'gold', d = (dropsComprados[id] ||= { qtd: 0, orb: 0, gold: 0 }); d.qtd += qtdDe(l); d[m] += Number(l.bruto ?? l.preco ?? 0); }
     const drops = {};
     for (const l of vendas) {
       const id = idDe(l); if (!DROPS[id]) continue;
@@ -650,6 +653,7 @@
     const recebidoG = Object.values(drops).reduce((t, d) => t + d.orb.liquido + emG(d.gold.liquido, 'gold'), 0);
     const estoqueG = Object.values(drops).reduce((t, d) => t + (d.estoqueValor || 0), 0);
     const custoUsadosG = usados * medioG;
+    const compradosG = Object.values(dropsComprados).reduce((t, d) => t + d.orb + emG(d.gold, 'gold'), 0);
     const r = {
       em: Date.now(), completo: !!(compras.completo && vendas.completo), desde: Math.min(compras.maisAntigo ?? Date.now(), vendas.maisAntigo ?? Date.now()), cambio: cb,
       tokens: { compradosGemas: tok.orb.qtd, gastoGemas: Math.round(tok.orb.total), medioGemas: tok.orb.qtd ? +(tok.orb.total / tok.orb.qtd).toFixed(2) : null,
@@ -657,7 +661,8 @@
         total: qtdTok, medioEmGemas: +medioG.toFixed(2), vendidos: tok.vendidos.qtd, noInventario: Number(M.tokens || 0), usados },
       drops: Object.values(drops).map((d) => ({ ...d, orb: { bruto: Math.round(d.orb.bruto), liquido: Math.round(d.orb.liquido) }, gold: { bruto: Math.round(d.gold.bruto), liquido: Math.round(d.gold.liquido) } })),
       recebidoGemas: Math.round(recebidoG), estoqueGemas: Math.round(estoqueG), custoTokensUsadosGemas: Math.round(custoUsadosG),
-      lucroGemas: Math.round(recebidoG + estoqueG - custoUsadosG), lucroPorToken: usados ? +((recebidoG + estoqueG - custoUsadosG) / usados).toFixed(2) : null,
+      dropsComprados: Object.entries(dropsComprados).map(([id, d]) => ({ nome: nomeDe(Number(id)), qtd: d.qtd, gemas: Math.round(d.orb), coins: Math.round(d.gold) })), custoDropsCompradosGemas: Math.round(compradosG),
+      lucroGemas: Math.round(recebidoG + estoqueG - custoUsadosG - compradosG), lucroPorToken: usados ? +((recebidoG + estoqueG - custoUsadosG - compradosG) / usados).toFixed(2) : null,
     };
     // desde o começo, pelo contador do próprio app (o histórico do jogo só guarda os registros mais recentes)
     const B = E.boss || { lutas: 0, drops: {} };

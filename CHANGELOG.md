@@ -2,6 +2,7 @@
 
 | Versão | Data | O que mudou |
 | --- | --- | --- |
+| 5.78 | 27/11/2026 | Relatório do boss: drops que a conta comprou (sniper de itens/revenda) têm o custo descontado do lucro do boss. |
 | 5.77 | 27/11/2026 | Histórico: página que demora ganha uma 2ª tentativa antes de parar (e o log diz onde parou); "Fragmento de Z-Move" reconhecido como TM Disk Piece no relatório do boss. |
 | 5.76 | 27/11/2026 | Histórico do jogo: o app parava na 1ª página (o jogo não manda "tem mais"); agora lê todas as páginas (12 de vendas, 61 de compras), parando na página vazia ou repetida. Vale para o relatório do boss, o livro do Mercado e o lucro real. |
 | 5.75 | 27/11/2026 | Relatório do boss: soma também desde o começo, pelo contador do app (cada luta = 1 token, cada drop pelo preço de agora), porque o histórico do jogo só guarda os registros mais recentes. |

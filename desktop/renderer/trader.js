@@ -352,7 +352,7 @@ async function pkRelBoss(root, c) {
       kpi('Tokens comprados', pkFmt(t.total), `${pkFmt(t.compradosGemas)} em Gemas · ${pkFmt(t.compradosCoins)} em Coins`),
       kpi('Preço médio do token', `${t.medioEmGemas} 🔮`, `${t.medioGemas != null ? t.medioGemas + ' 🔮 (Gemas)' : ''}${t.medioCoins != null ? ' · ' + C(t.medioCoins) + ' (Coins)' : ''}`),
       kpi('Drops renderam', G(r.recebidoGemas + r.estoqueGemas), `${G(r.recebidoGemas)} vendidos + ${G(r.estoqueGemas)} em estoque`),
-      kpi('Lucro do boss', `${r.lucroGemas >= 0 ? '+' : '−'}${pkG(Math.abs(r.lucroGemas))}`, `${r.lucroPorToken != null ? r.lucroPorToken + ' 🔮 por token · ' : ''}${pkFmt(t.usados)} tokens usados (${G(r.custoTokensUsadosGemas)})`, pkCls(r.lucroGemas)),
+      kpi('Lucro do boss', `${r.lucroGemas >= 0 ? '+' : '−'}${pkG(Math.abs(r.lucroGemas))}`, `${r.lucroPorToken != null ? r.lucroPorToken + ' 🔮 por token · ' : ''}${pkFmt(t.usados)} tokens usados (${G(r.custoTokensUsadosGemas)})${r.custoDropsCompradosGemas ? ` · − ${G(r.custoDropsCompradosGemas)} de drops comprados para revenda` : ''}`, pkCls(r.lucroGemas)),
     );
     corpo.append(kp);
     corpo.append(pkTabela(['Drop', 'Vendidos', 'Recebido em Gemas', 'Recebido em Coins', 'Em estoque', 'Vale (preço de agora)'], r.drops.sort((a, z) => (z.orb.liquido + z.gold.liquido / (r.cambio || 1e9)) - (a.orb.liquido + a.gold.liquido / (r.cambio || 1e9))).map((d) =>
