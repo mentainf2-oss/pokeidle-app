@@ -2166,7 +2166,7 @@ contextBridge.executeInMainWorld({
 });
 
 
-// ===================== PokeIdle App 5.75 (gerado por tools/montar-preload.js — não edite aqui) =====================
+// ===================== PokeIdle App 5.76 (gerado por tools/montar-preload.js — não edite aqui) =====================
 ;(() => {
   const { contextBridge: pontePk, ipcRenderer: ipcPk } = require('electron');
   // o que o script pede ao app: rede só para os sites liberados (API do Claude e precificador) e avisos
@@ -2192,7 +2192,7 @@ contextBridge.executeInMainWorld({
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.75
+// @version      5.76
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -2222,7 +2222,7 @@ contextBridge.executeInMainWorld({
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.75';
+  const VERSAO_APP = '5.76';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -2780,15 +2780,20 @@ contextBridge.executeInMainWorld({
   }
   /* --------- 💰 lucro real: o histórico de compras e vendas da sua conta, no próprio jogo --------- */
   async function lerHistoricoProprio(msg, horas = 24 * 7, maxPaginas = 8, aoLer = null) {
-    const lim = Date.now() - horas * 3600_000, linhas = []; let completo = false, ok = false;
+    const lim = Date.now() - horas * 3600_000, linhas = []; let completo = false, ok = false, ultimaChave = null;
     for (let pagina = 0; pagina < maxPaginas; pagina++) {
       const seq = 9000 + Math.floor(Math.random() * 90000);
       const resp = await pedir({ t: msg, pagina, seq }, (m) => m.t === 'market' && String(m.aba || '').startsWith('historico') && m.aba !== 'historicoGlobal' && (m.seq === seq || m.pagina === pagina), 5000);
       if (!resp) break;                                             // sem resposta: não dá para dizer que o histórico está completo
       ok = true;
       const L = resp.linhas || []; if (!L.length) { completo = true; break; }
+      // 5.76: o jogo nem sempre manda "temMais" — antes o app parava na 1ª página (o jogo mostra 12 de vendas e 61 de compras)
+      if (!M.histCampos) { M.histCampos = true; log(`🔍 histórico: campos da página: ${Object.keys(resp).join(', ')}`, 'info'); }
+      const chave1 = `${L[0]?.id ?? ''}|${L[0]?.em ?? ''}|${L.length}`; if (chave1 === ultimaChave) { completo = true; break; } ultimaChave = chave1;   // página repetida: acabou
       linhas.push(...L); if (aoLer) try { aoLer(pagina + 1, linhas.length, Math.min(...L.map((l) => l.em || Date.now()))); } catch {}
-      if (!resp.temMais) { completo = true; break; }
+      const tot = resp.totalPaginas ?? resp.paginas ?? resp.numPaginas ?? resp.nPaginas ?? (resp.total && (resp.porPagina || resp.tamanho) ? Math.ceil(resp.total / (resp.porPagina || resp.tamanho)) : null);
+      if (resp.temMais === false || resp.fim === true || (tot != null && pagina + 1 >= tot)) { completo = true; break; }
+      if (resp.temMais == null && tot == null && L.length < 5) { completo = true; break; }   // página curta sem aviso: última
       if (Math.min(...L.map((l) => l.em || Date.now())) < lim) { completo = true; break; }
     }
     const res = linhas.filter((l) => (l.em || 0) >= lim && l.tipo !== 'deposito' && l.tipo !== 'saque' && l.tipo !== 'diamante');
@@ -2801,7 +2806,7 @@ contextBridge.executeInMainWorld({
   async function relatorioBoss() {
     const DROPS = { [ITEM.ZFRAG]: 'TM Disk Piece', [ITEM.AOE]: 'AoE TM Disk Piece', [ITEM.MEGA]: 'Mega Stone Fragment', [ITEM.MEGASH]: 'Mega Shiny Stone Fragment', [ITEM.SAFARI]: 'Safari Ticket' };
     const nomeDe = (id) => E.nomesItens?.[id] || DROPS[id] || String(id);
-    const idDe = (l) => { if (l.itemId != null) return Number(l.itemId); const d = norm2(String(l.descricao || '').replace(/^\d+\s*×\s*/, '')); for (const id of [ITEM.TOKEN, ...Object.keys(DROPS).map(Number)]) if (norm2(nomeDe(id)) === d) return id; return null; };
+    const idDe = (l) => { if (l.itemId != null) return Number(l.itemId); const d = norm2(String(l.descricao || '').replace(/^\d+\s*×\s*/, '')); if (d === norm2('Fragmento de Z-Move')) return ITEM.ZFRAG; for (const id of [ITEM.TOKEN, ...Object.keys(DROPS).map(Number)]) if (norm2(nomeDe(id)) === d || norm2(DROPS[id] || '') === d) return id; return null; };
     const qtdDe = (l) => Number(String(l.descricao || '').match(/^(\d+)\s*×/)?.[1]) || Number(l.qtd) || 1;
     if (M.relBossRodando) return { rodando: M.relBossProg || null };
     M.relBossRodando = true; M.relBossProg = { fase: 'compras', pagina: 0, linhas: 0 };
