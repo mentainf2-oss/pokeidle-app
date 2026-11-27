@@ -2,6 +2,7 @@
 
 | Versão | Data | O que mudou |
 | --- | --- | --- |
+| 5.77 | 27/11/2026 | Histórico: página que demora ganha uma 2ª tentativa antes de parar (e o log diz onde parou); "Fragmento de Z-Move" reconhecido como TM Disk Piece no relatório do boss. |
 | 5.76 | 27/11/2026 | Histórico do jogo: o app parava na 1ª página (o jogo não manda "tem mais"); agora lê todas as páginas (12 de vendas, 61 de compras), parando na página vazia ou repetida. Vale para o relatório do boss, o livro do Mercado e o lucro real. |
 | 5.75 | 27/11/2026 | Relatório do boss: soma também desde o começo, pelo contador do app (cada luta = 1 token, cada drop pelo preço de agora), porque o histórico do jogo só guarda os registros mais recentes. |
 | 5.74 | 27/11/2026 | Boss: relatório pelo histórico completo da conta (todas as páginas de compras e vendas): tokens comprados, preço médio em cada moeda, drops vendidos por item, o que ainda está em estoque pelo preço de agora, e o lucro do boss. Fica na aba Boss do Painel. |

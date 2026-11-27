@@ -2166,7 +2166,7 @@ contextBridge.executeInMainWorld({
 });
 
 
-// ===================== PokeIdle App 5.76 (gerado por tools/montar-preload.js — não edite aqui) =====================
+// ===================== PokeIdle App 5.77 (gerado por tools/montar-preload.js — não edite aqui) =====================
 ;(() => {
   const { contextBridge: pontePk, ipcRenderer: ipcPk } = require('electron');
   // o que o script pede ao app: rede só para os sites liberados (API do Claude e precificador) e avisos
@@ -2192,7 +2192,7 @@ contextBridge.executeInMainWorld({
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.76
+// @version      5.77
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -2222,7 +2222,7 @@ contextBridge.executeInMainWorld({
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.76';
+  const VERSAO_APP = '5.77';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -2783,8 +2783,10 @@ contextBridge.executeInMainWorld({
     const lim = Date.now() - horas * 3600_000, linhas = []; let completo = false, ok = false, ultimaChave = null;
     for (let pagina = 0; pagina < maxPaginas; pagina++) {
       const seq = 9000 + Math.floor(Math.random() * 90000);
-      const resp = await pedir({ t: msg, pagina, seq }, (m) => m.t === 'market' && String(m.aba || '').startsWith('historico') && m.aba !== 'historicoGlobal' && (m.seq === seq || m.pagina === pagina), 5000);
-      if (!resp) break;                                             // sem resposta: não dá para dizer que o histórico está completo
+      const filtroH = (m) => m.t === 'market' && String(m.aba || '').startsWith('historico') && m.aba !== 'historicoGlobal' && (m.seq === seq || m.pagina === pagina);
+      let resp = await pedir({ t: msg, pagina, seq }, filtroH, 8000);
+      if (!resp) { await dormir(1500); resp = await pedir({ t: msg, pagina, seq }, filtroH, 10000); }   // 5.77: uma 2ª tentativa antes de desistir
+      if (!resp) { log(`🔍 histórico: a página ${pagina + 1} não respondeu — parei aí`, 'info'); break; }                                             // sem resposta: não dá para dizer que o histórico está completo
       ok = true;
       const L = resp.linhas || []; if (!L.length) { completo = true; break; }
       // 5.76: o jogo nem sempre manda "temMais" — antes o app parava na 1ª página (o jogo mostra 12 de vendas e 61 de compras)
