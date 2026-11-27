@@ -2,6 +2,7 @@
 
 | Versão | Data | O que mudou |
 | --- | --- | --- |
+| 5.73 | 27/11/2026 | XP Share: o jogo não deixa pôr em quem está numa casa — agora vai para quem espera vaga numa casa (fila) e, depois, para o pokémon da coleção mais perto do nível de venda (nota ≥ 3,5); passa para o próximo quando ele chega lá. |
 | 5.72 | 27/11/2026 | XP Share automático (aprendido com o jogador): o item fica no pokémon que sobe numa casa do app e mais longe do nível de venda; quando ele chega lá, passa para o próximo (tira, espera o 1 min do jogo e coloca). O "tirar" o app aprende na primeira vez que você clica em Remover. Vitrine: 2 vagas sempre guardadas para o que sai das casas. Mercado: os comprados para as casas entram no livro, e a lista Esperando venda mostra onde cada um está (casa, vitrine, fila, coleção). |
 | 5.71 | 26/11/2026 | Sniper só compra o que gira: no máximo 1 shiny da mesma espécie esperando venda (3 nos normais); não compra espécie que tem anúncio meu parado há 24 h+ sem favorito; e só compra se o mercado vende o bastante para girar em até 3 dias (6 para shiny), pelas vendas dos últimos 14 dias. Vale também para o shiny comprado para upar nas casas. |
 | 5.70 | 26/11/2026 | O painel antigo saiu do jogo: todas as funções dele estão no Painel do app, nas abas Compras (lista, sniper pokémon e itens), Casas, Lucro, Boss (e Prey), Análise (mercado, estudo, avaliar, investir), Claude, e em Ajustes (config e log). Cada clique e campo vale na conta de verdade; confirmações aparecem no app. |

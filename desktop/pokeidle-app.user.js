@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.72
+// @version      5.73
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -31,7 +31,7 @@
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.72';
+  const VERSAO_APP = '5.73';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -3465,7 +3465,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
       avisoRaro('xpshare' + p.id, `🎒 XP Share (+5% de XP) está no ${p.nome} Nv ${fmt(p.level || 0)}, que o app não vai upar para vender. Mova o item pelo jogo uma vez para um pokémon que está subindo (ex.: o que está numa casa) — o app aprende a ação e passa a mover sozinho`, 360);
   }
   /* 🎒 XP SHARE (5.72, aprendido com o jogador): o item 70050 dá +5% de XP a quem o segura. O app deixa o item no pokémon que
-   * está subindo numa casa do app e mais longe do nível de venda; quando ele chega lá (ou sai da casa), passa para o próximo.
+   * vai subir para vender e NÃO está numa casa (o jogo não deixa); quando ele chega ao nível de venda, passa para o próximo.
    * O jogo trava 1 min depois de tirar antes de recolocar — por isso tira, espera e depois coloca. */
   // aprende o "tirar" do XP Share com o próprio jogador: um envio de xpshare sem pokémon, ou com o id de quem já segura o item
   function aprenderXpShare(d) {
@@ -3479,13 +3479,17 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
       log(`🎒 aprendi a tirar o XP Share: ${JSON.stringify(m).replace(/\d{5,}/g, '…')}${usaDono ? ' (com o id de quem segura)' : ''}`, 'ok');
     }
   }
+  // 5.73 (o jogador avisou: o jogo NÃO deixa pôr o XP Share em quem está numa casa): vai para quem está na coleção esperando
+  // subir — primeiro os da fila de casa (comprados para upar), depois os da coleção que o app sobe para vender (nota ≥ 3,5)
   function candidatosXpShare() {
+    const naCasa = new Set(Object.values(E.postos || {}).filter(Boolean).map((p) => String(p.pokemonId)));
+    const fora = new Set([...naCasa, ...(M.meus || []).filter((a) => a.tipo === 'pokemon').map((a) => String(a.pokemonId)), String(M.activeId)]);
+    const nvMin = Math.max(CFG.nivelAlvo || 0, CFG.nivelMinVenda || 0);
+    const ok = (p) => p && p.slot == null && !fora.has(String(p.id)) && (p.level || 0) < Math.min(CFG.nivelMaxCasa || 9999, nvMin);
     const out = [];
-    for (const [key, p] of Object.entries(E.postos || {})) {
-      if (!p?.bot || !p.pokemonId || p.naFila || p.xp == null) continue;
-      const cid = String(key).split(':')[0], falta = xpDoNivel(alvoDoPokemon(p, cid)) - p.xp;
-      if (falta > 0) out.push({ pid: p.pokemonId, nome: p.nome, nv: nivelDeXp(p.xp), alvo: alvoDoPokemon(p, cid), falta });
-    }
+    for (const x of E.filaCasa || []) { const p = (M.pokemons || []).find((q) => String(q.id) === String(x.pokemonId)); if (ok(p)) out.push({ pid: p.id, nome: p.nome, nv: p.level || 1, alvo: nvMin, falta: 1e15 + (p.level || 0), fila: true }); }
+    for (const p of M.pokemons || []) if (ok(p) && !out.some((c) => String(c.pid) === String(p.id)) && ((p.nota || 0) >= 3.5 || p.shiny) && !(CFG.evitarOutland && ehOutland(p)))
+      out.push({ pid: p.id, nome: p.nome, nv: p.level || 1, alvo: nvMin, falta: (p.level || 0) * 1e6 + (p.nota || 0) });   // mais alto primeiro: chega antes ao nível de venda
     return out.sort((a, z) => z.falta - a.falta);
   }
   function cicloXpShare() {
@@ -3500,16 +3504,16 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     if (dono) {
       if (ag - (st.tirouEm || 0) < 3 * 60_000) return;
       const R = E.xpShRemover;
-      if (!R) return avisoRaro('xpshTirar', `🎒 XP Share: está no ${dono.nome} Nv ${fmt(dono.level || 0)}, que não sobe numa casa do app — tire uma vez pelo jogo (botão Remover) e eu aprendo a mover sozinho para o ${alvo.nome}`, 240);
+      if (!R) return avisoRaro('xpshTirar', `🎒 XP Share: está no ${dono.nome} Nv ${fmt(dono.level || 0)}, que já não precisa — tire uma vez pelo jogo (botão Remover) e eu aprendo a mover sozinho para o ${alvo.nome}`, 240);
       if ((st.tentTirar || 0) >= 3) { E.xpSh = { pausaAte: ag + 6 * 3600_000 }; persistir(); return avisoRaro('xpshTirar2', `🎒 XP Share: o jogo não aceitou tirar do ${dono.nome} — tento de novo em 6 h`, 360); }
-      log(`🎒 XP Share: tirando do ${dono.nome} Nv ${fmt(dono.level || 0)} (não está subindo numa casa do app) — em 1 min vai para o ${alvo.nome} Nv ${fmt(alvo.nv)} → ${fmt(alvo.alvo)}`);
+      log(`🎒 XP Share: tirando do ${dono.nome} Nv ${fmt(dono.level || 0)} (já passou do nível de venda, foi para casa ou vitrine) — em 1 min vai para o ${alvo.nome} Nv ${fmt(alvo.nv)}`);
       const kPid = 'pokemonId' in R.modelo ? 'pokemonId' : 'id' in R.modelo ? 'id' : null;
       enviar({ ...R.modelo, ...(kPid && R.usaDono ? { [kPid]: dono.id } : {}) });
       E.xpSh = { tirouEm: ag, tentTirar: (st.tentTirar || 0) + 1 }; persistir(); return;
     }
     if (ag - (st.tirouEm || 0) < 70_000 || ag - (st.equipouEm || 0) < 3 * 60_000) return;   // o jogo trava 1 min depois de tirar
     if ((st.tentEquip || 0) >= 3) { E.xpSh = { pausaAte: ag + 6 * 3600_000 }; persistir(); return avisoRaro('xpshEq', '🎒 XP Share: o jogo não aceitou colocar (o item está na conta?) — tento de novo em 6 h', 360); }
-    log(`🎒 XP Share: colocando no ${alvo.nome} Nv ${fmt(alvo.nv)} (sobe numa casa até o Nv ${fmt(alvo.alvo)}) — +5% de XP`, 'ok');
+    log(`🎒 XP Share: colocando no ${alvo.nome} Nv ${fmt(alvo.nv)} (${alvo.fila ? 'esperando vaga numa casa' : 'na coleção'} — sobe até o Nv ${fmt(alvo.alvo)} para vender) — +5% de XP`, 'ok');
     enviar({ t: 'xpshareheld.equipar', pokemonId: Number(alvo.pid) });
     E.xpSh = { ...st, equipouEm: ag, tentEquip: (st.tentEquip || 0) + 1 }; persistir();
   }
