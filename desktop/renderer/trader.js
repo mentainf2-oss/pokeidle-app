@@ -287,7 +287,7 @@ async function pkMercado(root, s, c) {
     kpi('Vendas com prejuízo', String(prej.length), prej.length ? 'veja no filtro Prejuízo' : 'nenhuma — a trava do livro segura o preço', prej.length ? 'bad' : 'ok'),
   );
   root.append(kp);
-  const origem = { sniper: 'sniper', casa: 'para casa', 'histórico': 'histórico do jogo', app: 'app' };
+  const origem = { sniper: 'sniper (revenda)', casa: 'comprado para a casa', 'histórico': 'histórico do jogo', app: 'app' };
   const nomeDe = (x) => { const n = el('span'); n.append(el('b', null, `${x.shiny ? '✨ ' : ''}${x.nome}`), el('small', 'muted', `  ${origem[x.origem] || x.origem || ''}`)); return n; };
   const quandoV = (v, moeda, ms) => { const sp = el('span'); sp.append(el('b', null, pkM(v, moeda)), el('small', 'muted', `  ${pkQuando(ms)}`)); return sp; };
   // ---- esperando venda ----
@@ -297,7 +297,7 @@ async function pkMercado(root, s, c) {
   bts.append(button('Buscar preço de compra no histórico do jogo', 'ghost', async (ev) => { const bt = ev.currentTarget; bt.disabled = true; bt.textContent = 'Lendo o histórico…'; const n = await window.idle.invoke('poke:pkapp:livroColecao', c.id).catch(() => null); toast(n == null ? 'Não consegui ler agora.' : n ? `${n} pokémon ganharam o preço de compra.` : 'Nenhum pokémon novo achado no histórico.'); pkLivro = null; renderTrader(); }),
     button('Atualizar', 'ghost', () => { pkLivro = null; renderTrader(); }));
   t1.append(bts); c1.append(t1);
-  c1.append(abertos.length ? pkTabela(['Pokémon', 'Comprado por', 'Nv na compra', 'Parado há'], abertos.slice(0, 400).map((x) => pkLinha(nomeDe(x), quandoV(x.custo, x.moeda, x.em), x.nv ?? '—', pkDur(Date.now() - x.em))))
+  c1.append(abertos.length ? pkTabela(['Pokémon', 'Comprado por', 'Nv na compra', 'Onde está', 'Desde a compra'], abertos.slice(0, 400).map((x) => pkLinha(nomeDe(x), quandoV(x.custo, x.moeda, x.em), x.nv ?? '—', x.onde ? pkPill(x.onde, x.onde === 'vitrine' ? 'ok' : x.onde === 'casa' ? 'info' : '') : '—', pkDur(Date.now() - x.em))))
     : el('p', 'tip', 'Nenhum pokémon comprado esperando venda.'));
   root.append(c1);
   // ---- vendidos ----
