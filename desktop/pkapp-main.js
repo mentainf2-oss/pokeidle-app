@@ -260,6 +260,7 @@ module.exports = function pkappMain({ ipcMain, views, config, send, ctx, app, pa
   }
   // 🪞 painel antigo espelhado no Painel do app (5.70): HTML de uma aba e os cliques/mudanças devolvidos à conta
   ipcMain.handle('poke:pkapp:espelho', async (_e, id, aba) => ponte(id, 'painelEspelho', aba));
+  ipcMain.handle('poke:pkapp:estudoEsp', async (_e, id) => ponte(id, 'estudoEspecies'));
   ipcMain.handle('poke:pkapp:relBoss', async (_e, id, iniciar) => ponte(id, iniciar ? 'relatorioBoss' : 'relatorioBossUltimo'));
   ipcMain.handle('poke:pkapp:espelhoEvento', async (_e, id, aba, pkx, tipo, valor, confirmado) => ponte(id, 'painelEvento', aba, pkx, tipo, valor, !!confirmado));
   ipcMain.handle('poke:pkapp:espelhoCss', async (_e, id) => ponte(id, 'painelCss'));

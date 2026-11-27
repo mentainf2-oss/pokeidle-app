@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.80
+// @version      5.81
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -31,7 +31,7 @@
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.80';
+  const VERSAO_APP = '5.81';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -211,7 +211,7 @@
   // 📚 catálogo: toda decisão do app fica guardada com o motivo (o texto do log já traz o porquê), por 4 dias
   const DEC = (() => { const L = ler('pkapp.decisoes', []); return Array.isArray(L) ? L : []; })();
   const CATS_DEC = [
-    ['auditoria', (m) => /^🔎/.test(m)], ['erro', (m, t) => t === 'erro' || /^erro|falhou/i.test(m)], ['aprendizado', (m) => /^🎓 aprendizado|^📋 parecer/.test(m)],
+    ['auditoria', (m) => /^🔎/.test(m)], ['erro', (m, t) => t === 'erro' || /^erro|falhou/i.test(m)], ['aprendizado', (m) => /^🎓|^📋 parecer/.test(m)],
     ['claude', (m) => /^🧠/.test(m)], ['venda', (m) => /^💰 vendido|^ANUNCIAR|^VENDER|^🪟/.test(m)], ['preço', (m) => /^(BAIXAR|SUBIR|REAJUSTAR|CORRIGIR)|^🔁|^🤝 aplicando/.test(m)],
     ['negociação', (m) => /^🤝/.test(m)], ['compra', (m, t) => t === 'compra' || /^COMPRAR|^🛒|^✨/.test(m)], ['casa', (m) => /^🏠/.test(m)], ['boss', (m) => /^👑|Boss Token|^🎁/.test(m)],
     ['pulou', (m) => /pulei|^⛔|não compro|sem preço|sem câmbio|^📚|^🐢/.test(m)], ['hunt', (m) => /^🗺️/.test(m)], ['evolução', (m) => /^🧬/.test(m)], ['pedido', (m) => /^💬/.test(m)], ['ajuste', (m) => /^⚙️|^👥|^▶|^⏹|^🧪|^⚡ modo|ligado$|desligado$/.test(m)],
@@ -888,6 +888,59 @@
   /* 5.80 (pedido do jogador: Numel ✨ não vendiam): o precificador sobe o preço com o nível (Poder no PvE), mas tem espécie que o
    * mercado paga só pela nota — Numel ✨ Nv 1.453 vendeu por 1.062 e o mesmo Nv 40 por 940. Então o preço em Gemas tem um TETO:
    * o que essa espécie (shiny ou não) vendeu de verdade com nota parecida (±0,35), em qualquer nível, nos últimos 14 dias. */
+  /* 🎓 ESTUDO DE ESPÉCIES (5.81, pedido do jogador: "vá estudando todos os pokémons aos poucos e aprendendo, para não errar de
+   * novo"): a cada 10 min estuda 30 espécies do banco de vendas (14 dias), em Gemas e em Coins, shiny e normal:
+   *  - giro: vendas por dia;  - preço: 1º quartil / mediana / 3º quartil;
+   *  - o nível vale? mediana das vendas Nv ≥ 500 ÷ Nv < 200 (≈1 = o mercado não paga pelo nível → não vale upar para vender);
+   *  - spot de revenda: quanto sobra comprando no 1º quartil e vendendo na mediana (−15%), vezes o giro por dia.
+   * O resultado vira regra: o sniper e a compra para as casas evitam espécie sem saída e não compram nível alto de espécie
+   * em que o nível não vale; e cada anúncio parado ganha um diagnóstico em Decisões (por que não vende). */
+  function estudarEspecies(lote = 30) {
+    const lim = Date.now() - 14 * 86400_000, grupos = new Map();
+    for (const [moeda, B] of [['orb', M.baseOrb || []], ['gold', M.base || []]]) for (const v of B) {
+      if (!(v.em >= lim) || !v.nome || !(v.preco > 0)) continue;
+      const k = `${moeda}|${v.shiny ? 1 : 0}|${norm2(v.nome)}`; let g = grupos.get(k); if (!g) grupos.set(k, (g = { moeda, shiny: !!v.shiny, nome: v.nome, V: [] })); g.V.push(v);
+    }
+    if (!grupos.size) return 0;
+    const chaves = [...grupos.keys()].sort(), ini = (E.estudoEspIdx || 0) % chaves.length;
+    const q = (A, p) => A[Math.min(A.length - 1, Math.floor(p * (A.length - 1) + 0.5))];
+    E.estudoEsp = E.estudoEsp || {};
+    for (let i = 0; i < Math.min(lote, chaves.length); i++) {
+      const k = chaves[(ini + i) % chaves.length], g = grupos.get(k), V = g.V, P = V.map((v) => v.preco).sort((a, z) => a - z);
+      const dias = Math.max(1, Math.min(14, (Date.now() - Math.min(...V.map((v) => v.em))) / 86400_000));
+      const baixo = V.filter((v) => (v.nv || 0) < 200).map((v) => v.preco).sort((a, z) => a - z), alto = V.filter((v) => (v.nv || 0) >= 500).map((v) => v.preco).sort((a, z) => a - z);
+      const efeitoNivel = baixo.length >= 3 && alto.length >= 3 ? +(q(alto, 0.5) / Math.max(1, q(baixo, 0.5))).toFixed(2) : null;
+      const p25 = q(P, 0.25), p50 = q(P, 0.5), p75 = q(P, 0.75), porDia = +(V.length / dias).toFixed(2);
+      // margem de revenda só entre vendas de nível parecido (±30% do nível mais comum), para não misturar Nv 40 com Nv 1.000
+      const nvs = V.map((v) => v.nv || 0).sort((a, z) => a - z), nvMed = q(nvs, 0.5), Pn = V.filter((v) => (v.nv || 0) >= nvMed * 0.7 && (v.nv || 0) <= nvMed * 1.3).map((v) => v.preco).sort((a, z) => a - z);
+      const Pm = Pn.length >= 5 ? Pn : P, margem = Math.round(q(Pm, 0.5) * (1 - COMISSAO) - q(Pm, 0.25)), spot = Math.round(Math.max(0, margem) * Math.min(porDia, 10));
+      E.estudoEsp[k] = { nome: g.nome, moeda: g.moeda, shiny: g.shiny, n: V.length, porDia, p25, p50, p75, efeitoNivel, margem, spot, nvComum: nvMed, compraBoa: q(Pm, 0.25), vendeMed: q(Pm, 0.5), em: Date.now() };
+    }
+    E.estudoEspIdx = (ini + lote) % chaves.length;
+    for (const [k, x] of Object.entries(E.estudoEsp)) if (Date.now() - x.em > 3 * 86400_000) delete E.estudoEsp[k];
+    persistir(); return Math.min(lote, chaves.length);
+  }
+  const estudoDe = (nome, shiny, moeda) => E.estudoEsp?.[`${moeda === 'orb' ? 'orb' : 'gold'}|${shiny ? 1 : 0}|${norm2(String(nome || '').replace(/^✨\s*/, ''))}`] || null;
+  // por que um anúncio parado não vende: compara com o que a espécie vende de verdade (nota parecida) e anota em Decisões
+  function diagnosticarParados() {
+    const ag = Date.now(); if (ag - (M.diagEm || 0) < 30 * 60_000) return; M.diagEm = ag;
+    E.diagVisto = E.diagVisto || {};
+    for (const a of M.meus || []) {
+      if (a.tipo !== 'pokemon' || ag - desdeQuando(a) < 24 * 3600_000) continue;
+      const f = a.ficha || {}, ch = `${a.id}`; if (ag - (E.diagVisto[ch] || 0) < 12 * 3600_000) continue; E.diagVisto[ch] = ag;
+      const es = estudoDe(f.nome, f.shiny, a.moeda), t = a.moeda === 'orb' ? tetoDaEspecie(f.nome, f.shiny, f.nota) : null, nomeX = `${f.shiny ? '✨' : ''}${f.nome} Nv ${fmt(f.level || 0)}`;
+      const preco = a.moeda === 'orb' ? `${fmt(a.preco)} 🔮` : curto(a.preco), M_ = (v) => (a.moeda === 'orb' ? `${fmt(v)} 🔮` : curto(v));
+      let motivo;
+      if (!es || es.n < 2) { motivo = `ninguém comprou ${f.shiny ? 'shiny ' : ''}${f.nome} em 14 dias — espécie sem saída`; (E.semSaida ||= {})[`${f.shiny ? 1 : 0}|${norm2(f.nome)}`] = ag; }
+      else if (t && a.preco > t.p75) motivo = `está caro: com nota parecida vende por ${M_(t.p50)} (metade das vendas) a ${M_(t.p75)}, ${t.n} vendas em 14 dias`;
+      else if (!t && a.preco > es.p75) motivo = `está caro: a espécie vende por ${M_(es.p50)} (mediana) a ${M_(es.p75)}`;
+      else if (es.porDia < 0.3) motivo = `o preço está ok, mas a espécie gira pouco (${es.porDia} venda/dia)`;
+      else motivo = `o preço está na faixa (${M_(es.p25)}–${M_(es.p75)}) e a espécie gira ${es.porDia}/dia — deve sair logo`;
+      const nivelTxt = es && es.efeitoNivel != null && es.efeitoNivel < 1.2 && (f.level || 0) >= 500 ? ` · o nível quase não muda o preço desta espécie (×${es.efeitoNivel}) — não vale upar para vender` : '';
+      log(`🎓 parado há ${Math.round((ag - desdeQuando(a)) / 3600_000)} h: ${nomeX} a ${preco}${favsDe(a) ? ` (${favsDe(a)} favorito(s))` : ''} — ${motivo}${nivelTxt}`, 'aprendizado');
+    }
+    for (const k of Object.keys(E.diagVisto)) if (ag - E.diagVisto[k] > 3 * 86400_000) delete E.diagVisto[k];
+  }
   function tetoDaEspecie(nome, shiny, nota) {
     const n0 = norm2(String(nome || '').replace(/^✨\s*/, '')), lim = Date.now() - 14 * 86400_000;
     const V = (M.baseOrb || []).filter((v) => v.em >= lim && norm2(v.nome) === n0 && !!v.shiny === !!shiny && (nota == null || v.nota == null || Math.abs(v.nota - nota) <= 0.35)).map((v) => v.preco).sort((a, z) => a - z);
@@ -1740,6 +1793,11 @@
     // vaga na vitrine é escassa: com poucas sobrando, só entra o que dá o dobro do lucro mínimo
     // vaga na vitrine é escassa: com poucas sobrando, só entra o dobro do lucro mínimo; sem vaga, compra para a fila (até filaMax) com o dobro também
     const naFila = vg.paraSnipe < 1;
+    {   // 🎓 5.81: o estudo de espécies vira regra — sem saída, ou nível alto de espécie em que o nível não vale
+      const ss = E.semSaida?.[`${f.shiny ? 1 : 0}|${norm2(f.nome)}`]; if (ss && Date.now() - ss < 7 * 86400_000) return avisoRaro('semSaida' + f.nome + !!f.shiny, `🎓 ${f.shiny ? '✨' : ''}${f.nome}: já ficou parado sem nenhuma venda da espécie em 14 dias — não compro`, 240);
+      const es = estudoDe(f.nome, f.shiny, a.moeda);
+      if (es && es.efeitoNivel != null && es.efeitoNivel < 1.2 && (f.level || 0) >= 500 && a.preco > es.p50) return avisoRaro('nivelNV' + f.nome + !!f.shiny, `🎓 ${f.shiny ? '✨' : ''}${f.nome} Nv ${fmt(f.level)}: nesta espécie o nível quase não muda o preço (×${es.efeitoNivel}) e ele custa acima da mediana — não compro`, 240);
+    }
     {   // 🔁 5.71: só compra o que gira — estoque da espécie, vendas por dia e anúncios parados sem favorito
       const tenho = emAndamento(f.nome), maxE = f.shiny ? CFG.maxPorEspecieShiny : CFG.maxPorEspecie;
       if (maxE > 0 && tenho >= maxE) return avisoRaro('maxEsp' + f.nome + !!f.shiny, `🔁 ${f.shiny ? '✨' : ''}${f.nome}: já tenho ${tenho} esperando venda — não compro outro até vender (giro)`, 120);
@@ -3519,7 +3577,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
         if (CFG.mod.prey) await cicloPrey();
         if (CFG.mod.claude) await cicloClaude();
         try { instalarFiltroPopups(); } catch {}
-        try { cicloPasse(); if (CFG.xpShareAuto) cicloXpShare(); else avisoXpShare(); cicloRotacaoVitrine(); } catch {}
+        try { cicloPasse(); if (CFG.xpShareAuto) cicloXpShare(); else avisoXpShare(); cicloRotacaoVitrine(); diagnosticarParados(); if (Date.now() - (M.estEspEm || 0) > 10 * 60_000) { M.estEspEm = Date.now(); estudarEspecies(30); } } catch {}
         if (CFG.mod.hunt) await cicloHunt();
         if (CFG.mod.sniperPk || CFG.mod.casas) await carregarEvo();
       } catch (e) { log('erro: ' + e.message, 'erro'); }
@@ -4917,6 +4975,7 @@ Inclua em mods só o que muda. "deixar na hunt" = boss:false; "fazer boss" = bos
     decisoes: (cat) => DEC.filter((x) => !cat || x.cat === cat).slice(0, 300),
     livro: () => { const casa = new Set(Object.values(E.postos || {}).filter(Boolean).map((p) => String(p.pokemonId))), vit = new Set((M.meus || []).filter((a) => a.tipo === 'pokemon').map((a) => String(a.pokemonId))), fila = new Set((E.filaVenda || []).map((x) => String(x.pokemonId)));
       return LIVRO.slice(0, 3000).map((x) => (x.venda ? x : { ...x, onde: casa.has(String(x.pid)) ? 'casa' : vit.has(String(x.pid)) ? 'vitrine' : fila.has(String(x.pid)) ? 'fila de venda' : 'coleção' })); },
+    estudoEspecies: () => ({ total: Object.keys(E.estudoEsp || {}).length, itens: Object.values(E.estudoEsp || {}) }),
     relatorioBoss: () => { if (!M.relBossRodando) relatorioBoss().catch((e) => log('relatório do boss: ' + e.message, 'erro')); return { iniciado: true }; },
     relatorioBossUltimo: () => ({ ultimo: E.relBoss || null, rodando: M.relBossRodando ? M.relBossProg : null }),
     painelEspelho: (aba) => painelEspelho(aba),

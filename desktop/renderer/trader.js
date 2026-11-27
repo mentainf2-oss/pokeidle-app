@@ -167,6 +167,7 @@ async function renderTrader() {
   if (pkTab === 'decisoes') await pkDecisoes(root, s, c);
   if (pkTab === 'mercado') await pkMercado(root, s, c);
   if (pkTab === 'bossA') await pkRelBoss(root, c);
+  if (pkTab === 'analise') await pkEstudoEsp(root, c);
   if (PK_ESP[pkTab]) await pkEspelho(root, c, pkTab);
   if (pkTab === 'farm') await pkFarmTela(root, s);
   if (pkTab === 'controle') { await pkControle(root, s, c); const h = el('h2', 'section', 'Ajustes finos e log (o painel que ficava no jogo)'); root.append(h); await pkEspelho(root, c, 'avancado'); }
@@ -315,6 +316,24 @@ async function pkMercado(root, s, c) {
   })) : el('p', 'tip', 'Nada vendido ainda.'));
   c2.append(el('p', 'tip', 'Recebido já sem a comissão de 15%. O preço da venda é conferido com o histórico do jogo (✓ = conferido, · = ainda não). * = comprado numa moeda e vendido na outra (lucro pelo câmbio do dia). Guardado na conta e num arquivo do PC (pkapp-livro); nenhum pokémon anotado é anunciado abaixo do custo + comissão.'));
   root.append(c2);
+}
+
+// ---------- 🎓 Estudo de espécies: melhores spots de revenda e onde upar vale a pena ----------
+async function pkEstudoEsp(root, c) {
+  const r = await window.idle.invoke('poke:pkapp:estudoEsp', c.id).catch(() => null);
+  const card = el('div', 'card');
+  card.append(el('h2', 'section first', `🎓 Estudo de espécies${r ? ` · ${r.total} estudadas` : ''}`));
+  if (!r || !r.itens.length) { card.append(el('p', 'tip', 'O app estuda 30 espécies a cada 10 min pelo banco de vendas (14 dias). Volte daqui a pouco.')); root.append(card); return; }
+  const M_ = (v, m) => (m === 'orb' ? pkG(v) : pkFmt(v)), nome = (x) => `${x.shiny ? '✨ ' : ''}${x.nome}`, moe = (x) => (x.moeda === 'orb' ? 'Gemas' : 'Coins');
+  const spots = r.itens.filter((x) => x.n >= 5 && x.margem > 0).sort((a, z) => z.spot - a.spot).slice(0, 15);
+  card.append(el('h3', 'section', 'Melhores spots de revenda (no nível mais vendido: comprar no 1º quartil, vender na mediana, × vendas por dia)'));
+  card.append(spots.length ? pkTabela(['Pokémon', 'Moeda', 'Vendas/dia', 'Compra boa (1º quartil)', 'Vende (mediana)', 'Sobra por venda', 'Nível vale?'], spots.map((x) => pkLinha(el('b', null, nome(x)), moe(x), x.porDia, M_(x.compraBoa ?? x.p25, x.moeda), M_(x.vendeMed ?? x.p50, x.moeda), el('b', 'ok', M_(x.margem, x.moeda)), x.efeitoNivel == null ? '—' : `×${x.efeitoNivel}`))) : el('p', 'tip', 'Ainda sem espécies com dados suficientes.'));
+  const upar = r.itens.filter((x) => x.efeitoNivel != null && x.n >= 8).sort((a, z) => z.efeitoNivel - a.efeitoNivel);
+  card.append(el('h3', 'section', 'Upar vale a pena? (preço mediano Nv ≥ 500 ÷ Nv < 200)'));
+  card.append(upar.length ? pkTabela(['Pokémon', 'Moeda', 'Vendas/dia', 'Efeito do nível', 'Leitura'], [...upar.slice(0, 10), ...upar.slice(-5).reverse()].filter((x, i, A) => A.indexOf(x) === i).map((x) => pkLinha(el('b', null, nome(x)), moe(x), x.porDia, el('b', x.efeitoNivel >= 1.5 ? 'ok' : x.efeitoNivel < 1.2 ? 'bad' : null, `×${x.efeitoNivel}`), x.efeitoNivel >= 1.5 ? 'upar compensa' : x.efeitoNivel < 1.2 ? 'o mercado não paga pelo nível' : 'pouco')))
+    : el('p', 'tip', 'Ainda sem espécies com vendas em nível baixo e alto suficientes.'));
+  card.append(el('p', 'tip', 'Aprendizado em uso: o sniper não compra espécie que ficou parada sem nenhuma venda em 14 dias, nem nível alto de espécie em que o nível não vale (acima da mediana). Cada anúncio parado há 24 h+ ganha um diagnóstico em Decisões (🎓): caro para a nota, espécie sem saída, ou gira pouco.'));
+  root.append(card);
 }
 
 // ---------- 👑 Boss pelo histórico completo (tokens comprados, preço médio, drops vendidos, lucro) ----------
