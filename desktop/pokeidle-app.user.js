@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.81
+// @version      5.82
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -31,7 +31,7 @@
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.81';
+  const VERSAO_APP = '5.82';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -1964,13 +1964,34 @@
       if (!c.emUso) continue;
       (c.postos || []).forEach((pid, slot) => {
         const key = `${c.id}:${slot}`, atual = E.postos[key], pct = (M.raridadesCasa || PCT_RAR)[c.rar] ?? PCT_RAR[c.rar];
-        if (!pid) { if (atual && !atual.bot) E.postos[key] = null; else if (atual) atual.pct = pct; return; }
+        if (!pid) { if (atual && !atual.bot) E.postos[key] = null; else if (atual) { atual.pct = pct; casaFicouVazia(key, c.id, atual); } return; }
         const pk = (M.pokemons || []).find((p) => p.id === pid);
         if (!atual && (E.filaVenda || []).some((x) => String(x.pokemonId) === String(pid))) { E.postos[key] = { pokemonId: pid, nome: pk?.nome || '?', xp: pk?.xp ?? null, pct, bot: true, naFila: true }; return; }
         if (atual && atual.pokemonId === pid) { atual.pct = pct; if (pk?.xp != null) atual.xp = pk.xp; if (pk?.nome) atual.nome = pk.nome; return; }
         E.postos[key] = { pokemonId: pid, nome: pk?.nome || '?', xp: pk?.xp ?? null, nota: pk?.nota, pot: pk?.potencia, iv: pk?.ivs ? Object.values(pk.ivs).reduce((a, b) => a + b, 0) : null, pct, bot: false };
       });
     }
+    persistir();
+  }
+  // 5.82: o jogo mostra a casa VAZIA, mas o app ainda achava que o pokémon dele estava lá (saiu da casa por fora do app, ou o jogo
+  // não aceitou colocar) — antes o app nunca enchia essa casa de novo (HRNF: casas 3001 e 3465 paradas). Libera a casa e, se o
+  // pokémon ainda está na coleção esperando subir, devolve ele para a fila de casa (no máximo 2 vezes: depois fica na coleção).
+  function casaFicouVazia(key, cid, p) {
+    if (!p?.pokemonId) { E.postos[key] = null; return; }
+    if (Date.now() - (p.em || 0) < 3 * 60_000) return;                                  // acabou de ser colocado: o jogo ainda não mostrou
+    E.postos[key] = null;
+    const k = String(p.pokemonId), pk = (M.pokemons || []).find((x) => String(x.id) === k);
+    const nv = pk?.level ?? (p.xp != null ? nivelDeXp(p.xp) : '?'), nome = String(pk?.nome || p.nome || '?').replace(/^✨\s*/, '').replace(/\s+Nv\s.*$/, '');
+    const listado = (M.meus || []).some((a) => String(a.pokemonId) === k) || (E.filaVenda || []).some((x) => String(x.pokemonId) === k) || !!(E.anunciosPk || {})[k];
+    if (p.naFila || listado || !pk || pk.slot != null) {
+      log(`🏠 casa ${cid}: o jogo mostra vazia — ${nome} já não está nela (${p.naFila || listado ? 'foi para a venda' : !pk ? 'saiu da coleção' : 'está no time'}); a casa volta a encher`, 'ok');
+      persistir(); return;
+    }
+    E.casaFalhas = E.casaFalhas || {}; const falhas = (E.casaFalhas[k] = (E.casaFalhas[k] || 0) + 1);
+    if (falhas > 2) { log(`🏠 casa ${cid}: ${nome} Nv ${nv} saiu da casa pela ${falhas}ª vez — fica na coleção; a casa recebe outro`, 'erro'); persistir(); return; }
+    E.filaCasa = E.filaCasa || [];
+    if (!E.filaCasa.some((x) => String(x.pokemonId) === k)) E.filaCasa.push({ pokemonId: p.pokemonId, nome, nv: pk.level, nota: p.nota ?? pk.nota, pot: p.pot ?? pk.potencia, iv: p.iv, shiny: !!(p.shiny || pk.shiny), ficha: p.ficha || fichaMin(pk), custo: p.custo || 0, moedaCompra: p.moedaCompra || 'gold', em: Date.now() });
+    log(`🏠 casa ${cid}: o jogo mostra vazia, mas o app achava que ${nome} Nv ${nv} estava nela — libero a casa e ${nome} volta para a fila de casa`, 'ok');
     persistir();
   }
   async function cicloCasas() {
@@ -2196,7 +2217,7 @@
     // 📗 5.72 (pedido do jogador): o comprado para a casa entra no livro do Mercado (a confirmação da compra nem sempre chega casada)
     if (p.preco > 0 && p.pokemonId != null) try { livroCompra({ pid: p.pokemonId, nome: p.nome, nv: p.nv, custo: p.preco, moeda: p.moeda || 'gold', origem: 'casa', shiny: p.shiny }); } catch {}
     enviar({ t: 'xpshare.escolher', casaId, slot, pokemonId: p.pokemonId });
-    E.postos[key] = { pokemonId: p.pokemonId, nome: p.nome, xp: p.xp ?? xpDoNivel(p.nv || 100), custo: p.preco, moedaCompra: p.moeda || 'gold', nota: p.nota, pot: p.pot, iv: p.iv, ficha: p.ficha || null, shiny: !!(p.shiny || p.ficha?.shiny), alvoNv: p.alvoNv || null, bot: true, pct: E.postos[key]?.pct };
+    E.postos[key] = { em: Date.now(), pokemonId: p.pokemonId, nome: String(p.nome || '?').replace(/\s+Nv\s.*$/, ''), xp: p.xp ?? xpDoNivel(p.nv || 100), custo: p.preco, moedaCompra: p.moeda || 'gold', nota: p.nota, pot: p.pot, iv: p.iv, ficha: p.ficha || null, shiny: !!(p.shiny || p.ficha?.shiny), alvoNv: p.alvoNv || null, bot: true, pct: E.postos[key]?.pct };
     persistir();
   }
   /* --------- 🪟 vitrine: até 10 pokémon anunciados --------- */
@@ -3634,6 +3655,9 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
   function aprenderXpShare(d) {
     if (!/xpshare/i.test(d)) return;
     let m; try { m = JSON.parse(d); } catch { return; }
+    // 5.82: no jogo as CASAS também são "xpshare" (xpshare.escolher, com casaId). Só o ITEM XP Share (xpshareheld) ensina a tirar —
+    // aprender um clique numa casa fazia o app repetir esse clique (tirar/trocar o pokémon de uma casa) achando que tirava o item.
+    if (!/xpshareheld/i.test(String(m.t || '')) || m.casaId != null) return;
     const dono = (M.pokemons || []).find((p) => Number(p.heldItemId) === 70050);
     const pid = m.pokemonId ?? m.id ?? null;
     if (pid == null || (dono && String(pid) === String(dono.id)) || !/equip/i.test(m.t)) {
@@ -3658,6 +3682,11 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
   function cicloXpShare() {
     if (CFG.simulacao || !CFG.mod.casas) return;
     const ag = Date.now(); if (ag - (M.xpShEm || 0) < 60_000) return; M.xpShEm = ag;
+    const Rm = E.xpShRemover?.modelo;
+    if (Rm && (!/xpshareheld/i.test(String(Rm.t || '')) || Rm.casaId != null)) {   // 5.82: o "tirar" aprendido era um clique numa casa — esquece
+      log(`🎒 XP Share: o jeito de tirar que eu tinha aprendido era um clique numa CASA (${String(Rm.t || '?')}) — esqueci; tire o item uma vez pelo jogo para eu aprender de novo`, 'erro');
+      delete E.xpShRemover; E.xpSh = {}; persistir();
+    }
     const st = E.xpSh || {};
     if (st.pausaAte && ag < st.pausaAte) return;
     const dono = (M.pokemons || []).find((p) => Number(p.heldItemId) === 70050);
@@ -4995,7 +5024,7 @@ Inclua em mods só o que muda. "deixar na hunt" = boss:false; "fazer boss" = bos
     papeis: () => Object.keys(PAPEIS),
   };
   try { Object.defineProperty(PAGINA, '__PKAPP_PONTE', { value: ponteDesktop, configurable: true }); } catch {}
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, estudoToken, resultadoBossDia, exportarCfg, importarCfg, compilarParecer, fecharDia, aprender, DEC, bossDaConta, cicloHunt, abrirVagaParaShiny, instalarFiltroPopups, novoPedido, interpretarLocal, cicloPedidos, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: VERSAO_APP }, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, sincronizarCasas, aprenderXpShare, cicloXpShare, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, estudoToken, resultadoBossDia, exportarCfg, importarCfg, compilarParecer, fecharDia, aprender, DEC, bossDaConta, cicloHunt, abrirVagaParaShiny, instalarFiltroPopups, novoPedido, interpretarLocal, cicloPedidos, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: VERSAO_APP }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));

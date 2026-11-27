@@ -2,6 +2,7 @@
 
 | Versão | Data | O que mudou |
 | --- | --- | --- |
+| 5.82 | 27/11/2026 | Casas paradas: quando o jogo mostra a casa vazia mas o app ainda achava que o pokémon dele estava lá, o app nunca enchia de novo (HRNF: casas 3001 e 3465). Agora libera a casa em até 3 min e devolve o pokémon à fila de casa (no máximo 2 vezes). XP Share: o app só aprende a tirar o ITEM (xpshareheld) — antes um clique numa casa (as casas também são "xpshare" no jogo) podia ser aprendido e repetido, tirando pokémon das casas; o que foi aprendido errado é esquecido. |
 | 5.81 | 27/11/2026 | Estudo de espécies contínuo: 30 espécies a cada 10 min pelo banco de vendas (giro por dia, faixa de preço, quanto o nível vale, spot de revenda). Vira regra: o sniper evita espécie sem saída e nível alto onde o nível não vale; cada anúncio parado há 24 h+ ganha diagnóstico em Decisões (🎓). Painel → Análise mostra os melhores spots de revenda e onde upar compensa. |
 | 5.80 | 27/11/2026 | Preço em Gemas com teto pelo que a espécie vende de verdade: o precificador subia o preço com o nível, mas há espécies (ex.: Numel ✨) que o mercado paga só pela nota. Agora justo ≤ 75% das vendas da espécie com nota parecida (14 dias) e rápido ≤ a mediana — vale para anunciar, baixar preço e para o sniper decidir se está barato. |
 | 5.79 | 27/11/2026 | Giro da vitrine: pokémon anunciado há mais de 48 h sem nenhum favorito sai e volta para o fim da fila (30 min depois, como anúncio novo); quem tem favorito fica. Um por vez, a cada 30 min. O reanúncio continua a escada de preço de onde parou. |
