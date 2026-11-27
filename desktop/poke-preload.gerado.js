@@ -2166,7 +2166,7 @@ contextBridge.executeInMainWorld({
 });
 
 
-// ===================== PokeIdle App 5.73 (gerado por tools/montar-preload.js — não edite aqui) =====================
+// ===================== PokeIdle App 5.74 (gerado por tools/montar-preload.js — não edite aqui) =====================
 ;(() => {
   const { contextBridge: pontePk, ipcRenderer: ipcPk } = require('electron');
   // o que o script pede ao app: rede só para os sites liberados (API do Claude e precificador) e avisos
@@ -2192,7 +2192,7 @@ contextBridge.executeInMainWorld({
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.73
+// @version      5.74
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -2222,7 +2222,7 @@ contextBridge.executeInMainWorld({
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.73';
+  const VERSAO_APP = '5.74';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -2779,7 +2779,7 @@ contextBridge.executeInMainWorld({
     M.recentesOrb = Object.fromEntries(Object.entries(porId).filter(([, a]) => a.length >= 3).map(([id, a]) => [id, mediana(a)]));
   }
   /* --------- 💰 lucro real: o histórico de compras e vendas da sua conta, no próprio jogo --------- */
-  async function lerHistoricoProprio(msg, horas = 24 * 7, maxPaginas = 8) {
+  async function lerHistoricoProprio(msg, horas = 24 * 7, maxPaginas = 8, aoLer = null) {
     const lim = Date.now() - horas * 3600_000, linhas = []; let completo = false, ok = false;
     for (let pagina = 0; pagina < maxPaginas; pagina++) {
       const seq = 9000 + Math.floor(Math.random() * 90000);
@@ -2787,13 +2787,65 @@ contextBridge.executeInMainWorld({
       if (!resp) break;                                             // sem resposta: não dá para dizer que o histórico está completo
       ok = true;
       const L = resp.linhas || []; if (!L.length) { completo = true; break; }
-      linhas.push(...L);
+      linhas.push(...L); if (aoLer) try { aoLer(pagina + 1, linhas.length, Math.min(...L.map((l) => l.em || Date.now()))); } catch {}
       if (!resp.temMais) { completo = true; break; }
       if (Math.min(...L.map((l) => l.em || Date.now())) < lim) { completo = true; break; }
     }
     const res = linhas.filter((l) => (l.em || 0) >= lim && l.tipo !== 'deposito' && l.tipo !== 'saque' && l.tipo !== 'diamante');
     res.completo = ok && completo; res.maisAntigo = linhas.length ? Math.min(...linhas.map((l) => l.em || Date.now())) : null;
     return res;
+  }
+  /* 👑 RELATÓRIO DO BOSS PELO HISTÓRICO COMPLETO (5.74, pedido do jogador): lê TODAS as páginas do histórico de compras e de
+   * vendas da conta e soma: tokens comprados (quantidade, gasto e preço médio em cada moeda), drops do boss vendidos (bruto e
+   * líquido, por item) e o que ainda está no inventário (pelo menor anúncio de agora). Lucro = vendido + em estoque − tokens usados. */
+  async function relatorioBoss() {
+    const DROPS = { [ITEM.ZFRAG]: 'TM Disk Piece', [ITEM.AOE]: 'AoE TM Disk Piece', [ITEM.MEGA]: 'Mega Stone Fragment', [ITEM.MEGASH]: 'Mega Shiny Stone Fragment', [ITEM.SAFARI]: 'Safari Ticket' };
+    const nomeDe = (id) => E.nomesItens?.[id] || DROPS[id] || String(id);
+    const idDe = (l) => { if (l.itemId != null) return Number(l.itemId); const d = norm2(String(l.descricao || '').replace(/^\d+\s*×\s*/, '')); for (const id of [ITEM.TOKEN, ...Object.keys(DROPS).map(Number)]) if (norm2(nomeDe(id)) === d) return id; return null; };
+    const qtdDe = (l) => Number(String(l.descricao || '').match(/^(\d+)\s*×/)?.[1]) || Number(l.qtd) || 1;
+    if (M.relBossRodando) return { rodando: M.relBossProg || null };
+    M.relBossRodando = true; M.relBossProg = { fase: 'compras', pagina: 0, linhas: 0 };
+    let compras, vendas;
+    try {
+      compras = await lerHistoricoProprio('market.historicoCompras', 24 * 3650, 2000, (p, n, ate) => { M.relBossProg = { fase: 'compras', pagina: p, linhas: n, ate }; });
+      vendas = await lerHistoricoProprio('market.historico', 24 * 3650, 2000, (p, n, ate) => { M.relBossProg = { fase: 'vendas', pagina: p, linhas: n, ate }; });
+    } finally { M.relBossRodando = false; }
+    const cb = cambioImplicito()?.taxa || null;
+    const tok = { gold: { qtd: 0, total: 0 }, orb: { qtd: 0, total: 0 }, desde: null, vendidos: { qtd: 0, total: 0, moeda: null } };
+    for (const l of compras) { if (idDe(l) !== ITEM.TOKEN) continue; const m = l.moeda === 'orb' ? 'orb' : 'gold', q = qtdDe(l); tok[m].qtd += q; tok[m].total += Number(l.bruto ?? l.preco ?? 0); tok.desde = Math.min(tok.desde ?? l.em, l.em); }
+    for (const l of vendas) { if (idDe(l) !== ITEM.TOKEN) continue; tok.vendidos.qtd += qtdDe(l); }
+    const drops = {};
+    for (const l of vendas) {
+      const id = idDe(l); if (!DROPS[id]) continue;
+      const m = l.moeda === 'orb' ? 'orb' : 'gold', d = (drops[id] ||= { nome: nomeDe(id), qtd: 0, orb: { bruto: 0, liquido: 0 }, gold: { bruto: 0, liquido: 0 } });
+      const bruto = Number(l.bruto ?? l.preco ?? 0); d.qtd += qtdDe(l); d[m].bruto += bruto; d[m].liquido += Number(l.liquido ?? bruto * (1 - COMISSAO));
+    }
+    // ainda no inventário ou à venda: pelo menor anúncio de agora em Gemas (já sem a comissão)
+    for (const id of Object.keys(DROPS).map(Number)) {
+      const naMao = Number(M.itens?.[id] || 0) + (M.meus || []).filter((a) => a.tipo === 'item' && Number(a.itemId) === id).reduce((t, a) => t + (Number(a.qtd) || 0), 0);
+      const pr = M.resumo?.[id]?.minOrb || M.medias?.[id]?.orb?.media || 0;
+      const d = (drops[id] ||= { nome: nomeDe(id), qtd: 0, orb: { bruto: 0, liquido: 0 }, gold: { bruto: 0, liquido: 0 } });
+      d.estoque = naMao; d.estoqueValor = Math.round(naMao * pr * (1 - COMISSAO)); d.precoAgora = pr;
+    }
+    const emG = (v, m) => (m === 'orb' ? v : cb ? v / cb : 0);
+    const gastoTokG = tok.orb.total + emG(tok.gold.total, 'gold'), qtdTok = tok.orb.qtd + tok.gold.qtd;
+    const usados = Math.max(0, qtdTok - tok.vendidos.qtd - Number(M.tokens || 0));
+    const medioG = qtdTok ? gastoTokG / qtdTok : 0;
+    const recebidoG = Object.values(drops).reduce((t, d) => t + d.orb.liquido + emG(d.gold.liquido, 'gold'), 0);
+    const estoqueG = Object.values(drops).reduce((t, d) => t + (d.estoqueValor || 0), 0);
+    const custoUsadosG = usados * medioG;
+    const r = {
+      em: Date.now(), completo: !!(compras.completo && vendas.completo), desde: Math.min(compras.maisAntigo ?? Date.now(), vendas.maisAntigo ?? Date.now()), cambio: cb,
+      tokens: { compradosGemas: tok.orb.qtd, gastoGemas: Math.round(tok.orb.total), medioGemas: tok.orb.qtd ? +(tok.orb.total / tok.orb.qtd).toFixed(2) : null,
+        compradosCoins: tok.gold.qtd, gastoCoins: Math.round(tok.gold.total), medioCoins: tok.gold.qtd ? Math.round(tok.gold.total / tok.gold.qtd) : null,
+        total: qtdTok, medioEmGemas: +medioG.toFixed(2), vendidos: tok.vendidos.qtd, noInventario: Number(M.tokens || 0), usados },
+      drops: Object.values(drops).map((d) => ({ ...d, orb: { bruto: Math.round(d.orb.bruto), liquido: Math.round(d.orb.liquido) }, gold: { bruto: Math.round(d.gold.bruto), liquido: Math.round(d.gold.liquido) } })),
+      recebidoGemas: Math.round(recebidoG), estoqueGemas: Math.round(estoqueG), custoTokensUsadosGemas: Math.round(custoUsadosG),
+      lucroGemas: Math.round(recebidoG + estoqueG - custoUsadosG), lucroPorToken: usados ? +((recebidoG + estoqueG - custoUsadosG) / usados).toFixed(2) : null,
+    };
+    E.relBoss = r; persistir();
+    log(`👑 relatório do boss (histórico ${r.completo ? 'completo' : 'parcial'}): ${qtdTok} tokens comprados a ${r.tokens.medioEmGemas} 🔮 em média; drops renderam ${fmt(r.recebidoGemas)} 🔮 + ${fmt(r.estoqueGemas)} 🔮 em estoque; lucro ${r.lucroGemas >= 0 ? '+' : ''}${fmt(r.lucroGemas)} 🔮`, 'ok');
+    return r;
   }
   // 📗 5.67 (pedido do jogador): os pokémon que ainda estão na conta (coleção, casas, time, vitrine) ganham o preço de compra pelo
   // histórico de compras do próprio jogo — lido fundo (até 180 dias, 40 páginas) uma vez por dia
@@ -7003,6 +7055,8 @@ Inclua em mods só o que muda. "deixar na hunt" = boss:false; "fazer boss" = bos
     decisoes: (cat) => DEC.filter((x) => !cat || x.cat === cat).slice(0, 300),
     livro: () => { const casa = new Set(Object.values(E.postos || {}).filter(Boolean).map((p) => String(p.pokemonId))), vit = new Set((M.meus || []).filter((a) => a.tipo === 'pokemon').map((a) => String(a.pokemonId))), fila = new Set((E.filaVenda || []).map((x) => String(x.pokemonId)));
       return LIVRO.slice(0, 3000).map((x) => (x.venda ? x : { ...x, onde: casa.has(String(x.pid)) ? 'casa' : vit.has(String(x.pid)) ? 'vitrine' : fila.has(String(x.pid)) ? 'fila de venda' : 'coleção' })); },
+    relatorioBoss: () => { if (!M.relBossRodando) relatorioBoss().catch((e) => log('relatório do boss: ' + e.message, 'erro')); return { iniciado: true }; },
+    relatorioBossUltimo: () => ({ ultimo: E.relBoss || null, rodando: M.relBossRodando ? M.relBossProg : null }),
     painelEspelho: (aba) => painelEspelho(aba),
     painelEvento: (aba, pkx, tipo, valor, confirmado) => painelEvento(aba, pkx, tipo, valor, confirmado),
     painelCss: () => CSS,

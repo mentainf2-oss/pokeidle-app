@@ -166,6 +166,7 @@ async function renderTrader() {
   if (pkTab === 'parecer') await pkParecer(root, s, c);
   if (pkTab === 'decisoes') await pkDecisoes(root, s, c);
   if (pkTab === 'mercado') await pkMercado(root, s, c);
+  if (pkTab === 'bossA') await pkRelBoss(root, c);
   if (PK_ESP[pkTab]) await pkEspelho(root, c, pkTab);
   if (pkTab === 'farm') await pkFarmTela(root, s);
   if (pkTab === 'controle') { await pkControle(root, s, c); const h = el('h2', 'section', 'Ajustes finos e log (o painel que ficava no jogo)'); root.append(h); await pkEspelho(root, c, 'avancado'); }
@@ -314,6 +315,41 @@ async function pkMercado(root, s, c) {
   })) : el('p', 'tip', 'Nada vendido ainda.'));
   c2.append(el('p', 'tip', 'Recebido já sem a comissão de 15%. O preço da venda é conferido com o histórico do jogo (✓ = conferido, · = ainda não). * = comprado numa moeda e vendido na outra (lucro pelo câmbio do dia). Guardado na conta e num arquivo do PC (pkapp-livro); nenhum pokémon anotado é anunciado abaixo do custo + comissão.'));
   root.append(c2);
+}
+
+// ---------- 👑 Boss pelo histórico completo (tokens comprados, preço médio, drops vendidos, lucro) ----------
+let pkRelTimer = null;
+async function pkRelBoss(root, c) {
+  const card = el('div', 'card');
+  const topo = el('div', 'pk-barra'); topo.append(el('h2', 'section first', 'Boss pelo histórico completo da conta'));
+  const corpo = el('div');
+  const bt = button('Calcular agora (lê todo o histórico)', 'ghost', async () => { await window.idle.invoke('poke:pkapp:relBoss', c.id, true).catch(() => null); setTimeout(atualizar, 1500); });
+  topo.append(bt); card.append(topo, corpo); root.append(card);
+  const G = (v) => (v == null ? '—' : pkG(v)), C = (v) => (v == null ? '—' : pkFmt(v));
+  async function atualizar() {
+    const x = await window.idle.invoke('poke:pkapp:relBoss', c.id, false).catch(() => null);
+    if (!document.body.contains(corpo)) { clearInterval(pkRelTimer); return; }
+    corpo.replaceChildren();
+    if (x && x.rodando) { const p = x.rodando; corpo.append(el('p', 'tip', `Lendo o histórico de ${p.fase === 'compras' ? 'compras' : 'vendas'}… página ${p.pagina || 0} (${p.linhas || 0} linhas${p.ate ? `, até ${pkQuando(p.ate)}` : ''}). Pode levar alguns minutos: o app respeita o limite de pedidos do jogo.`)); bt.disabled = true; return; }
+    bt.disabled = false;
+    const r = x && x.ultimo;
+    if (!r) { corpo.append(el('p', 'tip', 'Ainda não calculado. Clique em "Calcular agora": o app lê todas as páginas do seu histórico de compras e vendas.')); return; }
+    const t = r.tokens;
+    const kp = el('div', 'pk-kpis');
+    const kpi = (rot, val, sub, cls) => { const b = el('div', 'pk-kpi'); b.append(el('span', null, rot), el('b', cls || null, val)); if (sub) b.append(el('small', null, sub)); return b; };
+    kp.append(
+      kpi('Tokens comprados', pkFmt(t.total), `${pkFmt(t.compradosGemas)} em Gemas · ${pkFmt(t.compradosCoins)} em Coins`),
+      kpi('Preço médio do token', `${t.medioEmGemas} 🔮`, `${t.medioGemas != null ? t.medioGemas + ' 🔮 (Gemas)' : ''}${t.medioCoins != null ? ' · ' + C(t.medioCoins) + ' (Coins)' : ''}`),
+      kpi('Drops renderam', G(r.recebidoGemas + r.estoqueGemas), `${G(r.recebidoGemas)} vendidos + ${G(r.estoqueGemas)} em estoque`),
+      kpi('Lucro do boss', `${r.lucroGemas >= 0 ? '+' : '−'}${pkG(Math.abs(r.lucroGemas))}`, `${r.lucroPorToken != null ? r.lucroPorToken + ' 🔮 por token · ' : ''}${pkFmt(t.usados)} tokens usados (${G(r.custoTokensUsadosGemas)})`, pkCls(r.lucroGemas)),
+    );
+    corpo.append(kp);
+    corpo.append(pkTabela(['Drop', 'Vendidos', 'Recebido em Gemas', 'Recebido em Coins', 'Em estoque', 'Vale (preço de agora)'], r.drops.sort((a, z) => (z.orb.liquido + z.gold.liquido / (r.cambio || 1e9)) - (a.orb.liquido + a.gold.liquido / (r.cambio || 1e9))).map((d) =>
+      pkLinha(el('b', null, d.nome), pkFmt(d.qtd), d.orb.liquido ? G(d.orb.liquido) : '—', d.gold.liquido ? C(d.gold.liquido) : '—', pkFmt(d.estoque || 0), d.estoqueValor ? G(d.estoqueValor) : '—'))));
+    corpo.append(el('p', 'tip', `Histórico ${r.completo ? 'completo' : 'parcial (o jogo não devolveu todas as páginas)'} desde ${pkQuando(r.desde)} · calculado ${pkQuando(r.em)}. Recebido já sem a comissão de 15%; Coins convertidos pelo câmbio de ${r.cambio ? pkFmt(Math.round(r.cambio)) : '?'} por Gema. Tokens usados = comprados − revendidos − ${pkFmt(t.noInventario)} no inventário; o custo deles vai pelo preço médio. Drops que você tirou antes do primeiro token comprado também entram.`));
+  }
+  await atualizar();
+  clearInterval(pkRelTimer); pkRelTimer = setInterval(atualizar, 4000);
 }
 
 // ---------- 🪞 Abas do painel antigo (Compras, Casas, Lucro, Boss, Análise, Claude, e Config/Início em Ajustes) ----------
