@@ -2,6 +2,7 @@
 
 | Versão | Data | O que mudou |
 | --- | --- | --- |
+| 5.79 | 27/11/2026 | Giro da vitrine: pokémon anunciado há mais de 48 h sem nenhum favorito sai e volta para o fim da fila (30 min depois, como anúncio novo); quem tem favorito fica. Um por vez, a cada 30 min. O reanúncio continua a escada de preço de onde parou. |
 | 5.78 | 27/11/2026 | Relatório do boss: drops que a conta comprou (sniper de itens/revenda) têm o custo descontado do lucro do boss. |
 | 5.77 | 27/11/2026 | Histórico: página que demora ganha uma 2ª tentativa antes de parar (e o log diz onde parou); "Fragmento de Z-Move" reconhecido como TM Disk Piece no relatório do boss. |
 | 5.76 | 27/11/2026 | Histórico do jogo: o app parava na 1ª página (o jogo não manda "tem mais"); agora lê todas as páginas (12 de vendas, 61 de compras), parando na página vazia ou repetida. Vale para o relatório do boss, o livro do Mercado e o lucro real. |

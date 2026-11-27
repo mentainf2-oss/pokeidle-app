@@ -2166,7 +2166,7 @@ contextBridge.executeInMainWorld({
 });
 
 
-// ===================== PokeIdle App 5.78 (gerado por tools/montar-preload.js — não edite aqui) =====================
+// ===================== PokeIdle App 5.79 (gerado por tools/montar-preload.js — não edite aqui) =====================
 ;(() => {
   const { contextBridge: pontePk, ipcRenderer: ipcPk } = require('electron');
   // o que o script pede ao app: rede só para os sites liberados (API do Claude e precificador) e avisos
@@ -2192,7 +2192,7 @@ contextBridge.executeInMainWorld({
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.78
+// @version      5.79
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -2222,7 +2222,7 @@ contextBridge.executeInMainWorld({
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.78';
+  const VERSAO_APP = '5.79';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -2260,7 +2260,8 @@ contextBridge.executeInMainWorld({
     // giro rápido da vitrine (no evento de XP upar é barato: vender mais rápido, com menos lucro por pokémon)
     // estudo contínuo do mercado: o que vale, o que vende rápido e o que deu lucro decide o que comprar
     estudoAtivo: true, estudoVendasDiaMin: 3, estudoHorasLenta: 36,
-    xpShareAuto: true, vagasCasaFixas: 2,                          // 5.72: 2 vagas da vitrine sempre guardadas para o que sai das casas
+    xpShareAuto: true, vagasCasaFixas: 2, rotacaoVitrineH: 48,     // 5.79: giro da vitrine (sem favorito há 48 h)
+                             // 5.72: 2 vagas da vitrine sempre guardadas para o que sai das casas
                                                 // 5.72: o app move o XP Share (+5% de XP) para quem sobe numa casa
     maxPorEspecie: 3, maxPorEspecieShiny: 1, snipeDiasVendaMax: 3, snipeDiasVendaMaxShiny: 6,   // 5.71: giro de verdade antes de comprar
                                                  // no máximo N da mesma espécie entre casas, fila e vitrine (não inundar o próprio mercado)
@@ -4506,7 +4507,26 @@ contextBridge.executeInMainWorld({
     E.vistoEm = E.vistoEm || {};
     const v = E.vistoEm[a.id], c = a.criadoEm || Date.now();
     if (!v || c < v) { E.vistoEm[a.id] = c; if (Object.keys(E.vistoEm).length > 200) for (const k of Object.keys(E.vistoEm)) if (!M.meus.some((x) => String(x.id) === k)) delete E.vistoEm[k]; }
-    return E.vistoEm[a.id];
+    // 5.79: girado na vitrine (tirado e anunciado de novo) continua com a idade do 1º anúncio — a escada de preço não volta ao começo
+    const p0 = a.tipo === 'pokemon' ? E.primeiroAnuncio?.[String(a.pokemonId)] : null;
+    return p0 ? Math.min(E.vistoEm[a.id], p0) : E.vistoEm[a.id];
+  }
+  /* 🔄 GIRO DA VITRINE (5.79, pedido do jogador): pokémon anunciado há mais de 48 h SEM nenhum favorito sai da vitrine e volta para
+   * o fim da fila (o jogo pede 30 min para anunciar de novo) — abre vaga para o que está esperando e o anúncio volta como novo.
+   * Quem tem favorito fica (alguém quer comprar). Um por vez, no máximo a cada 30 min. */
+  function cicloRotacaoVitrine() {
+    if (!(CFG.rotacaoVitrineH > 0) || CFG.simulacao || !CFG.mod.sniperPk && !CFG.mod.casas) return;
+    const ag = Date.now(); if (ag - (M.rotEm || 0) < 30 * 60_000) return;
+    const parados = (M.meus || []).filter((a) => a.tipo === 'pokemon' && ag - desdeQuando(a) > CFG.rotacaoVitrineH * 3600_000 && !favsDe(a)).sort((a, z) => desdeQuando(a) - desdeQuando(z));
+    if (!parados.length) return;
+    M.rotEm = ag;
+    const a = parados[0], f = a.ficha || {}, c = custoDoAnuncio(a), idade = desdeQuando(a), pid = String(a.pokemonId);
+    (E.primeiroAnuncio ||= {})[pid] = Math.min(E.primeiroAnuncio[pid] || idade, idade);
+    for (const [k, t] of Object.entries(E.primeiroAnuncio)) if (ag - t > 21 * 86400_000) delete E.primeiroAnuncio[k];
+    log(`🔄 vitrine: ${f.shiny ? '✨' : ''}${f.nome || 'pokémon'} Nv ${fmt(f.level || 0)} parado há ${Math.round((ag - idade) / 3600_000)} h sem nenhum favorito — tirei para girar a vitrine; volta no fim da fila em 30 min`, 'venda');
+    (E.filaVenda ||= []).push({ pokemonId: a.pokemonId, nome: f.nome || 'pokémon', nv: f.level, nota: f.nota, pot: f.potencia, iv: f.ivTotal, shiny: !!f.shiny, custo: c?.custo || 0, moeda: a.moeda, moedaCompra: compradoEmGemas(a.pokemonId, f.nome, f.level) ? 'orb' : a.moeda, naoAntes: ag + 31 * 60_000, rotacao: true });
+    persistir();
+    enviar({ t: 'market.cancelar', id: a.id }); M.meusEm = 0;
   }
   function compradoEmGemas(pokemonId, nome, nv) {
     const id = pokemonId != null ? String(pokemonId) : null;
@@ -4774,7 +4794,8 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
     // vitrine quase cheia: em Gemas usa o "Vender rápido" do precificador, para girar a vaga
     // vender rápido: em Gemas o "vender rápido" do precificador; em Coins o preço de mercado × fatorRapido; nunca abaixo do piso (custo)
     const rapido = CFG.vendaRapida || (moeda === 'orb' && ref.rapido && vagasPk().livres <= 1);
-    const justoSh = moeda === 'orb' ? (ref?.prc?.justo ?? ref?.justo ?? null) : (ref?.como !== 'sniper' ? ref?.preco ?? null : null);   // 5.67: todo pokémon entra no preço justo (antes só shiny)
+    const girado = Date.now() - (E.primeiroAnuncio?.[String(pokemonId)] || Date.now()) > 12 * 3600_000;   // 5.79: voltou do giro da vitrine: segue a escada
+    const justoSh = girado ? null : moeda === 'orb' ? (ref?.prc?.justo ?? ref?.justo ?? null) : (ref?.como !== 'sniper' ? ref?.preco ?? null : null);   // 5.67: todo pokémon entra no preço justo (antes só shiny)
     const alvoV = justoSh ? justoSh : rapido ? (moeda === 'orb' && ref.rapido ? ref.rapido * fatorGemasAgora() : ref.preco * fatorRapidoAgora()) : ref.preco * CFG.vendaFatorMediana;
     let alvoC = alvoV;
     if (rapido) { const cc = await menorConcorrentePk(ficha?.nome || String(nome).replace(/ Nv .*$/, ''), Math.round(nv), nota, pot, moeda, shiny); if (cc?.preco && degrauAbaixo(cc.preco, moeda) < alvoC) { alvoC = degrauAbaixo(cc.preco, moeda); porque += ` — abaixo do menor parecido (${curtoM(cc.preco, moeda)})`; } }
@@ -5675,7 +5696,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
         if (CFG.mod.prey) await cicloPrey();
         if (CFG.mod.claude) await cicloClaude();
         try { instalarFiltroPopups(); } catch {}
-        try { cicloPasse(); if (CFG.xpShareAuto) cicloXpShare(); else avisoXpShare(); } catch {}
+        try { cicloPasse(); if (CFG.xpShareAuto) cicloXpShare(); else avisoXpShare(); cicloRotacaoVitrine(); } catch {}
         if (CFG.mod.hunt) await cicloHunt();
         if (CFG.mod.sniperPk || CFG.mod.casas) await carregarEvo();
       } catch (e) { log('erro: ' + e.message, 'erro'); }
