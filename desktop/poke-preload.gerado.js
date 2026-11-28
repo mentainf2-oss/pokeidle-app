@@ -2166,7 +2166,7 @@ contextBridge.executeInMainWorld({
 });
 
 
-// ===================== PokeIdle App 5.88 (gerado por tools/montar-preload.js — não edite aqui) =====================
+// ===================== PokeIdle App 5.89 (gerado por tools/montar-preload.js — não edite aqui) =====================
 ;(() => {
   const { contextBridge: pontePk, ipcRenderer: ipcPk } = require('electron');
   // o que o script pede ao app: rede só para os sites liberados (API do Claude e precificador) e avisos
@@ -2192,7 +2192,7 @@ contextBridge.executeInMainWorld({
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.88
+// @version      5.89
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -2222,7 +2222,7 @@ contextBridge.executeInMainWorld({
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.88';
+  const VERSAO_APP = '5.89';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -5348,10 +5348,11 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
       // 5.88: o jogo pode recusar o anúncio (a HRNF repetia "ANUNCIAR 3× TM Disk Piece" a cada 2–3 min e as peças seguiam no inventário).
       // Se a última tentativa não tirou nada do inventário, conta como recusa; depois de 2, espera 30 min e diz o motivo que o jogo deu.
       const T = ((E.dropTent ||= {})[id] ||= { n: 0, em: 0, tem: 0 });
-      if (T.em) { if (tem < T.tem) { T.n = 0; T.em = 0; } else if (Date.now() - T.em > 90_000) { T.n++; T.em = 0; } }
+      if (T.em) { if (tem < T.tem) { T.n = 0; T.em = 0; T.pausas = 0; } else if (Date.now() - T.em > 90_000) { T.n++; T.em = 0; } }
       if (T.n >= 2) {
-        if (Date.now() - (T.pausaEm ||= Date.now()) < 30 * 60_000) { const er = M.ultimoErroJogo && Date.now() - M.ultimoErroJogo.em < 40 * 60_000 ? ` (o jogo disse: "${M.ultimoErroJogo.txt}")` : ''; avisoRaro('dropRecusa' + id, `👑 ${tem}× ${E.nomesItens[id] || id}: o jogo não aceitou o anúncio 2 vezes${er} — tento de novo em 30 min`, 30, 'erro'); continue; }
-        T.n = 0; T.pausaEm = 0;
+        const pausa = Math.min(240, 30 * 2 ** (T.pausas || 0)) * 60_000;   // 5.89: 30 → 60 → 120 → 240 min (peça comprada fica retida no jogo por horas)
+        if (Date.now() - (T.pausaEm ||= Date.now()) < pausa) { const er = M.ultimoErroJogo && Date.now() - M.ultimoErroJogo.em < 40 * 60_000 ? ` (o jogo disse: "${M.ultimoErroJogo.txt}")` : ''; avisoRaro('dropRecusa' + id, `👑 ${tem}× ${E.nomesItens[id] || id}: o jogo não aceitou o anúncio 2 vezes${er} — tento de novo em ${Math.round(pausa / 60_000)} min`, 30, 'erro'); continue; }
+        T.n = 0; T.pausaEm = 0; T.pausas = (T.pausas || 0) + 1;
       }
       E.custosItens[ck(id, 'orb')] = { qtd: tem, custoTotal: 0, custoMedio: 0 };
       T.em = Date.now(); T.tem = tem;
@@ -5964,7 +5965,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
         if (CFG.mod.sniperIt && !CFG.vendaRapida) await reajustarItens();
         if (CFG.vendaRapida && (CFG.mod.casas || CFG.mod.sniperPk || CFG.mod.sniperIt)) await reajustarAnuncios();
         if (CFG.negociar) negociacoesAgendadas();
-        if (CFG.tokenAutoCompra && CFG.mod.boss) await comprarTokens();   // token só para quem faz boss (a Hrmfarm, sem boss, ficava tentando comprar)
+        if (CFG.tokenAutoCompra && CFG.mod.boss && (!M.nivel || regiaoLiberada(CFG.bossRegiao))) await comprarTokens();   // 5.89: conta que ainda não alcança a região do boss não compra token (a DragonLore seguia comprando)   // token só para quem faz boss (a Hrmfarm, sem boss, ficava tentando comprar)
         if (CFG.mod.boss) await cicloBoss();
         if (CFG.mod.prey) await cicloPrey();
         if (CFG.mod.claude) await cicloClaude();
