@@ -2166,7 +2166,7 @@ contextBridge.executeInMainWorld({
 });
 
 
-// ===================== PokeIdle App 5.85 (gerado por tools/montar-preload.js — não edite aqui) =====================
+// ===================== PokeIdle App 5.86 (gerado por tools/montar-preload.js — não edite aqui) =====================
 ;(() => {
   const { contextBridge: pontePk, ipcRenderer: ipcPk } = require('electron');
   // o que o script pede ao app: rede só para os sites liberados (API do Claude e precificador) e avisos
@@ -2192,7 +2192,7 @@ contextBridge.executeInMainWorld({
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.85
+// @version      5.86
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -2222,7 +2222,7 @@ contextBridge.executeInMainWorld({
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.85';
+  const VERSAO_APP = '5.86';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -2410,7 +2410,7 @@ contextBridge.executeInMainWorld({
   const CATS_DEC = [
     ['auditoria', (m) => /^🔎/.test(m)], ['erro', (m, t) => t === 'erro' || /^erro|falhou/i.test(m)], ['aprendizado', (m) => /^🎓|^📋 parecer/.test(m)],
     ['claude', (m) => /^🧠/.test(m)], ['venda', (m) => /^💰 vendido|^ANUNCIAR|^VENDER|^🪟/.test(m)], ['preço', (m) => /^(BAIXAR|SUBIR|REAJUSTAR|CORRIGIR)|^🔁|^🤝 aplicando/.test(m)],
-    ['negociação', (m) => /^🤝/.test(m)], ['compra', (m, t) => t === 'compra' || /^COMPRAR|^🛒|^✨/.test(m)], ['casa', (m) => /^🏠/.test(m)], ['boss', (m) => /^👑|Boss Token|^🎁/.test(m)],
+    ['negociação', (m) => /^🤝/.test(m)], ['compra', (m, t) => t === 'compra' || /^COMPRAR|^🛒|^✨/.test(m)], ['casa', (m) => /^🏠|^🎒/.test(m)], ['boss', (m) => /^👑|Boss Token|^🎁/.test(m)],
     ['pulou', (m) => /pulei|^⛔|não compro|sem preço|sem câmbio|^📚|^🐢/.test(m)], ['hunt', (m) => /^🗺️/.test(m)], ['evolução', (m) => /^🧬/.test(m)], ['pedido', (m) => /^💬/.test(m)], ['ajuste', (m) => /^⚙️|^👥|^▶|^⏹|^🧪|^⚡ modo|ligado$|desligado$/.test(m)],
   ];
   const IGNORAR_DEC = /^💰 lucro real|planilha|^🔮 precificador|^🎓 (em|estudo)|^🧾|^📊/;
@@ -3964,12 +3964,12 @@ contextBridge.executeInMainWorld({
     if (CFG.evoluirAuto === false || Date.now() - (M.evoCicloEm || 0) < 60_000) return;
     M.evoCicloEm = Date.now();
     if (!M.evo || !PRC.pronto()) return;
-    const ocup = new Set([...Object.values(E.postos || {}).filter(Boolean).map((p) => String(p.pokemonId)), ...(M.meus || []).map((a) => String(idPkAnuncio(a))), ...Object.keys(E.anunciosPk || {}), String(M.activeId), ...(E.filaVenda || []).map((x) => String(x.pokemonId))]);
+    const ocup = new Set([...Object.values(E.postos || {}).filter((p) => p && !p.bot).map((p) => String(p.pokemonId)), ...(M.meus || []).map((a) => String(idPkAnuncio(a))), ...Object.keys(E.anunciosPk || {}), String(M.activeId), ...(E.filaVenda || []).map((x) => String(x.pokemonId))]);   // 5.86: pokémon do app na casa também evolui
     E.evoluidos = E.evoluidos || {}; E.evoNao = E.evoNao || {};
     const cands = [];
     for (const p of M.pokemons || []) {
       const k = String(p.id);
-      if (p.slot != null || ocup.has(k) || p.heldItemId || p.starter || !(p.nota < 3.5)) continue;
+      if (p.slot != null || ocup.has(k) || (p.heldItemId && Number(p.heldItemId) !== 70050) || p.starter || !(p.nota < 3.5)) continue;
       const e = M.evo[p.nome]; if (!e || !(p.level >= e.nivel) || !e.paraId) continue;
       if (E.evoNao[k] && Date.now() - E.evoNao[k] < 24 * 3600_000) continue;            // o jogo não evoluiu este há pouco
       if (Date.now() - ((M.evoFeito ||= {})[k] || 0) < 5 * 60_000) continue;
@@ -4328,7 +4328,16 @@ contextBridge.executeInMainWorld({
       return true;
     }
     const cands = (M.pokemons || []).filter((p) => p.slot == null && !ocupados.has(String(p.id)) && (p.level || 0) < alvo && (p.nota >= 3.5 || p.shiny || p.potencia === 5) && !(CFG.evitarOutland && ehOutland(p)));
-    if (!cands.length) return false;
+    if (!cands.length) {
+      // 5.86: casa não fica vazia — sobe uma pré-evolução da coleção que vira nota 3,5+ evoluindo (a mais perto de evoluir)
+      const pre = (M.pokemons || []).filter((p) => p.slot == null && !ocupados.has(String(p.id)) && !p.heldItemId && !(CFG.evitarOutland && ehOutland(p))).map((p) => ({ p, pe: preEvoBoa(p) })).filter((x) => x.pe).sort((a, z) => (a.pe.nivel - a.p.level) - (z.pe.nivel - z.p.level) || z.pe.nova - a.pe.nova);
+      if (!pre.length) return false;
+      const { p, pe } = pre[0], ivt = Object.values(p.ivs || {}).reduce((x, y) => x + y, 0);
+      log(`${sim()}🏠 casa ${cid}: colocando ${p.nome} Nv ${p.level} da sua coleção — sobe até o Nv ${pe.nivel}, evolui para ${pe.para} (nota ${Number(p.nota).toFixed(2)} → ${pe.nova.toFixed(2)}) e segue até o Nv ${alvo} para vender`, 'ok');
+      registrarNoPosto({ pokemonId: p.id, nome: p.nome, nv: p.level, xp: p.xp, nota: p.nota, pot: p.potencia, iv: ivt, ficha: fichaMin(p), preco: custoConhecido(p.id), casaKey: key });
+      if (CFG.simulacao) M.simCasa[key] = p.id;
+      return true;
+    }
     const iv = (p) => Object.values(p.ivs || {}).reduce((x, y) => x + y, 0);
     const notas = cands.map((p) => { const fim = precoMercado(p.nome, alvo, p.nota, p.potencia, iv(p)), agora = precoMercado(p.nome, Math.max(50, p.level), p.nota, p.potencia, iv(p)); return { p, fim, ganho: (fim?.preco || 0) - (agora?.preco || 0) }; }).sort((a, z) => z.ganho - a.ganho || z.p.nota - a.p.nota);
     const { p, fim, ganho } = notas[0];
@@ -4736,10 +4745,13 @@ contextBridge.executeInMainWorld({
     if (!(CFG.rotacaoVitrineH > 0) || CFG.simulacao || !CFG.mod.sniperPk && !CFG.mod.casas) return;
     const ag = Date.now(); if (ag - (M.rotEm || 0) < 30 * 60_000) return;
     const limH = (E.filaVenda || []).length > 0 || casasProntasEm(0) > 0 ? Math.min(24, CFG.rotacaoVitrineH) : CFG.rotacaoVitrineH;   // 5.85: com fila esperando, gira em 24 h
-    const parados = (M.meus || []).filter((a) => a.tipo === 'pokemon' && ag - desdeQuando(a) > limH * 3600_000 && !favsDe(a)).sort((a, z) => desdeQuando(a) - desdeQuando(z));
+    E.rotPk = E.rotPk || {}; for (const [k, t] of Object.entries(E.rotPk)) if (ag - t > 7 * 86400_000) delete E.rotPk[k];
+    // 5.86: o mesmo anúncio não gira de novo antes de limH (antes o mais antigo — pela 1ª data — voltava a cada hora: Mamoswine da HrnFarm em loop)
+    const parados = (M.meus || []).filter((a) => a.tipo === 'pokemon' && ag - desdeQuando(a) > limH * 3600_000 && !favsDe(a) && ag - (E.rotPk[String(a.pokemonId)] || 0) > limH * 3600_000).sort((a, z) => desdeQuando(a) - desdeQuando(z));
     if (!parados.length) return;
     M.rotEm = ag;
     const a = parados[0], f = a.ficha || {}, c = custoDoAnuncio(a), idade = desdeQuando(a), pid = String(a.pokemonId);
+    E.rotPk[pid] = ag;
     (E.primeiroAnuncio ||= {})[pid] = Math.min(E.primeiroAnuncio[pid] || idade, idade);
     for (const [k, t] of Object.entries(E.primeiroAnuncio)) if (ag - t > 21 * 86400_000) delete E.primeiroAnuncio[k];
     log(`🔄 vitrine: ${f.shiny ? '✨' : ''}${f.nome || 'pokémon'} Nv ${fmt(f.level || 0)} parado há ${Math.round((ag - idade) / 3600_000)} h sem nenhum favorito — tirei para girar a vitrine; volta no fim da fila em 30 min`, 'venda');
@@ -6003,6 +6015,14 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
   }
   // 5.73 (o jogador avisou: o jogo NÃO deixa pôr o XP Share em quem está numa casa): vai para quem está na coleção esperando
   // subir — primeiro os da fila de casa (comprados para upar), depois os da coleção que o app sobe para vender (nota ≥ 3,5)
+  // 5.86: pré-evolução que vale subir — ainda não tem o nível de evoluir, mas a forma evoluída (por nível) dá nota ≥ 3,5.
+  // A casa / o XP Share levam até o nível de evoluir, o app evolui (🧬) e aí ela segue até o nível de venda.
+  function preEvoBoa(p) {
+    if (!p || !M.evo || !PRC.pronto() || !p.ivs || !(p.quality > 0) || !(p.nota < 3.5)) return null;
+    const e = M.evo[p.nome]; if (!e || !e.paraId || !(e.nivel > (p.level || 0))) return null;
+    const nova = PRC.notaDe(e.paraId, { ivs: p.ivs, quality: p.quality, potencia: p.potencia || 1, shiny: !!p.shiny });
+    return nova != null && nova >= 3.5 ? { para: e.para, nivel: e.nivel, nova } : null;
+  }
   function candidatosXpShare() {
     const naCasa = new Set(Object.values(E.postos || {}).filter(Boolean).map((p) => String(p.pokemonId)));
     const fora = new Set([...naCasa, ...(M.meus || []).filter((a) => a.tipo === 'pokemon').map((a) => String(a.pokemonId)), String(M.activeId)]);
@@ -6012,6 +6032,8 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
     for (const x of E.filaCasa || []) { const p = (M.pokemons || []).find((q) => String(q.id) === String(x.pokemonId)); if (ok(p)) out.push({ pid: p.id, nome: p.nome, nv: p.level || 1, alvo: nvMin, falta: 1e15 + (p.level || 0), fila: true }); }
     for (const p of M.pokemons || []) if (ok(p) && !out.some((c) => String(c.pid) === String(p.id)) && ((p.nota || 0) >= 3.5 || p.shiny) && !(CFG.evitarOutland && ehOutland(p)))
       out.push({ pid: p.id, nome: p.nome, nv: p.level || 1, alvo: nvMin, falta: (p.level || 0) * 1e6 + (p.nota || 0) });   // mais alto primeiro: chega antes ao nível de venda
+    // 5.86: sem ninguém acima, sobe uma pré-evolução que vira nota 3,5+ (a mais perto do nível de evoluir primeiro)
+    if (!out.length) for (const p of M.pokemons || []) { if (!ok(p) || (CFG.evitarOutland && ehOutland(p))) continue; const pe = preEvoBoa(p); if (pe) out.push({ pid: p.id, nome: p.nome, nv: p.level || 1, alvo: pe.nivel, falta: -(pe.nivel - (p.level || 0)), evo: pe }); }
     return out.sort((a, z) => z.falta - a.falta);
   }
   function cicloXpShare() {
