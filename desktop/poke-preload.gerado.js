@@ -2166,7 +2166,7 @@ contextBridge.executeInMainWorld({
 });
 
 
-// ===================== PokeIdle App 5.83 (gerado por tools/montar-preload.js — não edite aqui) =====================
+// ===================== PokeIdle App 5.84 (gerado por tools/montar-preload.js — não edite aqui) =====================
 ;(() => {
   const { contextBridge: pontePk, ipcRenderer: ipcPk } = require('electron');
   // o que o script pede ao app: rede só para os sites liberados (API do Claude e precificador) e avisos
@@ -2192,7 +2192,7 @@ contextBridge.executeInMainWorld({
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.83
+// @version      5.84
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -2222,7 +2222,7 @@ contextBridge.executeInMainWorld({
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.83';
+  const VERSAO_APP = '5.84';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -2260,7 +2260,7 @@ contextBridge.executeInMainWorld({
     // giro rápido da vitrine (no evento de XP upar é barato: vender mais rápido, com menos lucro por pokémon)
     // estudo contínuo do mercado: o que vale, o que vende rápido e o que deu lucro decide o que comprar
     estudoAtivo: true, estudoVendasDiaMin: 3, estudoHorasLenta: 36,
-    xpShareAuto: true, vagasCasaFixas: 2, rotacaoVitrineH: 48, venderShinyCapturado: true,     // 5.79: giro da vitrine (sem favorito há 48 h)
+    xpShareAuto: true, vagasCasaFixas: 2, rotacaoVitrineH: 48, venderShinyCapturado: true, casasAuto: true, evoluirAuto: true,     // 5.79: giro da vitrine (sem favorito há 48 h)
                              // 5.72: 2 vagas da vitrine sempre guardadas para o que sai das casas
                                                 // 5.72: o app move o XP Share (+5% de XP) para quem sobe numa casa
     maxPorEspecie: 3, maxPorEspecieShiny: 1, snipeDiasVendaMax: 3, snipeDiasVendaMaxShiny: 6,   // 5.71: giro de verdade antes de comprar
@@ -2474,7 +2474,7 @@ contextBridge.executeInMainWorld({
     if (String(url).includes('pokeidle.io')) {
       M.ws = ws; ws.addEventListener('message', (ev) => { if (typeof ev.data === 'string') receber(ev.data); });
       const s0 = ws.send.bind(ws);
-      ws.send = (d) => { try { if (!M.enviandoNosso && typeof d === 'string') { explorar('saida', d); aprenderXpShare(d); } } catch {} return s0(d); };   // o que o JOGO manda quando você clica
+      ws.send = (d) => { try { if (!M.enviandoNosso && typeof d === 'string') { explorar('saida', d); aprenderXpShare(d); aprenderEvoluir(d); } } catch {} return s0(d); };   // o que o JOGO manda quando você clica
     }
     return ws;
   };
@@ -3483,7 +3483,8 @@ contextBridge.executeInMainWorld({
       const r = { faixas, familias, nShiny: S.ord.s.length, nNormal: S.ord.n.length, dias };
       S.resumoSh = { de: S.rows, r }; return r;
     }
-    return { carregar, precificar, lerFicha, pronto, info, resumoShiny, especieId: (id, nome) => (pronto() ? especieId(id, nome) : null) };
+    return { carregar, precificar, lerFicha, pronto, info, resumoShiny, especieId: (id, nome) => (pronto() ? especieId(id, nome) : null),
+      notaDe: (speciesId, p) => { try { return S.central ? S.central.nota(speciesId, p) : null; } catch { return null; } } };   // 5.84: nota de uma ficha em outra forma (evoluída)
   })();
   // preço do precificador para uma ficha, com os fragmentos (Z-Move, AoE, Mega) pelo menor anúncio de agora
   function precoPrecificador(f) {
@@ -3919,8 +3920,18 @@ contextBridge.executeInMainWorld({
     try { const m = await I.evoMapa(); if (m && typeof m === 'object') M.evo = m; } catch {}
   }
   // 🧬 a ação de evoluir que o jogo manda quando VOCÊ evolui (o Explorador anotou): vira um molde para o app evoluir sozinho
+  // 5.84: aprende direto do clique "Evoluir" (como o XP Share) — não depende do Explorador
+  function aprenderEvoluir(d) {
+    if (!/evolu/i.test(d)) return;
+    let m; try { m = JSON.parse(d); } catch { return; }
+    if (!/evolu/i.test(String(m.t || ''))) return;
+    const limpo = JSON.parse(JSON.stringify(m, (k, v) => (/token|senha|password|auth|cookie|sess|segredo|secret/i.test(k) ? undefined : v)));
+    const novo = !E.evoModelo;
+    E.evoModelo = { t: m.t, ex: JSON.stringify(limpo), em: Date.now() }; persistir();
+    if (novo) log(`🧬 aprendi a evoluir: ${m.t} (${Object.keys(limpo).join(', ')}) — a partir de agora o app evolui sozinho quem chega em nota 3,5 evoluindo`, 'ok');
+  }
   function acaoEvoluir() {
-    const ent = Object.entries(EXP.saida || {}).find(([t, e]) => /evolu/i.test(t) && e.ex);
+    const ent = E.evoModelo ? [E.evoModelo.t, { ex: E.evoModelo.ex }] : Object.entries(EXP.saida || {}).find(([t, e]) => /evolu/i.test(t) && e.ex);
     if (!ent) return null;
     let modelo; try { modelo = JSON.parse(ent[1].ex); } catch { return null; }
     const kPk = Object.keys(modelo).find((k) => /^(id|pid|pokemonId|pokemon|alvoId)$/i.test(k) && typeof modelo[k] === 'number');
@@ -3932,12 +3943,48 @@ contextBridge.executeInMainWorld({
   function evoluirAntesDeVender(pk, cid) {
     const e = M.evo?.[pk?.nome]; if (!e || !((pk.level || 0) >= e.nivel)) return false;
     const ac = acaoEvoluir();
-    if (!ac) { avisoRaro('evoFalta' + pk.id, `🧬 casa ${cid}: ${pk.nome} Nv ${pk.level} pode evoluir para ${e.para} (vende bem melhor) — evolua um pokémon pelo jogo uma vez e o app aprende a evoluir sozinho; até lá ele não vende este`, 120); return true; }
+    if (!ac) { avisoRaro('evoFalta' + pk.id, `🧬 casa ${cid}: ${pk.nome} Nv ${pk.level} pode evoluir para ${e.para} (vende melhor) — evolua um pokémon pelo jogo uma vez e o app aprende; por enquanto vende como está`, 120); return false; }   // 5.84: antes segurava a venda (a casa ficava parada)
     if (Date.now() - ((M.evoFeito ||= {})[pk.id] || 0) < 5 * 60_000) return true;   // já pediu: espera o jogo confirmar
     M.evoFeito[pk.id] = Date.now();
     log(`${sim()}🧬 casa ${cid}: evoluindo ${pk.nome} Nv ${pk.level} → ${e.para} antes de vender`, 'ok');
     if (!CFG.simulacao) enviar(ac.montar(pk.id, e.paraId));
     return true;
+  }
+  /* 🧬 EVOLUIR PARA VALER (5.84, pedido do jogador): muitos pokémon da coleção chegam em nota 3,5+ evoluindo — aí a casa sobe
+   * eles e o app vende. A cada 5 min: quem está solto na coleção (fora do time, casas, vitrine e filas, sem item), já tem o nível de
+   * evoluir (evolução por nível, um caminho só) e cuja ficha na forma evoluída dá nota ≥ 3,5 (calculada como o jogo: IV, qualidade,
+   * potência, shiny) é evoluído — um por minuto. Depois disso ele entra no fluxo normal: casa até o nível de venda e vitrine. */
+  async function cicloEvolucao() {
+    if (CFG.evoluirAuto === false || Date.now() - (M.evoCicloEm || 0) < 60_000) return;
+    M.evoCicloEm = Date.now();
+    if (!M.evo || !PRC.pronto()) return;
+    const ocup = new Set([...Object.values(E.postos || {}).filter(Boolean).map((p) => String(p.pokemonId)), ...(M.meus || []).map((a) => String(idPkAnuncio(a))), ...Object.keys(E.anunciosPk || {}), String(M.activeId), ...(E.filaVenda || []).map((x) => String(x.pokemonId))]);
+    E.evoluidos = E.evoluidos || {}; E.evoNao = E.evoNao || {};
+    const cands = [];
+    for (const p of M.pokemons || []) {
+      const k = String(p.id);
+      if (p.slot != null || ocup.has(k) || p.heldItemId || p.starter || !(p.nota < 3.5)) continue;
+      const e = M.evo[p.nome]; if (!e || !(p.level >= e.nivel) || !e.paraId) continue;
+      if (E.evoNao[k] && Date.now() - E.evoNao[k] < 24 * 3600_000) continue;            // o jogo não evoluiu este há pouco
+      if (Date.now() - ((M.evoFeito ||= {})[k] || 0) < 5 * 60_000) continue;
+      if (!p.ivs || !(p.quality > 0)) continue;
+      const nova = PRC.notaDe(e.paraId, { ivs: p.ivs, quality: p.quality, potencia: p.potencia || 1, shiny: !!p.shiny });
+      if (nova != null && nova >= 3.5) cands.push({ p, e, nova });
+    }
+    M.evoCands = cands.length;
+    if (!cands.length) return;
+    const ac = acaoEvoluir();
+    if (!ac) { avisoRaro('evoAprender', `🧬 ${cands.length} pokémon da coleção chegam em nota 3,5+ evoluindo (ex.: ${cands.slice(0, 3).map((c) => `${c.p.nome} Nv ${c.p.level} → ${c.e.para} ${c.nova.toFixed(2)}`).join(', ')}) — evolua UM pelo jogo e o app aprende a evoluir os outros sozinho`, 360); return; }
+    cands.sort((a, z) => z.nova - a.nova || (z.p.shiny - a.p.shiny));
+    const { p, e, nova } = cands[0], k = String(p.id);
+    M.evoFeito[k] = Date.now();
+    E.evoluidos[k] = { de: p.nome, para: e.para, nota0: p.nota, nota: nova, em: Date.now() };
+    for (const kk of Object.keys(E.evoluidos)) if (Date.now() - E.evoluidos[kk].em > 7 * 86400_000) delete E.evoluidos[kk];
+    persistir();
+    log(`${sim()}🧬 evoluindo ${p.shiny ? '✨' : ''}${p.nome} Nv ${p.level} → ${e.para}: nota ${Number(p.nota).toFixed(2)} → ${nova.toFixed(2)} (vai para a casa e depois para a venda)${cands.length > 1 ? ` · faltam ${cands.length - 1}` : ''}`, 'ok');
+    if (!CFG.simulacao) enviar(ac.montar(p.id, e.paraId));
+    // se o jogo não evoluiu (a espécie continua a mesma daqui a 5 min), marca para não insistir por 24 h
+    setTimeout(() => { const q = (M.pokemons || []).find((x) => String(x.id) === k); if (q && q.nome === p.nome) { E.evoNao[k] = Date.now(); persistir(); avisoRaro('evoNao' + k, `🧬 ${p.nome} Nv ${p.level}: o jogo não evoluiu — tento de novo em 24 h`, 1440); } }, 5 * 60_000);
   }
   function evoOportunidade(a, f) {
     const e = M.evo?.[f.nome]; if (!e || !(f.level >= e.nivel) || f.shiny) return;
@@ -4146,10 +4193,17 @@ contextBridge.executeInMainWorld({
   function sincronizarCasas(lista) {
     // conta nova (ou com ajustes copiados): nenhuma das casas configuradas é desta conta → usa as casas em uso DELA (até 5).
     // Numa conta que já tem as casas certas nada muda (casa extra que você pôs à mão continua fora do app).
-    const daConta = (lista || []).filter((c) => c.emUso).map((c) => c.id);
-    if (daConta.length && !CFG.casas.some((id) => (lista || []).some((c) => c.id === id))) {
-      const antes = CFG.casas.join(', '); CFG.casas = daConta.slice(0, 5); salvarCfg();
-      log(`🏠 casas desta conta: ${CFG.casas.join(', ')} — as configuradas (${antes}) eram de outra conta (ajustes copiados ou padrão)`, 'ok');
+    // 5.84: no automático (padrão) o app usa TODAS as casas em uso da conta — antes ficava com a lista antiga e casa nova (ou trocada) ficava parada.
+    M.casasLista = lista;
+    const daConta = (lista || []).filter((c) => c.emUso).map((c) => c.id).slice(0, 5);
+    if (daConta.length && (CFG.casasAuto !== false || !CFG.casas.some((id) => (lista || []).some((c) => c.id === id)))) {
+      const antes = CFG.casas || [], novas = daConta.filter((id) => !antes.includes(id)), sairam = antes.filter((id) => !daConta.includes(id));
+      if (novas.length || sairam.length) {
+        CFG.casas = daConta; salvarCfg();
+        for (const k of Object.keys(E.postos || {})) if (!daConta.includes(Number(k.split(':')[0]))) delete E.postos[k];   // casa guardada: o registro dela sai
+        log(`🏠 casas em uso: ${daConta.join(', ')}${novas.length ? ` — nova(s): ${novas.join(', ')}` : ''}${sairam.length ? ` — saiu/saíram: ${sairam.join(', ')}` : ''}`, 'ok');
+        persistir();
+      }
     }
     for (const c of lista) {
       if (!c.emUso) continue;
@@ -5842,7 +5896,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
         try { instalarFiltroPopups(); } catch {}
         try { cicloPasse(); if (CFG.xpShareAuto) cicloXpShare(); else avisoXpShare(); cicloRotacaoVitrine(); diagnosticarParados(); if (Date.now() - (M.estEspEm || 0) > 10 * 60_000) { M.estEspEm = Date.now(); estudarEspecies(30); } } catch {}
         if (CFG.mod.hunt) await cicloHunt();
-        if (CFG.mod.sniperPk || CFG.mod.casas) await carregarEvo();
+        if (CFG.mod.sniperPk || CFG.mod.casas) { await carregarEvo(); if (CFG.mod.casas) try { await cicloEvolucao(); } catch (err) { console.warn('[PKApp] evolução', err); } }
       } catch (e) { log('erro: ' + e.message, 'erro'); }
       pintar();
       await dormir(CFG.intervaloSeg * 1000 * (0.85 + Math.random() * 0.3));
@@ -6229,6 +6283,10 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
   }
   function montarCasas() {
     $('#sec-casas').innerHTML = `
+      <div class="cart"><h4>🏠 Quais casas o app usa</h4><div class="form">
+        <label>Casas<select id="h-auto"><option value="1">Todas as casas em uso na conta (automático)</option><option value="0">Só os códigos abaixo</option></select></label>
+        <label>Códigos das casas (separados por vírgula)<input id="h-ids" placeholder="ex.: 2975, 3465, 818"></label>
+      </div><p class="mudo">No automático o app lê do jogo as casas em uso (até 5) a cada atualização: casa nova entra, casa guardada sai — nenhuma fica parada. Pokémon seu numa casa segue a regra "Pokémon que já estão nas casas".</p></div>
       <div class="form"><label>Nível-alvo<select id="h-alvo"><option value="1">Um por casa, pela demanda (automático)</option><option value="0">O mesmo para todas (Config)</option></select></label><label>Pokémon que já estão nas casas<select id="h-ocup"><option value="manter">Manter (o bot não mexe)</option><option value="adotar">Adotar: vender quando chegar no alvo</option><option value="trocar">Trocar por compras do bot</option></select></label></div>
       <div class="cart"><h4>Compra para casa: só o que vale muito</h4><div class="form">
         <label>Lucro mín. por pokémon<input id="h-lmin"></label><label>Lucro mín. vs custo<input id="h-marg"></label>
@@ -6250,6 +6308,13 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
       <div id="h-casas"></div>
       <div class="cart"><h4>Nível-alvo por lucro/hora (casa 40%)</h4><div id="h-curva"></div></div>
       <div class="cart"><h4>Melhores espécies para upar até o alvo</h4><div id="h-rank"></div></div>`;
+    $('#h-auto').value = CFG.casasAuto !== false ? '1' : '0';
+    $('#h-auto').onchange = (e) => { CFG.casasAuto = e.target.value === '1'; salvarCfg(); log(`⚙️ casas: ${CFG.casasAuto ? 'todas as em uso (automático)' : 'só os códigos digitados'}`); if (CFG.casasAuto && M.casasLista) sincronizarCasas(M.casasLista); pintar(); };
+    $('#h-ids').value = (CFG.casas || []).join(', ');
+    $('#h-ids').onchange = (e) => {
+      const ids = [...new Set(String(e.target.value).split(/[^\d]+/).map(Number).filter((n) => n > 0))].slice(0, 5);
+      CFG.casas = ids; CFG.casasAuto = false; salvarCfg(); log(`⚙️ casas do app: ${ids.join(', ') || 'nenhuma'} (só estas)`, 'ok'); pintar();
+    };
     $('#h-alvo').value = CFG.alvoPorCasa ? '1' : '0'; $('#h-alvo').onchange = (e) => { CFG.alvoPorCasa = e.target.value === '1'; salvarCfg(); pintar(); };
     $('#h-ocup').value = CFG.casasOcupadas; $('#h-ocup').onchange = (e) => { CFG.casasOcupadas = e.target.value; salvarCfg(); pintar(); };
     const liga = (id, k, tipo) => { const i = $(id); i.value = tipo === 'preco' ? curto(CFG[k]) : tipo === 'pct' ? Math.round(CFG[k] * 100) + '%' : CFG[k];
@@ -7266,7 +7331,7 @@ Inclua em mods só o que muda. "deixar na hunt" = boss:false; "fazer boss" = bos
     papeis: () => Object.keys(PAPEIS),
   };
   try { Object.defineProperty(PAGINA, '__PKAPP_PONTE', { value: ponteDesktop, configurable: true }); } catch {}
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, sincronizarCasas, aprenderXpShare, cicloXpShare, recuperarFila, bossDaConta, LIVRO, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, estudoToken, resultadoBossDia, exportarCfg, importarCfg, compilarParecer, fecharDia, aprender, DEC, bossDaConta, cicloHunt, abrirVagaParaShiny, instalarFiltroPopups, novoPedido, interpretarLocal, cicloPedidos, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: VERSAO_APP }, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, sincronizarCasas, aprenderXpShare, cicloXpShare, recuperarFila, bossDaConta, LIVRO, cicloEvolucao, aprenderEvoluir, PRC_: PRC, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, estudoToken, resultadoBossDia, exportarCfg, importarCfg, compilarParecer, fecharDia, aprender, DEC, bossDaConta, cicloHunt, abrirVagaParaShiny, instalarFiltroPopups, novoPedido, interpretarLocal, cicloPedidos, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: VERSAO_APP }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));
