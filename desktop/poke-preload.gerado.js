@@ -2166,7 +2166,7 @@ contextBridge.executeInMainWorld({
 });
 
 
-// ===================== PokeIdle App 5.84 (gerado por tools/montar-preload.js — não edite aqui) =====================
+// ===================== PokeIdle App 5.85 (gerado por tools/montar-preload.js — não edite aqui) =====================
 ;(() => {
   const { contextBridge: pontePk, ipcRenderer: ipcPk } = require('electron');
   // o que o script pede ao app: rede só para os sites liberados (API do Claude e precificador) e avisos
@@ -2192,7 +2192,7 @@ contextBridge.executeInMainWorld({
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.84
+// @version      5.85
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -2222,7 +2222,7 @@ contextBridge.executeInMainWorld({
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.84';
+  const VERSAO_APP = '5.85';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -2255,7 +2255,7 @@ contextBridge.executeInMainWorld({
     pedidoMinMs: 1500, pedidosPorMin: 24,
     vendaFatorMediana: 0.95, vendaDias: 7, especiesPreferidas: [],
     vendaRapida: true, fatorRapido: 0.9, mexerEmTodos: true,   // vender rápido (com lucro) e gerir todos os seus anúncios, não só os do app
-    casaDaColecao: true, casaNaoParar: true, filaMax: 15,         // casa pronta com vitrine cheia: vai para a fila e entra outro
+    casaDaColecao: true, casaNaoParar: true, filaMax: 4, lucroMinLivro: 0.08,         // casa pronta com vitrine cheia: vai para a fila e entra outro
     alvoPorPokemon: true, nivelMaxCasa: 1000, nivelMinVenda: 500, trocarParaCoinsH: 6,
     // giro rápido da vitrine (no evento de XP upar é barato: vender mais rápido, com menos lucro por pokémon)
     // estudo contínuo do mercado: o que vale, o que vende rápido e o que deu lucro decide o que comprar
@@ -2265,7 +2265,7 @@ contextBridge.executeInMainWorld({
                                                 // 5.72: o app move o XP Share (+5% de XP) para quem sobe numa casa
     maxPorEspecie: 3, maxPorEspecieShiny: 1, snipeDiasVendaMax: 3, snipeDiasVendaMaxShiny: 6,   // 5.71: giro de verdade antes de comprar
                                                  // no máximo N da mesma espécie entre casas, fila e vitrine (não inundar o próprio mercado)
-    giro: 'auto', giroFator: 0.82, giroFatorGemas: 0.9, giroNivelMax: 500, giroTrocaH: 2, giroPasso: 0.06, giroMargem: 0.01, giroCasaFator: 0.5,
+    giro: 'auto', giroFator: 0.82, giroFatorGemas: 0.9, giroNivelMax: 500, giroTrocaH: 2, giroPasso: 0.06, giroMargem: 0.10, giroCasaFator: 0.8,
     negociar: true, negociarMaxRespostas: 8,
     // shiny nas casas (em Gemas): desligado até você ligar
     casaShiny: true, casaShinyPrecoMax: 5000, casaShinyNvMax: 300, casaShinyLucroMin: 800, casaShinyMargemMin: 0.35, casaShinyDia: 0, casaShinyVendasMin: 40, casaShinyBuscas: 2,
@@ -2347,6 +2347,12 @@ contextBridge.executeInMainWorld({
   }
   if (!CFG.migSemLimite526) {                                     // v5.26: o jogador pediu sem limite de quantidade (o lucro e a conferência decidem)
     CFG.casaComprasDia = 0; CFG.casaShinyDia = 0; CFG.filaMax = Math.max(CFG.filaMax || 0, 15); CFG.migSemLimite526 = true; salvarCfg();
+  }
+  if (!CFG.mig585) {   // 5.85: estoque pequeno (gira) e giro sem vender no piso — só troca o que ainda está no padrão antigo
+    if (CFG.filaMax === 15) CFG.filaMax = 4;
+    if (CFG.giroMargem === 0.01) CFG.giroMargem = 0.10;
+    if (CFG.giroCasaFator === 0.5) CFG.giroCasaFator = 0.8;
+    CFG.mig585 = true; salvarCfg();
   }
   if (!CFG.migSegBoss528) {                                       // v5.28: o jogador faz ~4.440 lutas/dia no Rayquaza (4× fraco a gelo) ≈ 19,5 s por luta
     if (!(CFG.bossSegPorLuta > 0) && CFG.bossKey === 'rayquaza') CFG.bossSegPorLuta = 19.5;
@@ -2485,7 +2491,7 @@ contextBridge.executeInMainWorld({
     if (/^(market|csv)\./.test(o.t || '')) { M.reqs.push(Date.now()); M.reqTotal++; }
     // 📗 trava final (5.66): editar preço de um pokémon anotado no livro nunca abaixo do que ele custou (com a comissão)
     if (o.t === 'market.editar' && o.preco > 0) { try { const a = (M.meus || []).find((x) => String(x.id) === String(o.id)); const lv = a && a.tipo === 'pokemon' ? livroAberto(a.pokemonId) : null; const cv = lv ? livroConv(lv.custo, lv.moeda, o.moeda) : null;
-      if (cv > 0) { const minimo = Math.ceil(cv / (1 - COMISSAO) * 1.01); if (o.preco < minimo) { log(`📗 trava do livro: ${lv.nome} foi comprado por ${curtoM(lv.custo, lv.moeda)} — preço ${curtoM(o.preco, o.moeda)} → ${curtoM(minimo, o.moeda)}`, 'venda'); o = { ...o, preco: minimo }; } } } catch {} }
+      if (cv > 0) { const minimo = Math.ceil(cv / (1 - COMISSAO) * (1 + (CFG.lucroMinLivro ?? 0.08))); if (o.preco < minimo) { log(`📗 trava do livro: ${lv.nome} foi comprado por ${curtoM(lv.custo, lv.moeda)} — preço ${curtoM(o.preco, o.moeda)} → ${curtoM(minimo, o.moeda)}`, 'venda'); o = { ...o, preco: minimo }; } } } catch {} }
     M.enviandoNosso = true; try { M.ws.send(JSON.stringify(o)); } finally { M.enviandoNosso = false; } return true;
   };
   // espera a vez: intervalo mínimo entre pedidos, teto por minuto e pausa quando o servidor pede calma
@@ -4039,6 +4045,7 @@ contextBridge.executeInMainWorld({
     {   // 🔁 5.71: só compra o que gira — estoque da espécie, vendas por dia e anúncios parados sem favorito
       const tenho = emAndamento(f.nome), maxE = f.shiny ? CFG.maxPorEspecieShiny : CFG.maxPorEspecie;
       if (maxE > 0 && tenho >= maxE) return avisoRaro('maxEsp' + f.nome + !!f.shiny, `🔁 ${f.shiny ? '✨' : ''}${f.nome}: já tenho ${tenho} esperando venda — não compro outro até vender (giro)`, 120);
+      { const er = especieRuim(f.nome, f.shiny); if (er) return avisoRaro('ruim' + f.nome + !!f.shiny, `🎓 ${f.shiny ? '✨' : ''}${f.nome}: ${er.motivo} — não compro para revender`, 240); }
       const sf = paradosSemFavorito(f.nome, f.shiny); if (sf) return avisoRaro('semFav' + f.nome + !!f.shiny, `🔁 ${f.shiny ? '✨' : ''}${f.nome}: ${sf} anúncio(s) meus parados há 24 h+ sem nenhum favorito — o mercado não quer, não compro mais`, 120);
       const g = giroEspecie(f.nome, f.shiny, a.moeda), diasMax = f.shiny ? CFG.snipeDiasVendaMaxShiny : CFG.snipeDiasVendaMax;
       const diasPrev = g && g.porDia > 0 ? (tenho + 1) / g.porDia : Infinity;
@@ -4332,6 +4339,7 @@ contextBridge.executeInMainWorld({
   }
   async function comprarParaUpar(key, cid) {
     const ag = Date.now();
+    if (estoqueCheio()) return avisoRaro('casaEstoque', `🏠 casa ${cid}: não compro para upar — já há ${(E.filaVenda || []).length} pokémon esperando venda (máx. ${CFG.filaMax}); a casa pega da coleção`, 60);
     E.casaBusca = E.casaBusca || {};
     if (ag - (E.casaBusca[cid] || 0) < CFG.casaBuscaMin * 60_000) return;          // uma busca por casa a cada X min
     E.casaBusca[cid] = ag; persistir();
@@ -4339,7 +4347,7 @@ contextBridge.executeInMainWorld({
     if (CFG.casaComprasDia > 0 && feitas >= CFG.casaComprasDia) return avisoRaro('casaDia', `🏠 já foram ${feitas} compras para casas hoje (limite ${CFG.casaComprasDia})`, 60);
     const gf = emGiro() ? CFG.giroCasaFator : 1, alvo = Math.max(CFG.nivelMinVenda || 0, emGiro() ? Math.min(alvoDaCasa(cid), CFG.giroNivelMax) : alvoDaCasa(cid)), pct = E.postos[key]?.pct || 25, xpH = xpHoraCasa(pct);
     // só espécies que vendem no nível-alvo e dão bom lucro na mediana; 4 buscas no máximo
-    const cands = rankingEspecies(alvo).filter((e) => e.nAlto >= CFG.casaVendasMinAlvo && e.lucro >= CFG.casaLucroMin * gf * 0.7).slice(0, 4);
+    const cands = rankingEspecies(alvo).filter((e) => e.nAlto >= CFG.casaVendasMinAlvo && e.lucro >= CFG.casaLucroMin * gf * 0.7 && !especieRuim(e.nome, false)).slice(0, 4);
     if (!cands.length) return avisoRaro('casaSem' + cid, `🏠 casa ${cid}: nenhuma espécie com lucro ≥ ${curto(CFG.casaLucroMin)} e vendas no Nv ${alvo} — esperando`, 60);
     let melhor = null;
     for (const esp of cands) {
@@ -4389,6 +4397,7 @@ contextBridge.executeInMainWorld({
   }
   // casa com shiny: compra shiny barato de nível baixo em Gemas e sobe até o nível que mais rende (shiny só vende em Gemas)
   async function comprarShinyParaUpar(key, cid) {
+    if (estoqueCheio()) return false;                                                // 5.85: fila de venda com estoque: não compra mais
     if (!CFG.casaShiny || !CFG.gemasAtivas || !PRC.pronto()) return false;
     const ag = Date.now(); E.casaBuscaSh = E.casaBuscaSh || {};
     if (ag - (E.casaBuscaSh[cid] || 0) < CFG.casaBuscaMin * 60_000) return false;
@@ -4695,10 +4704,39 @@ contextBridge.executeInMainWorld({
   /* 🔄 GIRO DA VITRINE (5.79, pedido do jogador): pokémon anunciado há mais de 48 h SEM nenhum favorito sai da vitrine e volta para
    * o fim da fila (o jogo pede 30 min para anunciar de novo) — abre vaga para o que está esperando e o anúncio volta como novo.
    * Quem tem favorito fica (alguém quer comprar). Um por vez, no máximo a cada 30 min. */
+  /* 🎓 APRENDE COM O QUE JÁ VENDEU (5.85, pedido do jogador: "meus pokémon estão vendendo tão pouco — preciso de rotatividade com lucro").
+   * O estudo mostrou: compras para casa de ~40 M que o app esperava vender com ≥ 40 M de lucro saíam a 49,4 M (+2 M em ~20 h de casa),
+   * e a vitrine (10) + fila (21) entupidas, com as casas passando do alvo sem ter onde vender. Agora, pelo 📗 livro (o que de fato
+   * vendeu nos últimos 21 dias): espécie com margem real < 10% ou que leva mais de 4 dias para vender fica 7 dias sem compra
+   * (sniper e casas). E nada de comprar para revender enquanto a fila de venda tem estoque (CFG.filaMax). */
+  function aprenderRevendas() {
+    if (Date.now() - (M.aprRevEm || 0) < 30 * 60_000) return; M.aprRevEm = Date.now();
+    const ag = Date.now(), por = {};
+    for (const x of LIVRO) {
+      if (!x.venda || ag - x.venda.em > 21 * 86400_000 || !(x.custo > 0)) continue;
+      const c = livroConv(x.custo, x.moeda, x.venda.moeda); if (!(c > 0) || x.venda.recebe == null) continue;
+      const k = `${x.shiny ? 1 : 0}|${norm2(x.nome)}`, o = (por[k] ||= { nome: x.nome, shiny: !!x.shiny, n: 0, marg: 0, h: 0 });
+      o.n++; o.marg += (x.venda.recebe - c) / c; o.h += Math.max(0, (x.venda.em - x.em) / 3600_000);
+    }
+    E.especieRuim = E.especieRuim || {}; M.revendasReais = por;
+    for (const [k, t] of Object.entries(E.especieRuim)) if (ag > t.ate) delete E.especieRuim[k];
+    for (const [k, o] of Object.entries(por)) {
+      if (o.n < 2 || E.especieRuim[k]) continue;
+      const marg = o.marg / o.n, h = o.h / o.n;
+      if (marg >= 0.10 && h <= 96) continue;
+      const motivo = marg < 0.10 ? `margem real ${Math.round(marg * 100)}% em ${o.n} vendas` : `leva ~${Math.round(h / 24)} dias para vender (${o.n} vendas)`;
+      E.especieRuim[k] = { ate: ag + 7 * 86400_000, motivo };
+      log(`🎓 aprendi pelas vendas: ${o.shiny ? '✨' : ''}${o.nome} — ${motivo}. Não compro para revender por 7 dias`, 'aprendizado');
+    }
+    persistir();
+  }
+  const especieRuim = (nome, shiny) => { const t = E.especieRuim?.[`${shiny ? 1 : 0}|${norm2(nome)}`]; return t && Date.now() < t.ate ? t : null; };
+  const estoqueCheio = () => (E.filaVenda || []).length >= (CFG.filaMax || 4);
   function cicloRotacaoVitrine() {
     if (!(CFG.rotacaoVitrineH > 0) || CFG.simulacao || !CFG.mod.sniperPk && !CFG.mod.casas) return;
     const ag = Date.now(); if (ag - (M.rotEm || 0) < 30 * 60_000) return;
-    const parados = (M.meus || []).filter((a) => a.tipo === 'pokemon' && ag - desdeQuando(a) > CFG.rotacaoVitrineH * 3600_000 && !favsDe(a)).sort((a, z) => desdeQuando(a) - desdeQuando(z));
+    const limH = (E.filaVenda || []).length > 0 || casasProntasEm(0) > 0 ? Math.min(24, CFG.rotacaoVitrineH) : CFG.rotacaoVitrineH;   // 5.85: com fila esperando, gira em 24 h
+    const parados = (M.meus || []).filter((a) => a.tipo === 'pokemon' && ag - desdeQuando(a) > limH * 3600_000 && !favsDe(a)).sort((a, z) => desdeQuando(a) - desdeQuando(z));
     if (!parados.length) return;
     M.rotEm = ag;
     const a = parados[0], f = a.ficha || {}, c = custoDoAnuncio(a), idade = desdeQuando(a), pid = String(a.pokemonId);
@@ -4983,7 +5021,7 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
     if (justoSh && ref.rapido) alvoC = Math.max(alvoC, ref.rapido);   // shiny: o concorrente nunca puxa abaixo do preço rápido
     let preco = Math.max(Math.round(alvoC), piso, 1);
     { const lv = livroAberto(pokemonId), cv = lv ? livroConv(lv.custo, lv.moeda, moeda) : null;    // 📗 trava: nunca abaixo do custo de compra (já com a comissão)
-      if (cv > 0) { const minimo = Math.ceil(cv / (1 - COMISSAO) * 1.01); if (preco < minimo) { porque += ` — subi ao mínimo do livro (comprado por ${curtoM(lv.custo, lv.moeda)})`; preco = minimo; } } }
+      if (cv > 0) { const minimo = Math.ceil(cv / (1 - COMISSAO) * (1 + (CFG.lucroMinLivro ?? 0.08))); if (preco < minimo) { porque += ` — subi ao mínimo do livro (comprado por ${curtoM(lv.custo, lv.moeda)})`; preco = minimo; } } }
     if (justoSh) porque += shiny ? ' — shiny no preço justo' : ' — preço justo nas primeiras 12 h';
     else if (rapido) porque += emGiro() ? ' — giro rápido' : ' — vender rápido';
     if (ref.prc) porque += ` [precificador: ${ref.prc.rapido}/${ref.prc.justo}/${ref.prc.esperar} 🔮]`;
@@ -5894,6 +5932,7 @@ Responda SÓ com JSON numa linha: {"decisao":"SIM" ou "NAO","motivo":"até 12 pa
         if (CFG.mod.prey) await cicloPrey();
         if (CFG.mod.claude) await cicloClaude();
         try { instalarFiltroPopups(); } catch {}
+        try { aprenderRevendas(); } catch (err) { console.warn('[PKApp] aprender revendas', err); }
         try { cicloPasse(); if (CFG.xpShareAuto) cicloXpShare(); else avisoXpShare(); cicloRotacaoVitrine(); diagnosticarParados(); if (Date.now() - (M.estEspEm || 0) > 10 * 60_000) { M.estEspEm = Date.now(); estudarEspecies(30); } } catch {}
         if (CFG.mod.hunt) await cicloHunt();
         if (CFG.mod.sniperPk || CFG.mod.casas) { await carregarEvo(); if (CFG.mod.casas) try { await cicloEvolucao(); } catch (err) { console.warn('[PKApp] evolução', err); } }
@@ -7331,7 +7370,7 @@ Inclua em mods só o que muda. "deixar na hunt" = boss:false; "fazer boss" = bos
     papeis: () => Object.keys(PAPEIS),
   };
   try { Object.defineProperty(PAGINA, '__PKAPP_PONTE', { value: ponteDesktop, configurable: true }); } catch {}
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, sincronizarCasas, aprenderXpShare, cicloXpShare, recuperarFila, bossDaConta, LIVRO, cicloEvolucao, aprenderEvoluir, PRC_: PRC, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, estudoToken, resultadoBossDia, exportarCfg, importarCfg, compilarParecer, fecharDia, aprender, DEC, bossDaConta, cicloHunt, abrirVagaParaShiny, instalarFiltroPopups, novoPedido, interpretarLocal, cicloPedidos, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: VERSAO_APP }, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, sincronizarCasas, aprenderXpShare, cicloXpShare, recuperarFila, bossDaConta, LIVRO, cicloEvolucao, aprenderEvoluir, PRC_: PRC, aprenderRevendas, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, estudoToken, resultadoBossDia, exportarCfg, importarCfg, compilarParecer, fecharDia, aprender, DEC, bossDaConta, cicloHunt, abrirVagaParaShiny, instalarFiltroPopups, novoPedido, interpretarLocal, cicloPedidos, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: VERSAO_APP }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));
