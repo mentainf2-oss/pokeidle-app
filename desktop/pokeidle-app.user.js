@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.86
+// @version      5.87
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -31,7 +31,7 @@
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.86';
+  const VERSAO_APP = '5.87';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -69,7 +69,7 @@
     // giro rápido da vitrine (no evento de XP upar é barato: vender mais rápido, com menos lucro por pokémon)
     // estudo contínuo do mercado: o que vale, o que vende rápido e o que deu lucro decide o que comprar
     estudoAtivo: true, estudoVendasDiaMin: 3, estudoHorasLenta: 36,
-    xpShareAuto: true, vagasCasaFixas: 2, rotacaoVitrineH: 48, venderShinyCapturado: true, casasAuto: true, evoluirAuto: true,     // 5.79: giro da vitrine (sem favorito há 48 h)
+    xpShareAuto: true, vagasCasaFixas: 2, rotacaoVitrineH: 48, venderShinyCapturado: true, venderCapturas: true, venderCapturaMin: 15000000, casasAuto: true, evoluirAuto: true,     // 5.79: giro da vitrine (sem favorito há 48 h)
                              // 5.72: 2 vagas da vitrine sempre guardadas para o que sai das casas
                                                 // 5.72: o app move o XP Share (+5% de XP) para quem sobe numa casa
     maxPorEspecie: 3, maxPorEspecieShiny: 1, snipeDiasVendaMax: 3, snipeDiasVendaMaxShiny: 6,   // 5.71: giro de verdade antes de comprar
@@ -2341,23 +2341,35 @@
     const compras = new Map(); for (const c of (E.real?.compras || [])) if (c.tipo === 'pokemon' && c.pokemonId != null && !compras.has(String(c.pokemonId))) compras.set(String(c.pokemonId), c);
     const limiteConta = (M.nivel || 0) + 5, temCasa = (CFG.casas || []).length > 0;
     E.vistoSolto = E.vistoSolto || {};
-    let n = 0, nCasa = 0; const nomes = [];
+    let n = 0, nCasa = 0, nCapt = 0, vagaLivre = null; const nomes = [];
     for (const p of M.pokemons) {
       const k = String(p.id);
       if (p.slot != null || ocupados.has(k) || p.heldItemId || p.starter) { delete E.vistoSolto[k]; continue; }
       E.vistoSolto[k] = E.vistoSolto[k] || ag;
       const lv = livroAberto(p.id), c = compras.get(k);
-      let custo = 0, moeda = 'gold', em = 0, origem = '';
+      let custo = 0, moeda = 'gold', em = 0, origem = '', captura = false;
       if (lv) { custo = lv.custo; moeda = lv.moeda; em = lv.em; origem = lv.origem || ''; }
       else if (c && c.bruto > 0) { custo = c.bruto; moeda = c.moeda === 'orb' ? 'orb' : 'gold'; em = c.em; origem = 'histórico'; }
-      else if (!(p.shiny && CFG.venderShinyCapturado !== false)) continue;        // capturado comum: não é estoque de venda
+      else if (p.shiny && CFG.venderShinyCapturado !== false) { /* ✨ capturado: vai, depois de 24 h solto */ }
+      else if (CFG.venderCapturas !== false) {
+        // 5.87 (pedido do jogador: "contas com espaço na vitrine e pokémon na coleção sem anunciar"): capturado comum também vende —
+        // só com vaga sobrando na vitrine (fora a reserva das casas), 2 por rodada, se vale ≥ venderCapturaMin pelo mercado da espécie.
+        // Nota 3,5+ abaixo do nível de venda vai para as casas; pré-evolução que vira 3,5+ fica para evoluir.
+        if ((p.nota || 0) >= 3.5 && (p.level || 0) < (CFG.nivelMinVenda || 0)) continue;
+        if (ag - E.vistoSolto[k] < 6 * 3600_000 || nCapt >= 2 || preEvoBoa(p)) continue;
+        if (vagaLivre == null) { const v = vagasPk(); vagaLivre = v.livres - v.aCaminho - v.reserva; }
+        if (vagaLivre - nCapt <= 0) continue;
+        const ivc = Object.values(p.ivs || {}).reduce((a, b) => a + b, 0), ref = precoMercado(p.nome, Math.max(50, p.level || 100), p.nota, p.potencia, ivc);
+        if (!ref || ref.n < 3 || !/espécie/.test(ref.como) || ref.preco < (CFG.venderCapturaMin ?? 15_000_000)) continue;
+        captura = true; nCapt++;
+      } else continue;
       if (custo > 0 && ag - em < 60 * 60_000) continue;                         // comprado agora há pouco
-      if (!custo && ag - E.vistoSolto[k] < 24 * 3600_000) continue;            // ✨ capturado: espera 24 h solto antes de vender
+      if (!custo && !captura && ag - E.vistoSolto[k] < 24 * 3600_000) continue; // ✨ capturado: espera 24 h solto antes de vender
       const meuFarmador = limiteConta > 100 && (p.level || 0) >= limiteConta * 0.8;
       if (meuFarmador && (!custo || /hist|voce/.test(origem))) continue;        // farmador (comprado à mão ou capturado): é seu, fica
       const iv = Object.values(p.ivs || {}).reduce((a, b) => a + b, 0);
       const baixo = (p.level || 0) < (CFG.nivelMinVenda || 0);
-      if (baixo) {
+      if (baixo && !captura) {
         E.filaCasa = E.filaCasa || [];
         const fc = E.filaCasa.find((x) => String(x.pokemonId) === k);
         const desde = fc?.desde || fc?.em || ag;
@@ -5201,7 +5213,7 @@ Inclua em mods só o que muda. "deixar na hunt" = boss:false; "fazer boss" = bos
     papeis: () => Object.keys(PAPEIS),
   };
   try { Object.defineProperty(PAGINA, '__PKAPP_PONTE', { value: ponteDesktop, configurable: true }); } catch {}
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, sincronizarCasas, aprenderXpShare, cicloXpShare, recuperarFila, bossDaConta, LIVRO, cicloEvolucao, aprenderEvoluir, PRC_: PRC, aprenderRevendas, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, estudoToken, resultadoBossDia, exportarCfg, importarCfg, compilarParecer, fecharDia, aprender, DEC, bossDaConta, cicloHunt, abrirVagaParaShiny, instalarFiltroPopups, novoPedido, interpretarLocal, cicloPedidos, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: VERSAO_APP }, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, sincronizarCasas, aprenderXpShare, cicloXpShare, recuperarFila, bossDaConta, LIVRO, cicloEvolucao, aprenderEvoluir, PRC_: PRC, aprenderRevendas, vagasPk, precoMercado, preEvoBoa, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, estudoToken, resultadoBossDia, exportarCfg, importarCfg, compilarParecer, fecharDia, aprender, DEC, bossDaConta, cicloHunt, abrirVagaParaShiny, instalarFiltroPopups, novoPedido, interpretarLocal, cicloPedidos, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: VERSAO_APP }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));
