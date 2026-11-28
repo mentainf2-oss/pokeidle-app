@@ -2166,7 +2166,7 @@ contextBridge.executeInMainWorld({
 });
 
 
-// ===================== PokeIdle App 5.82 (gerado por tools/montar-preload.js — não edite aqui) =====================
+// ===================== PokeIdle App 5.83 (gerado por tools/montar-preload.js — não edite aqui) =====================
 ;(() => {
   const { contextBridge: pontePk, ipcRenderer: ipcPk } = require('electron');
   // o que o script pede ao app: rede só para os sites liberados (API do Claude e precificador) e avisos
@@ -2192,7 +2192,7 @@ contextBridge.executeInMainWorld({
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.82
+// @version      5.83
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -2222,7 +2222,7 @@ contextBridge.executeInMainWorld({
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.82';
+  const VERSAO_APP = '5.83';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -2260,7 +2260,7 @@ contextBridge.executeInMainWorld({
     // giro rápido da vitrine (no evento de XP upar é barato: vender mais rápido, com menos lucro por pokémon)
     // estudo contínuo do mercado: o que vale, o que vende rápido e o que deu lucro decide o que comprar
     estudoAtivo: true, estudoVendasDiaMin: 3, estudoHorasLenta: 36,
-    xpShareAuto: true, vagasCasaFixas: 2, rotacaoVitrineH: 48,     // 5.79: giro da vitrine (sem favorito há 48 h)
+    xpShareAuto: true, vagasCasaFixas: 2, rotacaoVitrineH: 48, venderShinyCapturado: true,     // 5.79: giro da vitrine (sem favorito há 48 h)
                              // 5.72: 2 vagas da vitrine sempre guardadas para o que sai das casas
                                                 // 5.72: o app move o XP Share (+5% de XP) para quem sobe numa casa
     maxPorEspecie: 3, maxPorEspecieShiny: 1, snipeDiasVendaMax: 3, snipeDiasVendaMaxShiny: 6,   // 5.71: giro de verdade antes de comprar
@@ -4443,22 +4443,56 @@ contextBridge.executeInMainWorld({
   // fila perdida (ex.: trocou do navegador para o app de PC, que começa com estado novo): todo pokémon que o histórico da
   // conta mostra como COMPRADO nos últimos 7 dias e que está parado na coleção (fora do time, das casas e da vitrine) volta
   // para a fila de venda, com o custo da compra. Pokémon seu que nunca foi comprado não entra (não vende o que é seu).
+  /* 🪟 PARADOS NA COLEÇÃO (5.83, pedido do jogador: "vários pokémon na coleção que poderiam ser vendidos estão lá parados").
+   * Antes só voltava para a venda o que foi comprado nos últimos 7 dias, com nota 3,5+ — e o que estava abaixo do Nv 500 esperava
+   * casa para sempre (as alts têm 1 casa). Agora, a cada 10 min:
+   *  - tudo que foi COMPRADO (📗 livro aberto, ou o histórico do jogo) e está solto na coleção — fora do time, das casas, da vitrine,
+   *    das filas, sem segurar item — vai para a fila de venda, com o custo de compra (o piso de venda continua: nunca abaixo do custo);
+   *  - abaixo do Nv 500 ainda tenta casa primeiro; se esperou 24 h na fila de casa (ou a conta não tem casa do app), vende como está;
+   *  - comprado há menos de 1 h fica (outro fluxo ainda pode estar cuidando dele);
+   *  - comprado À MÃO (histórico) com nível perto do limite da conta é farmador seu: fica;
+   *  - ✨ capturado (sem compra) parado há 24 h+, fora do time e sem ser o seu farmador, também vai (CFG.venderShinyCapturado). */
   function recuperarFila() {
-    if (Date.now() - (M._recFilaEm || 0) < 10 * 60_000 || !E.real?.compras?.length || !(M.pokemons || []).length) return;
+    if (Date.now() - (M._recFilaEm || 0) < 10 * 60_000 || !(M.pokemons || []).length) return;
     M._recFilaEm = Date.now();
-    const ocupados = new Set([...Object.values(E.postos || {}).filter(Boolean).map((p) => String(p.pokemonId)), ...M.meus.map((a) => String(idPkAnuncio(a))), String(M.activeId), ...(E.filaVenda || []).map((x) => String(x.pokemonId)), ...Object.values(E.pendentes || {}).map((x) => String(x.pokemonId))]);
-    const compras = new Map(); for (const c of E.real.compras) if (c.tipo === 'pokemon' && c.pokemonId != null && Date.now() - c.em < 7 * 86400_000 && !compras.has(String(c.pokemonId))) compras.set(String(c.pokemonId), c);
-    let n = 0;
+    const ag = Date.now();
+    const ocupados = new Set([...Object.values(E.postos || {}).filter(Boolean).map((p) => String(p.pokemonId)), ...M.meus.map((a) => String(idPkAnuncio(a))), String(M.activeId), ...Object.keys(E.anunciosPk || {}), ...(E.filaVenda || []).map((x) => String(x.pokemonId)), ...Object.values(E.pendentes || {}).map((x) => String(x.pokemonId))]);
+    const compras = new Map(); for (const c of (E.real?.compras || [])) if (c.tipo === 'pokemon' && c.pokemonId != null && !compras.has(String(c.pokemonId))) compras.set(String(c.pokemonId), c);
+    const limiteConta = (M.nivel || 0) + 5, temCasa = (CFG.casas || []).length > 0;
+    E.vistoSolto = E.vistoSolto || {};
+    let n = 0, nCasa = 0; const nomes = [];
     for (const p of M.pokemons) {
-      if (p.slot != null || ocupados.has(String(p.id))) continue;
-      const c = compras.get(String(p.id)); if (!c) continue;
-      if (!(p.level >= 50) || !(p.nota >= 3.5 || p.shiny)) continue;
+      const k = String(p.id);
+      if (p.slot != null || ocupados.has(k) || p.heldItemId || p.starter) { delete E.vistoSolto[k]; continue; }
+      E.vistoSolto[k] = E.vistoSolto[k] || ag;
+      const lv = livroAberto(p.id), c = compras.get(k);
+      let custo = 0, moeda = 'gold', em = 0, origem = '';
+      if (lv) { custo = lv.custo; moeda = lv.moeda; em = lv.em; origem = lv.origem || ''; }
+      else if (c && c.bruto > 0) { custo = c.bruto; moeda = c.moeda === 'orb' ? 'orb' : 'gold'; em = c.em; origem = 'histórico'; }
+      else if (!(p.shiny && CFG.venderShinyCapturado !== false)) continue;        // capturado comum: não é estoque de venda
+      if (custo > 0 && ag - em < 60 * 60_000) continue;                         // comprado agora há pouco
+      if (!custo && ag - E.vistoSolto[k] < 24 * 3600_000) continue;            // ✨ capturado: espera 24 h solto antes de vender
+      const meuFarmador = limiteConta > 100 && (p.level || 0) >= limiteConta * 0.8;
+      if (meuFarmador && (!custo || /hist|voce/.test(origem))) continue;        // farmador (comprado à mão ou capturado): é seu, fica
       const iv = Object.values(p.ivs || {}).reduce((a, b) => a + b, 0);
-      if ((p.level || 0) < (CFG.nivelMinVenda || 0)) { E.filaCasa = E.filaCasa || []; if (!E.filaCasa.some((x) => String(x.pokemonId) === String(p.id))) E.filaCasa.push({ pokemonId: p.id, nome: p.nome, nv: p.level, custo: c.bruto, moedaCompra: c.moeda === 'orb' ? 'orb' : 'gold', em: Date.now() }); continue; }
-      (E.filaVenda = E.filaVenda || []).push({ pokemonId: p.id, nome: p.nome, nv: p.level, nota: p.nota, pot: p.potencia, iv, shiny: !!p.shiny, custo: c.bruto, moedaCompra: c.moeda === 'orb' ? 'orb' : 'gold', ficha: fichaMin(p), lucro: 0, em: Date.now(), recuperado: true });
-      n++;
+      const baixo = (p.level || 0) < (CFG.nivelMinVenda || 0);
+      if (baixo) {
+        E.filaCasa = E.filaCasa || [];
+        const fc = E.filaCasa.find((x) => String(x.pokemonId) === k);
+        const desde = fc?.desde || fc?.em || ag;
+        if (temCasa && ag - desde < 24 * 3600_000) {
+          if (!fc) { E.filaCasa.push({ pokemonId: p.id, nome: p.nome, nv: p.level, nota: p.nota, pot: p.potencia, iv, shiny: !!p.shiny, ficha: fichaMin(p), custo, moedaCompra: moeda, em: ag, desde: ag }); nCasa++; }
+          continue;
+        }
+        if (fc) E.filaCasa = E.filaCasa.filter((x) => x !== fc);               // esperou casa demais: vende no nível que está
+      }
+      (E.filaVenda = E.filaVenda || []).push({ pokemonId: p.id, nome: p.nome, nv: p.level, nota: p.nota, pot: p.potencia, iv, shiny: !!p.shiny, custo, moedaCompra: moeda, ficha: fichaMin(p), lucro: 0, em: ag, recuperado: true, esperouCasa: baixo || undefined });
+      ocupados.add(k); n++; if (nomes.length < 6) nomes.push(`${p.shiny ? '✨' : ''}${p.nome} Nv ${p.level}`);
     }
-    if (n) { persistir(); log(`🪟 fila recuperada: ${n} pokémon comprado(s) estava(m) parado(s) na coleção — vão para a venda`, 'ok'); }
+    for (const k of Object.keys(E.vistoSolto)) if (!M.pokemons.some((p) => String(p.id) === k)) delete E.vistoSolto[k];
+    if (n || nCasa) persistir();
+    if (n) log(`🪟 parados na coleção: ${n} pokémon vão para a venda (${nomes.join(', ')}${n > nomes.length ? '…' : ''}) — nunca abaixo do custo`, 'ok');
+    if (nCasa) log(`🏠 ${nCasa} comprado(s) abaixo do Nv ${CFG.nivelMinVenda} esperando casa — se em 24 h não houver casa, vão para a venda como estão`);
   }
   // ✨ vitrine cheia com shiny na fila: retira o anúncio comum de menor valor (há 30 min ou mais) para o shiny entrar.
   // O retirado volta para a fila e é reanunciado depois dos 30 min que o jogo pede. No máximo uma troca a cada 10 min.
@@ -4841,11 +4875,11 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
   }
   // ficha completa de um pokémon seu (casa, coleção), para o precificador
   function fichaDoPokemon(id) { const p = (M.pokemons || []).find((x) => x.id === id); return p ? fichaMin(p) : null; }
-  async function anunciarPokemon({ pokemonId, nome, nv, nota, pot, iv, shiny, custo, alvo, moeda = 'gold', fila = true, lucro, ficha, moedaCompra = 'gold', moedaForcada = null, deCasa = false }) {
+  async function anunciarPokemon({ pokemonId, nome, nv, nota, pot, iv, shiny, custo, alvo, moeda = 'gold', fila = true, lucro, ficha, moedaCompra = 'gold', moedaForcada = null, deCasa = false, esperouCasa = false }) {
     ficha = ficha || fichaDoPokemon(pokemonId);
     if (!nome || nome === '?' || nome === 'pokémon') { avisoRaro('semNome' + pokemonId, `🪟 não anuncio o pokémon ${pokemonId}: espécie desconhecida (preço seria chute)`, 120); return false; }
     // 🏠 abaixo do Nv mínimo de venda (500) não vai para a vitrine: espera vaga nas casas e sobe até lá (vende bem mais rápido)
-    if ((nv || ficha?.level || 0) < (CFG.nivelMinVenda || 0)) {
+    if ((nv || ficha?.level || 0) < (CFG.nivelMinVenda || 0) && !esperouCasa) {   // 5.83: quem já esperou 24 h por casa vende como está
       E.filaCasa = E.filaCasa || [];
       if (!E.filaCasa.some((x) => String(x.pokemonId) === String(pokemonId))) { E.filaCasa.push({ pokemonId, nome, nv, nota, pot, iv, shiny: !!shiny, ficha: ficha || null, custo: custo || 0, moedaCompra, em: Date.now() }); persistir(); log(`${sim()}🏠 ${nome} Nv ${nv}: não anuncio abaixo do Nv ${CFG.nivelMinVenda} — vai para as casas upar até lá (${E.filaCasa.length} esperando casa)`, 'venda'); }
       return false;
@@ -5109,19 +5143,28 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
   // cada conta só luta no boss que tem liberado: a região pede o nível de treinador dela (Kanto 300, Johto 650, Hoenn 3.100…)
   // e as chances de drop sobem com a região (×(par+1)). Sem a região liberada, escolhe a melhor que a conta alcança.
   const regiaoLiberada = (reg) => !M.nivel || M.nivel >= nivelRegiao(REGIOES[reg] ?? 99);
+  // 5.83: antes, sem a região liberada, o app trocava sozinho para a melhor que a conta alcança (as alts iam para Johto, Nv 650).
+  // Lá os drops têm 2/3 da chance da Hoenn com o mesmo token: no melhor dia sobra ~13% por token, e cada hora no boss é uma hora
+  // sem XP — o plano das alts é subir até o 3.100 e só então fazer boss. Agora a conta espera a região configurada liberar.
+  // (Quem quiser Johto escolhe Johto na aba Boss: aí ela vale.)
   function bossDaConta() {
     if (!M.nivel || regiaoLiberada(CFG.bossRegiao)) return false;
-    const regs = Object.keys(REGIOES).filter(regiaoLiberada).sort((a, z) => REGIOES[z] - REGIOES[a]);
-    if (!regs.length) return false;
-    const reg = regs[0], par = REGIOES[reg];
-    const melhor = BOSSES[reg].map((k, pos) => ({ k, ev: [0, 1, 2].reduce((s2, d) => s2 + Math.max(0, evBoss(premioDe(pos, Date.now() + d * 86400_000), par).liquidoG), 0) })).sort((a, z) => z.ev - a.ev)[0];
-    const antes = `${CFG.bossRegiao}/${CFG.bossKey}`;
-    CFG.bossRegiao = reg; CFG.bossKey = melhor.k; CFG.bossSegPorLuta = 0; salvarCfg();
-    log(`👑 boss desta conta: ${antes} pede Nv ${fmt(nivelRegiao(REGIOES[antes.split('/')[0]] ?? 0))} e a conta é Nv ${fmt(M.nivel)} → ${reg}/${melhor.k} (chances de drop ×${par + 1})`, 'ok');
+    if (!M._avisoRegiao || Date.now() - M._avisoRegiao > 6 * 3600_000) {
+      M._avisoRegiao = Date.now();
+      log(`👑 boss em ${CFG.bossRegiao} pede Nv ${fmt(nivelRegiao(REGIOES[CFG.bossRegiao] ?? 0))} e a conta é Nv ${fmt(M.nivel)} — fica caçando (XP) até liberar; não compra token para isso`, 'ok');
+    }
     return true;
   }
   async function cicloBoss() {
-    try { bossDaConta(); } catch (e) { console.warn('[PKApp] boss da conta', e); }
+    if (!E.mig583 && M.nivel) {   // 5.83: desfaz a troca automática antiga (alts tinham ido para Johto sozinhas) — o boss delas é Hoenn depois do 3.100
+      E.mig583 = true;
+      if (M.nivel < nivelRegiao(REGIOES.hoenn) && (REGIOES[CFG.bossRegiao] ?? 2) < REGIOES.hoenn) {
+        const antes = `${CFG.bossRegiao}/${CFG.bossKey}`; CFG.bossRegiao = 'hoenn'; CFG.bossKey = 'rayquaza'; CFG.bossSegPorLuta = 0; salvarCfg();
+        log(`👑 boss: voltei de ${antes} (o app tinha trocado sozinho) para hoenn/rayquaza — a conta caça XP até o Nv 3.100 e então faz o Rayquaza`, 'ok');
+      }
+      persistir();
+    }
+    let bloqueado = false; try { bloqueado = bossDaConta(); } catch (e) { console.warn('[PKApp] boss da conta', e); }
     // drops que ficaram no inventário (o inventário às vezes chega depois do aviso do drop): anuncia a cada 2 min
     if (CFG.bossVenderDrops && Date.now() - (M._dropsEm || 0) > 120_000) { M._dropsEm = Date.now(); try { await venderDropsBoss(); } catch (e) { log('👑 venda dos drops: ' + e.message, 'erro'); } }
     { const r = resultadoBossDia(); if (r && r.lutas >= 20 && Date.now() - (M._ritmoBossLog || 0) > 3600_000) { M._ritmoBossLog = Date.now(); log(`👑 boss hoje: ${fmt(r.lutas)} lutas (${Math.round(r.vitPct * 100)}% vitórias), ~${Math.round(r.porHora)}/h${r.seg ? `, ${r.seg} s/luta` : ''}; ${r.dropados} drops, ${fmt(Math.round(r.recebido))} 🔮 recebidas + ~${fmt(Math.round(r.pendente))} 🔮 à venda − tokens ~${fmt(Math.round(r.custo))} 🔮 = lucro ~${fmt(Math.round(r.lucro))} 🔮`, 'ok'); } }
@@ -5131,6 +5174,7 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
     const premioHoje = premioDe(pos, Date.now()), ev = evBoss(premioHoje, par);
     const bom = ev.pct != null && ev.pct >= CFG.bossEvMinPct;
 
+    if (bloqueado) { if (M.bossAuto && CFG.bossModo === 'auto' && !CFG.simulacao) enviar({ t: 'boss.auto', ativo: false, key: CFG.bossKey }); return; }   // 5.83: região ainda não liberada
     // 1) tokens: com o módulo Boss ligado e sem a compra automática, segue o estoque-alvo
     if (!CFG.tokenAutoCompra) await comprarTokens();
 
@@ -5138,6 +5182,10 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
     if (CFG.bossModo === 'desligado') return;
     const bH = bossRendeH(ev), cacaAgora = ganhoCacaH(Date.now()), evx = eventoXp();
     const vale = bom && (bH == null || !ritmo().ok || bH > cacaAgora);
+    // 5.83: já na série, só desliga se o prêmio do dia mudou ou se ficou claramente ruim — antes entrava e saía a cada poucos minutos
+    // (o preço dos drops e o ritmo medido oscilam: +43% → +185% → +43%), e cada volta comprava token e perdia caça
+    if (M.bossAuto && M.bossPremioSerie == null) M.bossPremioSerie = premioHoje;
+    const segura = M.bossAuto && M.bossPremioSerie === premioHoje && ev.pct != null && ev.pct >= CFG.bossEvMinPct * 0.5 && (bH == null || !ritmo().ok || bH > cacaAgora * 0.8);
     if (bom && !vale && !M.emBoss && (!M._avisoEvento || Date.now() - M._avisoEvento > 3600_000)) {
       M._avisoEvento = Date.now();
       log(`👑 rotação boa, mas a caça rende mais agora (~${curto(cacaAgora)}/h vs boss ~${curto(bH)}/h)${evx ? ` — evento de XP ×${evx.mult} até ${new Date(evx.ate).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : ''}`);
@@ -5147,14 +5195,17 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
       if (CFG.bossModo === 'avisar') { if (!M._avisoBoss || Date.now() - M._avisoBoss > 3600_000) { M._avisoBoss = Date.now(); log(msg + ' — ligue a série no jogo', 'ok'); notificar(msg); } return; }
       if (CFG.simulacao) { if (M._simBoss && Date.now() - M._simBoss < 3600_000) return; M._simBoss = Date.now(); }
       log(`${sim()}${msg} — entrando com repetição automática`, 'ok');
+      M.bossPremioSerie = premioHoje;
       if (!CFG.simulacao) { enviar({ t: 'boss.auto', ativo: true, key: CFG.bossKey }); await dormir(800); enviar({ t: 'boss.entrar', key: CFG.bossKey }); }
     }
-    if (!vale && M.bossAuto && CFG.bossModo === 'auto') {
-      log(`${sim()}👑 rotação virou para ${NOME_PREMIO[premioHoje]} — desligando a série`);
+    if (!vale && !segura && M.bossAuto && CFG.bossModo === 'auto') {
+      log(`${sim()}👑 ${M.bossPremioSerie != null && M.bossPremioSerie !== premioHoje ? `rotação virou para ${NOME_PREMIO[premioHoje]}` : `o boss deixou de compensar (${ev.pct != null ? `${Math.round(ev.pct * 100)}% por token` : 'sem preço'}${bH != null ? `, boss ~${curto(bH)}/h vs caça ~${curto(cacaAgora)}/h` : ''})`} — desligando a série`);
+      M.bossPremioSerie = null;
       if (!CFG.simulacao) enviar({ t: 'boss.auto', ativo: false, key: CFG.bossKey });
     }
   }
   function aoFimDaSerieBoss() {
+    M.bossPremioSerie = null;
     if (CFG.bossModo !== 'auto' || !E.huntSlug) return;
     log(`${sim()}👑 série encerrada — voltando para a hunt (${E.huntSlug})`);
     if (!CFG.simulacao) setTimeout(() => enviar({ t: 'hunt.select', slug: E.huntSlug }), 4000);
@@ -7215,7 +7266,7 @@ Inclua em mods só o que muda. "deixar na hunt" = boss:false; "fazer boss" = bos
     papeis: () => Object.keys(PAPEIS),
   };
   try { Object.defineProperty(PAGINA, '__PKAPP_PONTE', { value: ponteDesktop, configurable: true }); } catch {}
-  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, sincronizarCasas, aprenderXpShare, cicloXpShare, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, estudoToken, resultadoBossDia, exportarCfg, importarCfg, compilarParecer, fecharDia, aprender, DEC, bossDaConta, cicloHunt, abrirVagaParaShiny, instalarFiltroPopups, novoPedido, interpretarLocal, cicloPedidos, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: VERSAO_APP }, configurable: true }); } catch {}
+  try { Object.defineProperty(PAGINA, '__PKAPP', { value: { M, E, CFG, FAT, CAT, sincronizarCasas, aprenderXpShare, cicloXpShare, recuperarFila, bossDaConta, LIVRO, ritmo, estudoCasas, quadroBoss, lucroDaRotacao, precoMercado, precoGemas, curvaNivel, rankingEspecies, cambioImplicito, preyHoje, valorBonusH, PRC, precoPrecificador, vagasPk, ehOutland, validarRegraClaude, revendaItem, tetoDoJogador, _receber: receber, _comprar: comprar, _encher: encherComColecao, _shiny: comprarShinyParaUpar, melhorNivelShiny, estudar, resumoEstudo, _conc: menorConcorrentePk, estudoToken, resultadoBossDia, exportarCfg, importarCfg, compilarParecer, fecharDia, aprender, DEC, bossDaConta, cicloHunt, abrirVagaParaShiny, instalarFiltroPopups, novoPedido, interpretarLocal, cicloPedidos, ir: (k) => { abaAtual = k; pintar(); }, tetoTokenGemas, evTokenGemas, fonteGemaItem, versao: VERSAO_APP }, configurable: true }); } catch {}
   abrirDB().then(() => { atualizarBase(); setTimeout(() => PRC.carregar(), 20_000); });   // depois que o jogo carregou
   setInterval(() => { const i = PRC.info(); if (!i.carregando && (!i.baixadoEm || Date.now() - i.baixadoEm > 6 * 3600_000)) PRC.carregar(); }, 15 * 60_000);
   const iniciar = () => (document.body && document.head ? criarApp() : setTimeout(iniciar, 300));
