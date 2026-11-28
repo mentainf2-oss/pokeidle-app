@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeIdle App — Compras, Sniper, Casas, Boss e Claude
 // @namespace    local.pokeidle.app
-// @version      5.87
+// @version      5.88
 // @description  Aplicativo de mercado para o PokeIdle: lista de compras com faixas de preço, sniper de pokémon e de itens (Coins e Gemas), casas, boss/rotação e decisões automáticas pelo Claude.
 // @match        https://pokeidle.io/app*
 // @run-at       document-start
@@ -31,7 +31,7 @@
 
 (function () {
   'use strict';
-  const VERSAO_APP = '5.87';
+  const VERSAO_APP = '5.88';
 
   /* ============================== CONFIG ============================== */
   const PADRAO = {
@@ -400,6 +400,7 @@
     if (m.t === 'comercio') { try { aoComercio(m); } catch (e) { log('🤝 ' + e.message, 'erro'); } }
     if (m.t === 'erro') {
       const txt = String(m.chave || m.msg || 'erro');
+      M.ultimoErroJogo = { txt, em: Date.now() };                         // 5.88: guarda para explicar por que um anúncio não entrou
       if (/spam|r[aá]pid|devagar|aguard|muitas|flood|calma|rate.?limit|throttl|lento|cooldown/i.test(txt)) frearServidor(txt);
       else log('⚠ jogo: ' + txt, 'erro');
     }
@@ -2044,6 +2045,7 @@
     const k = String(p.pokemonId), pk = (M.pokemons || []).find((x) => String(x.id) === k);
     const nv = pk?.level ?? (p.xp != null ? nivelDeXp(p.xp) : '?'), nome = String(pk?.nome || p.nome || '?').replace(/^✨\s*/, '').replace(/\s+Nv\s.*$/, '');
     const listado = (M.meus || []).some((a) => String(a.pokemonId) === k) || (E.filaVenda || []).some((x) => String(x.pokemonId) === k) || !!(E.anunciosPk || {})[k];
+    if (!pk) E.filaCasa = (E.filaCasa || []).filter((x) => String(x.pokemonId) !== k);   // 5.88: não é da conta: não volta para a casa
     if (p.naFila || listado || !pk || pk.slot != null) {
       log(`🏠 casa ${cid}: o jogo mostra vazia — ${nome} já não está nela (${p.naFila || listado ? 'foi para a venda' : !pk ? 'saiu da coleção' : 'está no time'}); a casa volta a encher`, 'ok');
       persistir(); return;
@@ -2124,7 +2126,9 @@
       }
       persistir();
     }
-    E.filaCasa = (E.filaCasa || []).filter((x) => { const p = pkDe(x.pokemonId); return !ocupados.has(String(x.pokemonId)) && !(p && p.slot != null) && Date.now() - (x.em || 0) < (p ? 48 : 2) * 3600_000; });
+    // 5.88: quem não está na coleção só entra se a compra foi confirmada (📗 livro) e é recente — a Fernan tentava pôr na casa
+    // Salamence/Swampert/Snorlax que ela nunca recebeu (compra que não aconteceu): o jogo recusava e a casa ficava vazia, em loop
+    E.filaCasa = (E.filaCasa || []).filter((x) => { const p = pkDe(x.pokemonId); return !ocupados.has(String(x.pokemonId)) && !(p && p.slot != null) && (p ? Date.now() - (x.em || 0) < 48 * 3600_000 : !!livroAberto(x.pokemonId) && Date.now() - (x.em || 0) < 15 * 60_000); });
     const nvMin = Math.max(alvo, CFG.nivelMinVenda || 0);
     const espera = E.filaCasa.map((x) => ({ x, p: pkDe(x.pokemonId) })).filter(({ x, p }) => ((p?.level ?? x.nv) || 0) < nvMin);
     if (espera.length) {
@@ -3150,7 +3154,16 @@ Responda SÓ com JSON numa linha: {"resposta": "texto para enviar", "preco": num
       let preco = Math.round(Math.max(menor || 0, med && CFG.bossDropPisoMedia ? med * CFG.bossDropPisoMedia : 0));
       if (!preco) preco = Math.round(fonteGemaItem(id)?.preco || 0);                          // sem anúncio e sem média: o preço que o app usa no boss
       if (!preco) { avisoRaro('dropSemPreco' + id, `👑 ${tem}× ${E.nomesItens[id] || id} sem preço de referência — anuncio quando aparecer um anúncio ou a média`, 60); continue; }
+      // 5.88: o jogo pode recusar o anúncio (a HRNF repetia "ANUNCIAR 3× TM Disk Piece" a cada 2–3 min e as peças seguiam no inventário).
+      // Se a última tentativa não tirou nada do inventário, conta como recusa; depois de 2, espera 30 min e diz o motivo que o jogo deu.
+      const T = ((E.dropTent ||= {})[id] ||= { n: 0, em: 0, tem: 0 });
+      if (T.em) { if (tem < T.tem) { T.n = 0; T.em = 0; } else if (Date.now() - T.em > 90_000) { T.n++; T.em = 0; } }
+      if (T.n >= 2) {
+        if (Date.now() - (T.pausaEm ||= Date.now()) < 30 * 60_000) { const er = M.ultimoErroJogo && Date.now() - M.ultimoErroJogo.em < 40 * 60_000 ? ` (o jogo disse: "${M.ultimoErroJogo.txt}")` : ''; avisoRaro('dropRecusa' + id, `👑 ${tem}× ${E.nomesItens[id] || id}: o jogo não aceitou o anúncio 2 vezes${er} — tento de novo em 30 min`, 30, 'erro'); continue; }
+        T.n = 0; T.pausaEm = 0;
+      }
       E.custosItens[ck(id, 'orb')] = { qtd: tem, custoTotal: 0, custoMedio: 0 };
+      T.em = Date.now(); T.tem = tem;
       await revenderItem(id, preco, 'orb', true);
     }
   }
